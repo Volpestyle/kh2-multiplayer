@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <initializer_list>
 #include <cstring>
+#include <string>
 
 using namespace kh2coop::inject::playerkit;
 
@@ -18,7 +19,8 @@ static LoadContext Ctx(std::uint8_t world, std::uint16_t resolved0) {
 }
 
 // VUH-2679: a client whose room was built in the two-player clone layout asks once for the join replay after the
-// roster grows to three seats, on a settled field frame; the replayed room is accepted once at the same epoch.
+// roster grows to three seats, at a positively safe field; r2 (Quill r1 on 07260e4) runs the adapter's state machine
+// with counting fakes: every ack and request it would put on the bridge is recorded in order.
 static void CloneRebuild() {
     const auto step = [](CloneRebuildFacts f, CloneRebuildStep want, const char* reason) {
         const char* why = ""; return CloneRebuildDecide(f, why) == want && std::strcmp(why, reason) == 0; };
@@ -34,65 +36,133 @@ static void CloneRebuild() {
     f = outgrown; f.requested = true;
     CHECK("one request per build", step(f, CloneRebuildStep::None, "requested"));
     f = outgrown; f.settledField = false;
-    CHECK("an event, cutscene, menu or transition defers it", step(f, CloneRebuildStep::None, "deferred"));
+    CHECK("an unsafe field defers it", step(f, CloneRebuildStep::None, "deferred"));
 
-    // Sequences. A tick model: facts per frame, a latch per build (transition), one request at most per build.
-    struct Seat { std::uint32_t transition = 1, requestedFor = 0; unsigned requests = 0;
-        bool clone = false, settled = true;
-        void tick(bool client, bool threeSeats) {
-            CloneRebuildFacts x; x.client = client; x.builtWithClone = clone; x.threeSeats = threeSeats;
-            x.requested = requestedFor == transition; x.settledField = settled;
-            const char* why = "";
-            if (CloneRebuildDecide(x, why) == CloneRebuildStep::Request) { ++requests; requestedFor = transition; }
+    // R4: the positive safe-field admission, each refusal named.
+    RebuildSafeFacts safe; safe.gameplay = safe.noEvent = safe.noCutscene = safe.noBattle = safe.notDowned = true;
+    safe.noHostHold = safe.noInputHold = safe.ordinaryPopulation = true;
+    const auto field = [](RebuildSafeFacts s, bool want, const char* reason) {
+        const char* why = ""; return RebuildSafeField(s, why) == want && std::strcmp(why, reason) == 0; };
+    CHECK("a quiet ordinary field is safe", field(safe, true, "safe"));
+    auto s = safe; s.gameplay = false; CHECK("menu, pause, uncontrollable or transition: unsafe", field(s, false, "gameplay"));
+    s = safe; s.noEvent = false; CHECK("an event: unsafe", field(s, false, "event"));
+    s = safe; s.noCutscene = false; CHECK("a cutscene: unsafe", field(s, false, "cutscene"));
+    s = safe; s.noBattle = false; CHECK("combat (BATTLE_STATUS): unsafe", field(s, false, "battle"));
+    s = safe; s.notDowned = false; CHECK("this seat logically downed: unsafe", field(s, false, "downed"));
+    s = safe; s.noHostHold = false; CHECK("the host's event hold (a stage window): unsafe", field(s, false, "host-hold"));
+    s = safe; s.noInputHold = false; CHECK("an owned input hold or pause: unsafe", field(s, false, "input-hold"));
+    s = safe; s.ordinaryPopulation = false; CHECK("a boss, script or dead population: unsafe", field(s, false, "population"));
+
+    // The machine, with counting fakes. "F"/"T" = ack arrived false/true, "Rn" = request seq n.
+    struct Bench {
+        RebuildMachine m; std::string out; bool ackOk = true, requestOk = true;
+        RebuildIdentity id{11, 22, 33, 44, 5, 7, 9};
+        std::uint64_t ms = 1000;
+        const char* tick(bool client, bool clone, bool three, bool safe) {
+            RebuildTick t; t.facts.client = client; t.facts.builtWithClone = clone; t.facts.threeSeats = three;
+            t.safe = safe; t.now = id; t.nowMs = ms;
+            return StepCloneRebuild(m, t, [&](bool arrived) { if (ackOk) out += arrived ? "T" : "F"; return ackOk; },
+                [&](std::uint32_t seq) { if (requestOk) out += "R" + std::to_string(seq); return requestOk; });
         }
-        void load(bool threeSeats) { ++transition; clone = !threeSeats; } // a clone world: two seats build the clone
     };
-    {   // D14: Friend1 loads with two seats; Friend2 joins; Friend1 rebuilds once; Friend2 and the host never.
-        Seat friend1, friend2, host; friend1.load(false); friend2.load(true);
-        for (int i = 0; i < 5; ++i) { friend1.tick(true, true); friend2.tick(true, true); host.tick(false, true); }
-        CHECK("2->3 in a clone room: exactly one request, on that seat only",
-              friend1.requests == 1 && friend2.requests == 0 && host.requests == 0);
-        friend1.load(true); // the replayed room, built with three seats
-        for (int i = 0; i < 5; ++i) friend1.tick(true, true);
-        CHECK("the rebuilt room never asks again", friend1.requests == 1 && !friend1.clone);
+    {   Bench b; const std::string r = b.tick(true, true, true, true);
+        CHECK("2->3 in a clone room: ack false, then the request, in one frame", r == "requested" && b.out == "FR1" &&
+              b.m.phase == RebuildPhase::Awaiting);
+        for (int i = 0; i < 5; ++i) b.tick(true, true, true, true);
+        CHECK("no second request while waiting", b.out == "FR1");
+        b.ms += REPLAY_TIMEOUT_MS; b.tick(true, true, true, true);
+        CHECK("one retry after the timeout", b.out == "FR1R2");
+        b.ms += REPLAY_TIMEOUT_MS; b.tick(true, true, true, true); b.tick(true, true, true, true);
+        CHECK("then abandoned: arrived=true closes the obligation, once", b.out == "FR1R2T" && b.m.phase == RebuildPhase::Idle);
+        for (int i = 0; i < 5; ++i) b.tick(true, true, true, true);
+        CHECK("an abandoned build never asks again", b.out == "FR1R2T");
     }
-    {   // 3->2->3 with no load in between: the room was built natively, nothing to rebuild.
-        Seat s; s.load(true);
-        for (int i = 0; i < 3; ++i) s.tick(true, true);
-        for (int i = 0; i < 3; ++i) s.tick(true, false);
-        for (int i = 0; i < 3; ++i) s.tick(true, true);
-        CHECK("3->2->3 without a load: no request", s.requests == 0);
-        s.load(false); // a load during the two-seat stretch builds the clone
-        for (int i = 0; i < 3; ++i) s.tick(true, false);
-        for (int i = 0; i < 3; ++i) s.tick(true, true);
-        CHECK("3->2 (load) ->3: one request for that growth", s.requests == 1);
+    {   Bench host, natively; host.tick(false, true, true, true); natively.tick(true, false, true, true);
+        CHECK("the host and a natively built seat send nothing", host.out.empty() && natively.out.empty());
+        Bench two; two.tick(true, true, false, true);
+        CHECK("two seats send nothing (two-player unchanged)", two.out.empty());
     }
-    {   // Growth during an event: deferred, then exactly one request once settled.
-        Seat s; s.load(false); s.settled = false;
-        for (int i = 0; i < 5; ++i) s.tick(true, true);
-        const bool deferred = s.requests == 0;
-        s.settled = true;
-        for (int i = 0; i < 5; ++i) s.tick(true, true);
-        CHECK("growth during an event is deferred to a settled field frame, then asked once", deferred && s.requests == 1);
+    {   // Growth during an event: nothing published until safe, then one request.
+        Bench b; for (int i = 0; i < 5; ++i) b.tick(true, true, true, false);
+        const bool quiet = b.out.empty();
+        b.tick(true, true, true, true);
+        CHECK("an event defers it with nothing published, then one request", quiet && b.out == "FR1");
     }
-    {   // A non-clone world never builds the clone, whatever the seat count (BcCloneWorld).
-        Seat s; s.transition = 1;
-        for (int i = 0; i < 3; ++i) s.tick(true, false);
-        for (int i = 0; i < 3; ++i) s.tick(true, true);
-        CHECK("a non-clone world: no request", s.requests == 0 && !BcCloneWorld(1) && !BcCloneWorld(6) &&
-              BcCloneWorld(2) && BcCloneWorld(4) && BcCloneWorld(5));
+    {   // Pressure on the false ack: nothing published, and an unsafe frame then simply drops it.
+        Bench b; b.ackOk = false; b.tick(true, true, true, true);
+        b.ackOk = true; b.tick(true, true, true, false);
+        CHECK("ack pressure then unsafe: nothing owed, nothing sent", b.out.empty() && b.m.phase == RebuildPhase::Idle);
     }
-    // The replay is accepted once, only for this seat's request, only while that epoch is the host's.
-    CHECK("the replayed room is accepted at the same epoch for the request", AcceptReplayedRoom(true, 7, 7, 7));
-    CHECK("no request: a same-epoch room is not accepted", !AcceptReplayedRoom(false, 7, 7, 7) && !AcceptReplayedRoom(true, 0, 0, 0));
-    CHECK("another epoch's room is not the replay", !AcceptReplayedRoom(true, 7, 8, 7) && !AcceptReplayedRoom(true, 7, 6, 7));
-    CHECK("a request superseded by a newer host epoch is not accepted", !AcceptReplayedRoom(true, 7, 7, 8));
-    // A lost request: retried once, then abandoned; the seat never leaves its admitted epoch while waiting.
-    CHECK("waiting before the timeout", CloneReplayWait(7, 7, REPLAY_TIMEOUT_MS - 1, 1) == ReplayWait::Waiting);
-    CHECK("one retry after the timeout", CloneReplayWait(7, 7, REPLAY_TIMEOUT_MS, 1) == ReplayWait::Retry);
-    CHECK("abandoned after the second timeout", CloneReplayWait(7, 7, REPLAY_TIMEOUT_MS, 2) == ReplayWait::Abandon);
-    CHECK("a newer host epoch supersedes the wait at any time", CloneReplayWait(7, 8, 0, 1) == ReplayWait::Superseded &&
-          CloneReplayWait(7, 8, REPLAY_TIMEOUT_MS * 5, 2) == ReplayWait::Superseded);
+    {   // R2: pressure between the false ack and the request, then an unsafe frame: the obligation is still closed.
+        Bench b; b.requestOk = false; b.tick(true, true, true, true);
+        const bool owed = b.out == "F" && b.m.phase == RebuildPhase::Request;
+        b.requestOk = true; b.tick(true, true, true, false); b.tick(true, true, true, false);
+        CHECK("request pressure then unsafe: arrived=true still follows", owed && b.out == "FT" && b.m.phase == RebuildPhase::Idle);
+        Bench c; c.requestOk = false; c.tick(true, true, true, true); c.ms += REPLAY_TIMEOUT_MS; c.tick(true, true, true, true);
+        c.tick(true, true, true, true);
+        CHECK("persistent request pressure: abandoned after the timeout, arrived=true", c.out == "FT");
+        Bench d; d.tick(true, true, true, true); d.ackOk = false; d.tick(true, true, true, false); d.tick(true, true, true, false);
+        const bool held = d.m.phase == RebuildPhase::AckTrue && d.out == "FR1";
+        d.ackOk = true; d.tick(true, true, true, false);
+        CHECK("an unsafe wait abandons; arrived=true is retried under pressure until sent", held && d.out == "FR1T");
+    }
+    {   // R3: identity changes drop the pending state; nothing old is retried, acked or accepted under the new identity.
+        for (int change = 0; change < 6; ++change) {
+            Bench b; b.tick(true, true, true, true);
+            auto next = b.id;
+            if (change == 0) next.generation++; else if (change == 1) next.session++; else if (change == 2) next.connection++;
+            else if (change == 3) next.hostDelivery++; else if (change == 4) next.epoch++; else next.transition++;
+            b.id = next; b.ms += REPLAY_TIMEOUT_MS * 3;
+            const std::string r = b.tick(true, false, true, true);  // the replacement room was built natively
+            for (int i = 0; i < 3; ++i) b.tick(true, false, true, true);
+            CHECK("a retired, replaced or moved-on identity drops the request: no retry, no ack, no new request",
+                  r == "identity-changed" && b.out == "FR1" && b.m.phase == RebuildPhase::Idle &&
+                  AdmitReplay(b.m, b.id, b.id.epoch, true) == ReplayAdmission::NotOurs);
+        }
+        Bench b; b.tick(true, true, true, true); b.m.Reset();  // RetireWorldSession
+        CHECK("a world-session retirement keeps the author's sequence monotonic", b.m.seq == 1 && b.m.phase == RebuildPhase::Idle);
+        b.id.generation++; b.tick(true, true, true, true);
+        const bool sameBuild = b.out == "FR1";  // a new session arrives through a new load; the old build never re-asks
+        b.id.transition++; b.tick(true, true, true, true);
+        CHECK("after retirement: the old build never re-asks; a new outgrown build asks with the next sequence",
+              sameBuild && b.out == "FR1FR2");
+    }
+    {   // Admission and commit of the replayed room.
+        Bench b; b.tick(true, true, true, true);
+        CHECK("the replay is accepted for this request and identity", AdmitReplay(b.m, b.id, b.id.epoch, true) == ReplayAdmission::Accept);
+        CHECK("another epoch's room is not the replay", AdmitReplay(b.m, b.id, b.id.epoch + 1, true) == ReplayAdmission::NotOurs);
+        auto other = b.id; other.session++;
+        CHECK("a same-epoch room under another identity is not the replay", AdmitReplay(b.m, other, b.id.epoch, true) == ReplayAdmission::NotOurs);
+        CHECK("an unsafe field at the replay refuses it", AdmitReplay(b.m, b.id, b.id.epoch, false) == ReplayAdmission::RefuseUnsafe);
+        RebuildMachine idle;
+        CHECK("no request: nothing is a replay", AdmitReplay(idle, b.id, b.id.epoch, true) == ReplayAdmission::NotOurs);
+        auto closing = b; CommitReplay(closing.m, false);  // AckTrue, same identity
+        Bench owing; owing.ackOk = false; owing.tick(true, true, true, true);  // AckFalse, same identity
+        CHECK("once closing (AckTrue) or before the request (AckFalse), a same-identity room is not the replay",
+              closing.m.phase == RebuildPhase::AckTrue && AdmitReplay(closing.m, b.id, b.id.epoch, true) == ReplayAdmission::NotOurs &&
+              owing.m.phase == RebuildPhase::AckFalse && AdmitReplay(owing.m, owing.id, owing.id.epoch, true) == ReplayAdmission::NotOurs);
+        auto queued = b; CommitReplay(queued.m, true);
+        queued.tick(true, false, true, true);
+        CHECK("a queued replay is consumed: no ack (the load's own arrival acks), no request", queued.out == "FR1" &&
+              queued.m.phase == RebuildPhase::Idle);
+        auto refused = b; CommitReplay(refused.m, false); refused.tick(true, true, true, true);
+        CHECK("a context or queue refusal closes the obligation with arrived=true", refused.out == "FR1T" &&
+              refused.m.phase == RebuildPhase::Idle);
+        auto unsafe = b; CommitReplay(unsafe.m, false); unsafe.tick(true, true, true, false);
+        CHECK("so does an unsafe replay, even on an unsafe frame", unsafe.out == "FR1T");
+    }
+    {   // 3->2->3 without a load: the build was native, nothing to rebuild; with a load in the two-seat stretch, one.
+        Bench b; for (int i = 0; i < 3; ++i) b.tick(true, false, true, true);
+        for (int i = 0; i < 3; ++i) b.tick(true, false, false, true);
+        for (int i = 0; i < 3; ++i) b.tick(true, false, true, true);
+        const bool none = b.out.empty();
+        b.id.transition++;  // a load while two seats: built with the clone
+        for (int i = 0; i < 3; ++i) b.tick(true, true, false, true);
+        for (int i = 0; i < 3; ++i) b.tick(true, true, true, true);
+        CHECK("3->2->3: none without a load, one request after a two-seat load", none && b.out == "FR1");
+        CHECK("a non-clone world never builds the clone", !BcCloneWorld(1) && !BcCloneWorld(6) && BcCloneWorld(2) &&
+              BcCloneWorld(4) && BcCloneWorld(5));
+    }
 }
 
 int main() {

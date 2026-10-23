@@ -37,6 +37,14 @@ struct WorldScope {
     WorldSourceKind kind{WorldSourceKind::Native};
 };
 struct WorldEnvelope { WorldScope scope; std::vector<std::uint8_t> packet; };
+// A client DLL's admission of host-sourced world material (EnemySync, client role): the current host connection at its
+// published delivery serial, with a host source serial past any applied resync cut. VUH-2679: the relay's room replay to
+// one seat must pass exactly this (its test asserts it on every replayed envelope).
+inline bool ClientAdmitsHostSource(const WorldScope& s, std::uint64_t hostConnection, std::uint64_t hostDelivery,
+                                   std::uint64_t appliedCut) {
+    return s.sourceConnectionId == hostConnection && s.hostSourceSerial && s.sourceDeliverySerial == hostDelivery &&
+        s.hostSourceSerial > appliedCut;
+}
 enum class ResyncPhase : std::uint8_t { Bootstrap=0, Checkpoint=1 };
 enum class ResyncPlanStage : std::uint8_t { CaptureRequested=0, Fenced=1 };
 struct ResyncRequest {

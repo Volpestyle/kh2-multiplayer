@@ -70,6 +70,20 @@ void codec() {
     ByteReader rr(p, n); RoomReplayRequest replayBack; read(rr, replayBack);
     check(rr.atEnd() && encode(replayBack) == replayBytes && replayBack.epoch == 7 && isScopedWorldPacket(PacketType::RoomReplayRequest) &&
           !isMaterialWorldPacket(PacketType::RoomReplayRequest), "RoomReplayRequest exact roundtrip, scoped, not material");
+    {   // The client DLL's host-source admission the replay must pass (Quill r1 R1 on 07260e4).
+        WorldScope host; host.sessionId = std::string(32, 'a'); host.sourceConnectionId = 100; host.sourceDeliverySerial = 3;
+        host.hostSourceSerial = 40;
+        auto requester = host; requester.sourceConnectionId = 200; requester.hostSourceSerial = 0; // the request's own scope
+        auto stale = host; stale.hostSourceSerial = 30;
+        auto oldDelivery = host; oldDelivery.sourceDeliverySerial = 2;
+        auto unsourced = host; unsourced.hostSourceSerial = 0;
+        check(ClientAdmitsHostSource(host, 100, 3, 0) && ClientAdmitsHostSource(host, 100, 3, 39),
+              "host-sourced material past the applied cut is admitted");
+        check(!ClientAdmitsHostSource(requester, 100, 3, 0) && !ClientAdmitsHostSource(unsourced, 100, 3, 0) &&
+              !ClientAdmitsHostSource(stale, 100, 3, 30) && !ClientAdmitsHostSource(oldDelivery, 100, 3, 0) &&
+              !ClientAdmitsHostSource(host, 101, 3, 0),
+              "a client-scoped, unsourced, pre-cut, old-delivery or other-host envelope is refused");
+    }
     for (auto bad : {RoomReplayRequest{0, 7, 1}, RoomReplayRequest{1, 0, 1}, RoomReplayRequest{1, 7, 2}}) {
         threw = false; try { (void)encode(bad); } catch (const std::exception&) { threw = true; }
         check(threw, "RoomReplayRequest refuses sequence 0, epoch 0 and an unknown reason");
@@ -451,11 +465,13 @@ void network() {
     std::array<std::vector<SeatState>, 2> received;
     std::array<std::vector<StageEnd>, 2> stages;
     std::array<unsigned, 2> rooms{};
+    std::array<std::vector<WorldScope>, 2> material; // VUH-2679: every envelope's scope, per client
     for (unsigned i = 0; i < 2; ++i) {
         ClientCallbacks cb;
-        cb.onWorldEnvelope = [&received, &stages, i](const WorldEnvelope& e) {
+        cb.onWorldEnvelope = [&received, &stages, &material, i](const WorldEnvelope& e) {
             const std::uint8_t* p = nullptr; std::size_t n = 0; // the admitted inner packet
             const auto type = decodePacketHeader(e.packet.data(), e.packet.size(), p, n);
+            if (isMaterialWorldPacket(type)) material[i].push_back(e.scope);
             if (type == PacketType::StageEnd) { ByteReader s(p, n); StageEnd m; read(s, m); stages[i].push_back(m); return; }
             if (type != PacketType::SeatState) return;
             ByteReader s(p, n); SeatState m; read(s, m); received[i].push_back(m);
@@ -511,9 +527,22 @@ void network() {
         RoomReplayRequest q; q.seq = seq; q.epoch = epoch; q.reason = ROOM_REPLAY_CLONE_OUTGROWN;
         clients[seat]->sendNativeWorld(encode(q), {1, clients[seat]->deliverySerial(), seat == 0 ? 1u : 0u}, true); pump();
     };
+    const auto friendMaterial = material[1].size(), hostMaterial = material[0].size();
     ask(1, 1, 1);
     check(rooms[1] == friendRooms + 1 && rooms[0] == hostRooms && server.rejectedWorldMessages() == rejected,
           "the friend's request replays the admitted room to that friend only");
+    // Quill r1 R1: every replayed material envelope is host-sourced exactly as a joiner's (the host's connection and
+    // delivery, a host source serial) and passes the client DLL's own host-source admission; the requester is its target.
+    const auto* hostPeerState = server.peerBySlot(SlotType::Player);
+    const auto friendConnection = server.peerBySlot(SlotType::Friend1)->connectionId;
+    bool admitted = material[1].size() > friendMaterial;
+    for (std::size_t k = friendMaterial; k < material[1].size(); ++k) {
+        const auto& sc = material[1][k];
+        admitted = admitted && ClientAdmitsHostSource(sc, hostPeerState->connectionId, hostPeerState->deliverySerial, 0) &&
+            sc.kind == WorldSourceKind::Native && sc.targetConnectionId == friendConnection && sc.sessionId.size() == 32;
+    }
+    check(admitted && material[0].size() == hostMaterial,
+          "the replay is host-sourced material the client DLL admits, to the requester only");
     ask(1, 2, 1);
     check(rooms[1] == friendRooms + 1 && server.rejectedWorldMessages() == rejected + 1, "a second request in the same epoch is refused");
     ask(1, 3, 9);

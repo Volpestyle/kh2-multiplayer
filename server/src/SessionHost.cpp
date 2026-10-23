@@ -1086,7 +1086,11 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 }
                 ps->lastRoomReplaySeq = request.seq;
                 ps->roomReplayEpoch = room_->epoch;
+                // Quill r1 R1: the replay is host material, framed exactly as a joiner's (the host's connection, delivery
+                // and latest host source serial), never under this request's client scope.
+                const auto requestScope = forwardingScope_; forwardingScope_.reset();
                 sendWorldStateTo(peer);
+                forwardingScope_ = requestScope;
                 log("RoomReplayRequest replayed slot=" + std::to_string(static_cast<int>(ps->assignedSlot)) + " epoch=" +
                     std::to_string(room_->epoch) + " seq=" + std::to_string(request.seq));
                 break;

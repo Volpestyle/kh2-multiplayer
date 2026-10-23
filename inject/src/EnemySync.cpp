@@ -29,6 +29,7 @@
 #include "kh2coop/EventHoldRecovery.hpp"
 #include "Warp.hpp"
 #include "PlayerKit.hpp"
+#include "EventHoldNativeInput.hpp"
 #include "PartyNativePolicy.hpp"
 #include "PrologueParty.hpp"
 #include "NativePartyHud.hpp"
@@ -324,20 +325,14 @@ struct HostRoom {
     bool arrived = false;
     bool ackSent = false;
     bool manifestComplete = false; // only fully framed replace or checked bootstrap
+    bool holdActive = false;       // VUH-2679: the host's EventHold for this epoch is active
     std::map<std::uint16_t, HostEnemy> enemies;  // by netId
 };
 HostRoom g_host;
-// VUH-2679: this client's request for the join replay of a room built in the two-player clone layout.
-struct CloneRebuild {
-    std::uint32_t transition = 0;  // the build (transition serial) a replay was requested for: once per build
-    std::uint32_t epoch = 0;       // the admitted epoch awaiting its replay; 0: none
-    std::uint32_t seq = 0;
-    std::uint64_t sentMs = 0;
-    unsigned attempts = 0;
-    unsigned logs = 0;
-    const char* lastWhy = "";
-};
-CloneRebuild g_cloneRebuild;
+// VUH-2679: this client's pending rebuild of a room built in the two-player clone layout (playerkit::StepCloneRebuild).
+playerkit::RebuildMachine g_cloneRebuild;
+unsigned g_cloneRebuildLogs = 0;
+const char* g_cloneRebuildWaitWhy = "";
 eventhold::Scope g_eventControlScope {};
 RoomTransition g_eventControlRoom {};
 std::optional<eventhold::Scope> g_recoveredControlScope;
@@ -559,6 +554,7 @@ bool ReleaseClientClaims(std::uint32_t frame);
 void ResetFieldObjects();
 
 void RetireWorldSession() {
+    g_cloneRebuild.Reset(); // VUH-2679: no pending rebuild survives its world session (its seq stays monotonic)
     ResetFieldObjects();
     ResetSpawnEmissions();
     ResetPopulationRepair();
@@ -946,72 +942,62 @@ bool Send(const std::vector<std::uint8_t>& packet) {
 
 bool SafeNativeGameplay();
 // VUH-2679: a room this client built in the two-player clone layout (PlayerKit's automatic Sora clone) has no native
-// body for a third seat. Once the roster has three seats, on a settled field frame, ask the relay once per build for
-// the join replay of the admitted room; the replayed room is then accepted at the same epoch (AcceptReplayedRoom) and
-// reloaded natively like a join. Only this seat reloads: the relay answers it alone.
-bool SendCloneRebuildRequest() {
-    RoomReplayRequest request;
-    request.seq = g_cloneRebuild.seq + 1; request.epoch = g_cloneRebuild.epoch; request.reason = ROOM_REPLAY_CLONE_OUTGROWN;
-    if (!Send(encode(request))) return false;
-    g_cloneRebuild.seq = request.seq; ++g_cloneRebuild.attempts; g_cloneRebuild.sentMs = GetTickCount64();
-    return true;
+// body for a third seat. Once the roster has three seats, at a positively safe field (RebuildSafeField), this seat acks
+// arrived=false and asks the relay once per build for the join replay of its admitted room; the replay is accepted at the
+// same epoch only for that request and identity (AdmitReplay) and reloaded natively. Only this seat reloads.
+playerkit::RebuildIdentity CloneRebuildIdentity() {
+    playerkit::RebuildIdentity id;
+    (void)SessionIdentity(id.session);
+    const auto local = g_bridge.LocalSlot();
+    id.connection = local < 3 ? g_bridge.ConnectionId(local) : 0;
+    id.hostConnection = g_bridge.ConnectionId(0); id.hostDelivery = g_bridge.PeerDeliverySerial(0);
+    id.generation = WorldSessionGeneration(); id.epoch = g_host.epoch; id.transition = warp::TransitionSerial();
+    return id;
 }
-// The relay's view of this seat's arrival in the admitted epoch: false while the room is being rebuilt (revive
-// admission refuses a seat that has not arrived), true again if the rebuild is abandoned.
-bool SendCloneRebuildAck(const RoomTransition& location, bool arrived) {
-    TransitionAck ack; ack.epoch = g_host.epoch; ack.worldId = location.worldId; ack.roomId = location.roomId; ack.arrived = arrived;
-    return Send(encode(ack));
+bool CloneRebuildSafe(const char*& why) {
+    playerkit::RebuildSafeFacts f;
+    std::uint64_t event = 1; std::int32_t cutscene = 1, battle = 1;
+    f.gameplay = g_inst.live && SafeNativeGameplay();
+    f.noEvent = ReadNative(g_exeBase + offsets::EVENT_CONTEXT, event) && !event;
+    f.noCutscene = ReadNative(g_exeBase + offsets::CUTSCENE_STATE, cutscene) && !cutscene;
+    f.noBattle = ReadNative(g_exeBase + offsets::BATTLE_STATUS, battle) && !battle;
+    f.notDowned = !g_localDowned.downed;
+    f.noHostHold = !g_host.holdActive;
+    f.noInputHold = !eventholdnative::HoldingInput();
+    f.ordinaryPopulation = std::all_of(g_inst.spawns.begin(), g_inst.spawns.end(), [](const Spawn& s) {
+        return !s.killed && (!s.present || ((s.objectType == 3 || s.objectType == 4) && s.objectId != 307));
+    });
+    return playerkit::RebuildSafeField(f, why);
 }
 void TickCloneRebuild(const RoomTransition& location) {
-    const auto transition = warp::TransitionSerial();
-    if (g_cloneRebuild.epoch) {
-        switch (playerkit::CloneReplayWait(g_cloneRebuild.epoch, g_host.epoch, GetTickCount64() - g_cloneRebuild.sentMs,
-                                           g_cloneRebuild.attempts)) {
-        case playerkit::ReplayWait::Waiting: return;
-        case playerkit::ReplayWait::Retry:
-            if (SendCloneRebuildRequest() && g_log)
-                g_log("[clone-rebuild] retried epoch=%u seq=%u", g_cloneRebuild.epoch, g_cloneRebuild.seq);
-            return;
-        case playerkit::ReplayWait::Abandon:
-            if (!SendCloneRebuildAck(location, true)) return;
-            if (g_log) g_log("[clone-rebuild] abandoned epoch=%u after %u requests; the next host room rebuilds natively",
-                             g_cloneRebuild.epoch, g_cloneRebuild.attempts);
-            g_cloneRebuild.epoch = 0;
-            return;
-        case playerkit::ReplayWait::Superseded:
-            if (g_log) g_log("[clone-rebuild] superseded epoch=%u by host epoch=%u", g_cloneRebuild.epoch, g_host.epoch);
-            g_cloneRebuild.epoch = 0;
-            break;
-        }
+    playerkit::RebuildTick tick;
+    tick.now = CloneRebuildIdentity();
+    tick.nowMs = GetTickCount64();
+    tick.facts.client = g_role == Role::Client && g_host.epoch && g_host.arrived && g_host.ackSent;
+    tick.facts.builtWithClone = tick.facts.client &&
+        playerkit::BcCloneBuiltFor(tick.now.transition, static_cast<std::uint8_t>(location.worldId));
+    tick.facts.threeSeats = g_bridge.ConnectionId(0) && g_bridge.ConnectionId(1) && g_bridge.ConnectionId(2);
+    const char* safeWhy = "";
+    tick.safe = (tick.facts.builtWithClone || g_cloneRebuild.phase != playerkit::RebuildPhase::Idle) && CloneRebuildSafe(safeWhy);
+    const auto epoch = g_host.epoch;
+    const char* step = playerkit::StepCloneRebuild(g_cloneRebuild, tick,
+        [&](bool arrived) {
+            TransitionAck ack; ack.epoch = epoch; ack.worldId = location.worldId; ack.roomId = location.roomId; ack.arrived = arrived;
+            return Send(encode(ack));
+        },
+        [&](std::uint32_t seq) {
+            RoomReplayRequest request; request.seq = seq; request.epoch = epoch; request.reason = ROOM_REPLAY_CLONE_OUTGROWN;
+            return Send(encode(request));
+        });
+    if (*step && g_cloneRebuildLogs < 64) {
+        ++g_cloneRebuildLogs;
+        if (g_log) g_log("[clone-rebuild] %s epoch=%u room=%02X/%02X transition=%u seq=%u safe=%s", step, epoch, location.worldId,
+                         location.roomId, tick.now.transition, g_cloneRebuild.seq, safeWhy);
+    } else if (!*step && g_cloneRebuild.phase == playerkit::RebuildPhase::Idle && tick.facts.builtWithClone && tick.facts.threeSeats &&
+               g_cloneRebuild.requestedTransition != tick.now.transition && safeWhy != g_cloneRebuildWaitWhy && g_cloneRebuildLogs < 64) {
+        ++g_cloneRebuildLogs; g_cloneRebuildWaitWhy = safeWhy;  // say once per reason why an outgrown room waits
+        if (g_log) g_log("[clone-rebuild] waiting why=%s epoch=%u transition=%u", safeWhy, epoch, tick.now.transition);
     }
-    playerkit::CloneRebuildFacts f;
-    f.client = g_role == Role::Client && g_host.epoch && g_host.arrived && g_host.ackSent;
-    f.builtWithClone = f.client && playerkit::BcCloneBuiltFor(transition, static_cast<std::uint8_t>(location.worldId));
-    f.threeSeats = g_bridge.ConnectionId(0) && g_bridge.ConnectionId(1) && g_bridge.ConnectionId(2);
-    f.requested = g_cloneRebuild.transition == transition;
-    if (f.builtWithClone && f.threeSeats && !f.requested) {
-        std::uint64_t event = 1; std::int32_t cutscene = 1;
-        f.settledField = g_inst.live && SafeNativeGameplay() && ReadNative(g_exeBase + offsets::EVENT_CONTEXT, event) && !event &&
-                         ReadNative(g_exeBase + offsets::CUTSCENE_STATE, cutscene) && !cutscene;
-    }
-    const char* why = "";
-    const auto step = playerkit::CloneRebuildDecide(f, why);
-    if (step == playerkit::CloneRebuildStep::None) {
-        // Say once per build why an outgrown clone room waits (an event, a menu, a transition).
-        if (f.builtWithClone && f.threeSeats && !f.requested && why != g_cloneRebuild.lastWhy && g_cloneRebuild.logs < 32) {
-            ++g_cloneRebuild.logs; g_cloneRebuild.lastWhy = why;
-            if (g_log) g_log("[clone-rebuild] waiting why=%s epoch=%u transition=%u", why, g_host.epoch, transition);
-        }
-        return;
-    }
-    // Not arrived while the room is rebuilt, then the request; ring pressure retries both next frame.
-    if (!SendCloneRebuildAck(location, false)) return;
-    g_cloneRebuild.epoch = g_host.epoch; g_cloneRebuild.attempts = 0;
-    if (!SendCloneRebuildRequest()) { g_cloneRebuild.epoch = 0; return; }
-    g_cloneRebuild.transition = transition;
-    g_cloneRebuild.lastWhy = "";
-    if (g_log) g_log("[clone-rebuild] requested epoch=%u room=%02X/%02X transition=%u seq=%u", g_cloneRebuild.epoch,
-                     location.worldId, location.roomId, transition, g_cloneRebuild.seq);
 }
 
 bool SafeNativeGameplay() {
@@ -4358,9 +4344,7 @@ bool ReceiveWorldPackets() {
                     continue;
                 }
                 if (CurrentRole() == Role::Client) {
-                    if (scope->sourceConnectionId != g_bridge.ConnectionId(0) || !scope->hostSourceSerial ||
-                        scope->sourceDeliverySerial != g_bridge.PeerDeliverySerial(0) ||
-                        scope->hostSourceSerial <= g_resyncAppliedCut) {
+                    if (!ClientAdmitsHostSource(*scope, g_bridge.ConnectionId(0), g_bridge.PeerDeliverySerial(0), g_resyncAppliedCut)) {
                         ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectScope);continue;
                     }
                 } else if (CurrentRole() == Role::Host) {
@@ -4486,6 +4470,7 @@ bool ReceiveWorldPackets() {
             if (type == PacketType::EventHold) {
                 EventHold hold; read(r, hold);
                 if (r.atEnd() && hold.epoch == g_host.epoch) {
+                    g_host.holdActive = hold.active;
                     if (PackPreparationActive())
                         ContinuePackPreparation(scope->hostSourceSerial,
                             hold.active != g_nativeResync->snapshot.hold.active ||
@@ -4507,18 +4492,27 @@ bool ReceiveWorldPackets() {
                 // old/replayed epoch roll back authority. Epoch zero is unset.
                 const auto advance = t.epoch - g_host.epoch;
                 // VUH-2679: the relay's replay of the admitted room this seat asked for (its room was built in the
-                // two-player clone layout) is accepted once at the same epoch, as a join is; nothing else is.
-                const bool replay = playerkit::AcceptReplayedRoom(g_cloneRebuild.epoch != 0, g_cloneRebuild.epoch, t.epoch, g_host.epoch);
-                if (replay) {
-                    g_cloneRebuild.epoch = 0;
-                    if (g_log) g_log("[clone-rebuild] replay accepted epoch=%u room=%02X/%02X", t.epoch, t.worldId, t.roomId);
+                // two-player clone layout) is accepted once at the same epoch, as a join is, for that request and
+                // identity only, at a still-safe field; it is consumed only once its host transition is queued.
+                const char* replaySafeWhy = "";
+                const auto admission = playerkit::AdmitReplay(g_cloneRebuild, CloneRebuildIdentity(), t.epoch,
+                                                              t.epoch == g_host.epoch && CloneRebuildSafe(replaySafeWhy));
+                const bool replay = admission == playerkit::ReplayAdmission::Accept;
+                if (admission == playerkit::ReplayAdmission::RefuseUnsafe) {
+                    playerkit::CommitReplay(g_cloneRebuild, false);  // close the arrived=false obligation instead
+                    if (g_log) g_log("[clone-rebuild] replay refused why=%s epoch=%u", replaySafeWhy, t.epoch);
                 }
                 if (t.epoch != 0 && (g_host.epoch == 0 || replay || (advance != 0 && advance < 0x80000000u))) {
                     ProducerWorldContext loadContext;
                     const bool loadContextAvailable = CaptureWorldContext(loadContext);
                     if (!loadContextAvailable || !warp::QueueHostTransition(t, loadContext, &*scope, nullptr, nullptr)) {
                         if (g_log) g_log("[enemysync] client transition rejected epoch=%u", t.epoch);
+                        if (replay) playerkit::CommitReplay(g_cloneRebuild, false);
                         continue;
+                    }
+                    if (replay) {
+                        playerkit::CommitReplay(g_cloneRebuild, true);
+                        if (g_log) g_log("[clone-rebuild] replay accepted epoch=%u room=%02X/%02X", t.epoch, t.worldId, t.roomId);
                     }
                     // Only an accepted transition touches save RAM. Queueing issues the load on a later
                     // frame, so the row is in place before the resolver reads it.

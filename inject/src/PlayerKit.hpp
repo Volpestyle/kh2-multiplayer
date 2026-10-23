@@ -88,13 +88,13 @@ void UpdateBcClone(bool resolving = false); // game frame and pre-resolver
 bool BcCloneBuiltFor(std::uint32_t transition, std::uint8_t world);
 // VUH-2679: a client whose current room was built with the clone layout, once the roster has three seats, asks the
 // relay for the join replay of its admitted room (RoomReplayRequest) and reloads it natively; once per build, on a
-// settled field frame. Host and the seats built natively never ask.
+// positively safe field frame (RebuildSafeField). Host and the seats built natively never ask.
 struct CloneRebuildFacts {
     bool client = false;          // a client seat, arrived in the host's current epoch
     bool builtWithClone = false;  // this room's own load resolved the party with the clone row (BcCloneBuiltFor)
     bool threeSeats = false;      // the host and both friend connections are present
     bool requested = false;       // a replay was already requested for this build (this transition)
-    bool settledField = false;    // in field: no event, no cutscene, menu closed, no transition pending, room live
+    bool settledField = false;    // RebuildSafeField now
 };
 enum class CloneRebuildStep : std::uint8_t { None, Request };
 inline CloneRebuildStep CloneRebuildDecide(const CloneRebuildFacts& f, const char*& why) {
@@ -105,21 +105,116 @@ inline CloneRebuildStep CloneRebuildDecide(const CloneRebuildFacts& f, const cha
     if (!f.settledField) { why = "deferred"; return CloneRebuildStep::None; }
     why = "clone-outgrown"; return CloneRebuildStep::Request;
 }
-// The replayed room is accepted at the current epoch once, for the request this seat made and only while that epoch
-// is still the host's; every other room still needs a strictly newer epoch.
-inline bool AcceptReplayedRoom(bool awaiting, std::uint32_t awaitingEpoch, std::uint32_t roomEpoch, std::uint32_t hostEpoch) {
-    return awaiting && awaitingEpoch != 0 && roomEpoch == awaitingEpoch && hostEpoch == awaitingEpoch;
+// Quill r1 R4 on 07260e4: the replay is a join replay, not a recovery of combat, boss or script state, so the rebuild
+// runs only at a positively qualified quiet field: controllable, in field, menu closed, no transition pending, no event
+// or cutscene, no battle, this seat not logically downed, no host event hold and no owned input hold, and an ordinary
+// living population (eventhold::RecoverySnapshotSupported's rule: types 3/4, not Thorn, no dead rows). Otherwise it
+// waits; an outgrown room that never qualifies is rebuilt natively by the next host room.
+struct RebuildSafeFacts {
+    bool gameplay = false;       // SafeNativeGameplay: controllable, field, menu closed, no transition pending
+    bool noEvent = false, noCutscene = false, noBattle = false, notDowned = false;
+    bool noHostHold = false, noInputHold = false, ordinaryPopulation = false;
+};
+inline bool RebuildSafeField(const RebuildSafeFacts& f, const char*& why) {
+    if (!f.gameplay) { why = "gameplay"; return false; }
+    if (!f.noEvent) { why = "event"; return false; }
+    if (!f.noCutscene) { why = "cutscene"; return false; }
+    if (!f.noBattle) { why = "battle"; return false; }
+    if (!f.notDowned) { why = "downed"; return false; }
+    if (!f.noHostHold) { why = "host-hold"; return false; }
+    if (!f.noInputHold) { why = "input-hold"; return false; }
+    if (!f.ordinaryPopulation) { why = "population"; return false; }
+    why = "safe"; return true;
 }
 // While a replay is awaited (lead #269): a lost request is retried once after REPLAY_TIMEOUT_MS; after a second
-// timeout it is abandoned (the seat re-acks arrival at its unchanged epoch, and its next host room, with three seats,
-// is built natively); a newer host epoch supersedes it. The seat never leaves its admitted epoch while waiting.
+// timeout it is abandoned. The seat never leaves its admitted epoch while waiting.
 constexpr std::uint64_t REPLAY_TIMEOUT_MS = 10000;
 constexpr unsigned REPLAY_ATTEMPTS = 2;
-enum class ReplayWait : std::uint8_t { Waiting, Retry, Abandon, Superseded };
-inline ReplayWait CloneReplayWait(std::uint32_t awaitingEpoch, std::uint32_t hostEpoch, std::uint64_t elapsedMs, unsigned attempts) {
-    if (awaitingEpoch != hostEpoch) return ReplayWait::Superseded;
+enum class ReplayWait : std::uint8_t { Waiting, Retry, Abandon };
+inline ReplayWait CloneReplayWait(std::uint64_t elapsedMs, unsigned attempts) {
     if (elapsedMs < REPLAY_TIMEOUT_MS) return ReplayWait::Waiting;
     return attempts < REPLAY_ATTEMPTS ? ReplayWait::Retry : ReplayWait::Abandon;
+}
+// Quill r1 R2/R3 on 07260e4: one pending rebuild, bound to the exact admitted identity it was asked for (the WorldBridge
+// session and generation, this seat's and the host's connections, the host's delivery serial, the epoch and the build's
+// transition). Any change of that identity (a world-session retirement or replacement, a new epoch, a new load) drops it:
+// nothing of an old request is retried, re-acked or accepted under a new identity. Once this seat has acked arrived=false
+// it owes the relay arrived=true: only a committed replay (whose load then acks arrival) or an explicit AckTrue step closes
+// that, never a silent reset under the same identity.
+struct RebuildIdentity {
+    std::uint64_t session = 0, connection = 0, hostConnection = 0, hostDelivery = 0;
+    std::uint32_t generation = 0, epoch = 0, transition = 0;
+    bool operator==(const RebuildIdentity&) const = default;
+};
+enum class RebuildPhase : std::uint8_t { Idle, AckFalse, Request, Awaiting, AckTrue };
+struct RebuildMachine {
+    RebuildPhase phase = RebuildPhase::Idle;
+    RebuildIdentity id;
+    std::uint64_t phaseMs = 0;
+    unsigned attempts = 0;
+    std::uint32_t seq = 0;                  // monotonic for this author; survives every reset
+    std::uint32_t requestedTransition = 0;  // the build a request was started for: once per build
+    void Reset() { phase = RebuildPhase::Idle; id = {}; phaseMs = 0; attempts = 0; }
+};
+struct RebuildTick {
+    CloneRebuildFacts facts;  // requested is derived from the machine
+    bool safe = false;        // RebuildSafeField now
+    RebuildIdentity now;
+    std::uint64_t nowMs = 0;
+};
+// One frame. ack(bool arrived) and request(seq) report whether the bridge took the packet (false: ring pressure, the
+// next frame tries again). Returns what happened, for the log ("" when nothing).
+template<class Ack, class Request>
+const char* StepCloneRebuild(RebuildMachine& m, const RebuildTick& t, Ack&& ack, Request&& request) {
+    if (m.phase != RebuildPhase::Idle && !(m.id == t.now)) { m.Reset(); return "identity-changed"; }
+    switch (m.phase) {
+    case RebuildPhase::Idle: {
+        auto f = t.facts; f.requested = m.requestedTransition && m.requestedTransition == t.now.transition;
+        f.settledField = t.safe;
+        const char* why = "";
+        if (CloneRebuildDecide(f, why) != CloneRebuildStep::Request) return "";
+        m.phase = RebuildPhase::AckFalse; m.id = t.now; m.phaseMs = t.nowMs; m.attempts = 0;
+        m.requestedTransition = t.now.transition;
+        [[fallthrough]];
+    }
+    case RebuildPhase::AckFalse:
+        if (!t.safe) { m.Reset(); return "unsafe-before-ack"; }  // nothing published yet: no obligation
+        if (!ack(false)) return "";
+        m.phase = RebuildPhase::Request; m.phaseMs = t.nowMs;
+        [[fallthrough]];
+    case RebuildPhase::Request:
+        if (!t.safe || t.nowMs - m.phaseMs >= REPLAY_TIMEOUT_MS) { m.phase = RebuildPhase::AckTrue; return "abandoning"; }
+        if (!request(m.seq + 1)) return "";
+        ++m.seq; m.attempts = 1; m.phase = RebuildPhase::Awaiting; m.phaseMs = t.nowMs;
+        return "requested";
+    case RebuildPhase::Awaiting:
+        if (!t.safe) { m.phase = RebuildPhase::AckTrue; return "abandoning"; }
+        switch (CloneReplayWait(t.nowMs - m.phaseMs, m.attempts)) {
+        case ReplayWait::Waiting: return "";
+        case ReplayWait::Retry:
+            if (!request(m.seq + 1)) return "";
+            ++m.seq; ++m.attempts; m.phaseMs = t.nowMs; return "retried";
+        case ReplayWait::Abandon: m.phase = RebuildPhase::AckTrue; return "abandoning";
+        }
+        return "";
+    case RebuildPhase::AckTrue:
+        if (!ack(true)) return "";
+        m.Reset(); return "abandoned";
+    }
+    return "";
+}
+// The replayed room: accepted at the same epoch only for this machine's own pending request, under the identity it was
+// asked for, and only while the field is still safe (an unsafe accept closes the obligation instead).
+enum class ReplayAdmission : std::uint8_t { NotOurs, Accept, RefuseUnsafe };
+inline ReplayAdmission AdmitReplay(const RebuildMachine& m, const RebuildIdentity& now, std::uint32_t roomEpoch, bool safe) {
+    if ((m.phase != RebuildPhase::Request && m.phase != RebuildPhase::Awaiting) || !(m.id == now) || !roomEpoch ||
+        roomEpoch != m.id.epoch) return ReplayAdmission::NotOurs;
+    return safe ? ReplayAdmission::Accept : ReplayAdmission::RefuseUnsafe;
+}
+// After an Accept: consumed only if the host transition was actually queued; a context or queue refusal (or an unsafe
+// accept) goes to the explicit AckTrue step that closes the arrived=false obligation.
+inline void CommitReplay(RebuildMachine& m, bool queued) {
+    if (queued) m.Reset(); else m.phase = RebuildPhase::AckTrue;
 }
 
 // Reads KH2COOP_PLAYER_KIT. Unset/0: returns true without hooking. Unknown
