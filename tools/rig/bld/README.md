@@ -47,6 +47,13 @@ PC1. The VC++ runtime (14.51.36247) matches too.
    `live.ps1` records that as a note when the file lists and sizes are unchanged and the sha256 diff
    matched. Any content change stops further runs.
 
+5. **After a reclaim.** The gate killed `live.ps1` before its closing checks and wrote
+   `C:\desk\gate\needs-verify.json`, so launches are refused. Over SSH, run
+   `powershell -File C:/kh2rig/ops/verify-after.ps1 -Attempt <name>`. It repeats the closing checks against
+   that attempt's own baselines and adds `verify-after-<utc>.json` to its evidence. When it passes, add
+   `-Clear -MarkerUtc <the marker's utc>` to delete the marker. It never clears an `exit N` marker (a
+   failed run): those go to the lead.
+
 ## Saves
 
 Account B's `KHIIFM_WW.png` on `bld` is byte-identical to the fleet's 2026-10-07 conversion of PC1's
