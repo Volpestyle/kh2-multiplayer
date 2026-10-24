@@ -1,0 +1,22 @@
+2026-10-24T04:41:43.1469879Z admitted vuh2339-bot01r-ac5280e-bld01.ps1 level=launch child=8280
+2026-10-24T05:07:25.6189814Z admitted vuh2339-bot01r-ac5280e-bld02-noclip.ps1 level=launch child=26868
+Captured 538 files: .local\evidence\bot01-replay\bot01r-ac5280e-bld02-noclip\install-before.json
+exit=1 stopped= out=C:\kh2rig\wt/build/rig/operator-logs/desk-scenario/bot01-replay-bot01r-ac5280e-bld02-noclip.out
+Captured 538 files: .local\evidence\bot01-replay\bot01r-ac5280e-bld02-noclip\install-after.json
+Install content unchanged (538 files): .local\evidence\bot01-replay\bot01r-ac5280e-bld02-noclip\install-diff.json
+{
+    "tag":  "bot01-replay-bot01r-ac5280e-bld02-noclip",
+    "utc":  "2026-10-24T05:23:07.9697441Z",
+    "saveFiles":  6,
+    "foreignFiles":  14,
+    "gameRootFiles":  11,
+    "assetFiles":  527,
+    "findings":  [
+
+                 ],
+    "processes":  [
+
+                  ]
+}
+bot01-replay bot01r-ac5280e-bld02-noclip fail: C:\kh2rig\wt\build\scenarios\20261024-000927_net_twilight_thorn_bots_noclip_1
+

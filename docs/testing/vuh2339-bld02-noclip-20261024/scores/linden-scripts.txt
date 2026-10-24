@@ -1,0 +1,69 @@
+run bld02: status=fail seconds=689.7
+  step 68 assert fail: Both seats must receive native Thorn attacks; no protect/immunity fixture
+Thorn HP: start 390, min 0, last 0 (288 rows)
+Thorn phases (frame:motion@hp): 4080:44@None 4110:10@None 4170:12@None 4230:234@None 4260:10@None 4290:11@None 4350:13@None 14820:204@390 15060:205@390 15210:206@380 15390:226@380 15630:207@380 16560:208@370 17070:209@370 17580:210@340 18090:211@263 18240:202@250 20400:222@216 20580:153@216 21360:202@198 23520:222@153 23700:153@153 24090:153@153 24720:152@153 25980:204@153 26250:205@153 26370:206@143 26550:226@143 26790:207@143 27300:208@133 27810:209@133 28320:210@108 28830:211@72 28980:203@72 30990:223@6
+second opening after HP<170: [(25980, 204), (27810, 209), (28320, 210), (28830, 211)]
+kill: yes
+
+432 completions: 42
+  f=18807 owner=0 b6 dist=903 cam=0.2 aim=neutral(None) chip150=0 soleEvent=True
+  f=18867 owner=0 b5 dist=1185 cam=0.39 aim=sideways(0.39) chip150=0 soleEvent=True
+  f=18867 owner=0 b5 dist=1185 cam=0.39 aim=sideways(0.39) chip150=0 soleEvent=True
+  f=18927 owner=0 b6 dist=1573 cam=0.66 aim=toward(0.75) chip150=0 soleEvent=False
+  f=18985 owner=0 b5 dist=1693 cam=0.95 aim=toward(0.89) chip150=0 soleEvent=False
+  f=19045 owner=0 b6 dist=1859 cam=0.92 aim=neutral(None) chip150=0 soleEvent=False
+  f=19225 owner=0 b5 dist=1523 cam=0.94 aim=neutral(None) chip150=0 soleEvent=True
+  f=19225 owner=0 b5 dist=1523 cam=0.94 aim=neutral(None) chip150=0 soleEvent=True
+  f=19285 owner=0 b6 dist=1563 cam=0.9 aim=neutral(None) chip150=4 soleEvent=True
+  f=19345 owner=0 b5 dist=1880 cam=0.93 aim=neutral(None) chip150=8 soleEvent=True
+  f=19345 owner=0 b5 dist=1880 cam=0.93 aim=neutral(None) chip150=8 soleEvent=True
+  f=19405 owner=0 b6 dist=1528 cam=0.91 aim=neutral(None) chip150=4 soleEvent=False
+  f=19465 owner=0 b5 dist=1550 cam=0.97 aim=away(-0.86) chip150=0 soleEvent=False
+  f=19525 owner=0 b6 dist=1876 cam=0.7 aim=neutral(None) chip150=0 soleEvent=False
+  f=19645 owner=0 b6 dist=1767 cam=0.59 aim=neutral(None) chip150=4 soleEvent=False
+  f=19705 owner=0 b5 dist=1843 cam=0.09 aim=neutral(None) chip150=4 soleEvent=True
+  f=19765 owner=0 b6 dist=1570 cam=0.1 aim=neutral(None) chip150=4 soleEvent=True
+  f=19826 owner=0 b5 dist=1898 cam=0.06 aim=neutral(None) chip150=8 soleEvent=True
+  f=19886 owner=0 b6 dist=1811 cam=-0.01 aim=neutral(None) chip150=4 soleEvent=True
+  f=19946 owner=0 b5 dist=1858 cam=0.09 aim=neutral(None) chip150=0 soleEvent=True
+  f=19946 owner=0 b5 dist=1858 cam=0.09 aim=neutral(None) chip150=0 soleEvent=True
+  f=20006 owner=0 b6 dist=1746 cam=0.19 aim=neutral(None) chip150=0 soleEvent=True
+  f=20066 owner=0 b5 dist=1747 cam=0.21 aim=neutral(None) chip150=5 soleEvent=True
+  f=20126 owner=0 b6 dist=1838 cam=0.12 aim=neutral(None) chip150=5 soleEvent=True
+  f=20186 owner=0 b5 dist=1503 cam=0.27 aim=neutral(None) chip150=4 soleEvent=True
+  f=20186 owner=0 b5 dist=1503 cam=0.27 aim=neutral(None) chip150=4 soleEvent=True
+  f=20306 owner=0 b5 dist=1869 cam=-0.01 aim=neutral(None) chip150=0 soleEvent=True
+  f=20306 owner=0 b5 dist=1869 cam=-0.01 aim=neutral(None) chip150=0 soleEvent=True
+  f=21807 owner=1 b6 dist=308 cam=-0.47 aim=toward(0.96) chip150=0 soleEvent=True
+  f=21867 owner=1 b6 dist=688 cam=-0.64 aim=toward(1.0) chip150=0 soleEvent=True
+  f=21987 owner=1 b6 dist=1111 cam=-0.49 aim=neutral(None) chip150=0 soleEvent=True
+  f=22047 owner=1 b6 dist=1104 cam=-0.53 aim=toward(0.98) chip150=0 soleEvent=True
+  f=22107 owner=1 b6 dist=1160 cam=-0.39 aim=neutral(None) chip150=0 soleEvent=True
+  f=22407 owner=1 b6 dist=787 cam=-0.5 aim=toward(0.97) chip150=0 soleEvent=True
+  f=22527 owner=1 b6 dist=1141 cam=-0.14 aim=neutral(None) chip150=0 soleEvent=True
+  f=22707 owner=0 b6 dist=866 cam=0.77 aim=away(-0.63) chip150=0 soleEvent=True
+  f=22767 owner=0 b6 dist=1231 cam=0.54 aim=neutral(None) chip150=0 soleEvent=True
+  f=22767 owner=0 b6 dist=1231 cam=0.54 aim=neutral(None) chip150=0 soleEvent=True
+  f=22887 owner=1 b6 dist=349 cam=-0.54 aim=toward(0.98) chip150=0 soleEvent=True
+  f=22947 owner=1 b6 dist=621 cam=-0.6 aim=neutral(None) chip150=4 soleEvent=True
+  f=23127 owner=0 b6 dist=1781 cam=0.38 aim=toward(0.92) chip150=0 soleEvent=True
+  f=23187 owner=0 b6 dist=1626 cam=0.98 aim=toward(0.55) chip150=10 soleEvent=True
+owner 0: 33 completions, 18 at 1600-1900, 12 sole-event chips, 68 HP
+owner 1: 9 completions, 0 at 1600-1900, 1 sole-event chips, 4 HP
+
+host: minHp=2 downed=0 revived=0 coop_revive=0 coop_hold_begin=0 stuck=0
+  thorn_reflect rows 0 (still 0); distances []; facing []
+  counters None
+  last: {"t": 1792819190.0, "kind": "done", "index": 0, "seconds": 304.0, "result": {"exitRoom": [2, 0], "nativeRoomExit": true}, "room": [2, 0]}
+
+friend: minHp=4 downed=0 revived=0 coop_revive=0 coop_hold_begin=0 stuck=0
+  thorn_reflect rows 0 (still 0); distances []; facing []
+  counters None
+  last: {"t": 1792819182.94, "kind": "done", "index": 0, "seconds": 297.0, "result": {"enemiesStart": 1, "swings": 330, "reactions": {"345": 4, "426": 1, "432": 67, "666": 15}, "minHp": 4, "deaths": 0, "evades": 0, "escapes": 0, "downed": 0, "heals": 0, "guards": 1}, "room": [2, 34]}
+seat 0 item_slots first None (thorn_00_samples.json) last None (thorn_11_samples.json); potion_stock None->None
+seat 1 item_slots first None (thorn_00_samples.json) last None (thorn_11_samples.json); potion_stock None->None
+clips: 
+all runs: 202: 72s lost 79 (host 79, friend 0) = 1.10/s | interlude: 57s lost 18 (host 13, friend 5) = 0.32/s
+   pc1-ac5280e: 202   74s lost  62 | host 432 34 (19 in band): 6 drops 37 HP | friend 432: 0 drops  0 HP | min HP 175
+   bld01-clips: 202  134s lost  25 | host 432 15 ( 8 in band): 2 drops 10 HP | friend 432: 0 drops  0 HP | min HP 207
+  bld02-noclip: 202   72s lost  79 | host 432 33 (18 in band): 9 drops 47 HP | friend 432: 1 drops  4 HP | min HP 0

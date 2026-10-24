@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "bld-evidence/assets.json",
+      "size": 97741,
+      "sha256": "5af325760e8d9f5e8e77313c33408d6b6a140d81103323e537a4033aa3579c49",
+      "url": "clankie://evidence/sha256/5af325760e8d9f5e8e77313c33408d6b6a140d81103323e537a4033aa3579c49"
+    },
+    {
+      "path": "bld-evidence/install-after.json",
+      "size": 96940,
+      "sha256": "1870c7fbc20eebe6f4dc9b4db27ce349091b388e54859a471a9a872fc1f5148c",
+      "url": "clankie://evidence/sha256/1870c7fbc20eebe6f4dc9b4db27ce349091b388e54859a471a9a872fc1f5148c"
+    },
+    {
+      "path": "bld-evidence/install-before.json",
+      "size": 96940,
+      "sha256": "e7ba8d571e70d80634003340be546fa836bd0817595156a6925730de6ac6ff9d",
+      "url": "clankie://evidence/sha256/e7ba8d571e70d80634003340be546fa836bd0817595156a6925730de6ac6ff9d"
+    },
+    {
+      "path": "bld-run/friend_thorn/pilot.jsonl",
+      "size": 453191,
+      "sha256": "3cf0bd093807affbfd0104ee90127f9eaf44caf1d8494dfcc8eabb7c57c47191",
+      "url": "clankie://evidence/sha256/3cf0bd093807affbfd0104ee90127f9eaf44caf1d8494dfcc8eabb7c57c47191"
+    },
+    {
+      "path": "bld-run/host_thorn/pilot.jsonl",
+      "size": 399265,
+      "sha256": "5ef245f05a490ca4dc2d3f06ec3cb17d56f86c5d32316ff392dc54172d365e20",
+      "url": "clankie://evidence/sha256/5ef245f05a490ca4dc2d3f06ec3cb17d56f86c5d32316ff392dc54172d365e20"
+    },
+    {
+      "path": "bld-run/kh2coop_inject_10520.log",
+      "size": 2247021,
+      "sha256": "47582a6980a61f74616969d3ce735546cec72a9fc8775357854fd1c773317c13",
+      "url": "clankie://evidence/sha256/47582a6980a61f74616969d3ce735546cec72a9fc8775357854fd1c773317c13"
+    },
+    {
+      "path": "bld-run/kh2coop_inject_33996.log",
+      "size": 2223994,
+      "sha256": "45912ca44be2983dbcbc7199bef40ac94a54060d2618d5b6d8cc29ef4c04c403",
+      "url": "clankie://evidence/sha256/45912ca44be2983dbcbc7199bef40ac94a54060d2618d5b6d8cc29ef4c04c403"
+    },
+    {
+      "path": "bld-run/relay.log",
+      "size": 79479,
+      "sha256": "e00bd02b2e16110cad9056b646d9597f8ada0db05308339c660720b56f4392b1",
+      "url": "clankie://evidence/sha256/e00bd02b2e16110cad9056b646d9597f8ada0db05308339c660720b56f4392b1"
+    },
+    {
+      "path": "bld-run/report.json",
+      "size": 368411,
+      "sha256": "778b46734da82b5c4c64acc654e35be7d33d68a3eb9b6152f9b97bc9e9084bb2",
+      "url": "clankie://evidence/sha256/778b46734da82b5c4c64acc654e35be7d33d68a3eb9b6152f9b97bc9e9084bb2"
+    },
+    {
+      "path": "net_twilight_thorn_bots_noclip.json",
+      "size": 38771,
+      "sha256": "0fd98f4ef7cb8cac9db3355cadb7200987d49ea55855e218b070d2bcce0396ef",
+      "url": "clankie://evidence/sha256/0fd98f4ef7cb8cac9db3355cadb7200987d49ea55855e218b070d2bcce0396ef"
+    }
+  ]
+}
