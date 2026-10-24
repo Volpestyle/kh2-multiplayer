@@ -17,8 +17,10 @@
 // playback and restore it afterwards, so a write open there is redirected to
 // <sandbox>\install-assets\<path below KH2ReSource> (a full copy of the
 // original, about 63 MB for a post-boss movie) and later reads of that file
-// follow the twin. The installed file is never opened for writing. Install
-// prunes install-assets twins from all but the newest six finished sandboxes.
+// follow the twin. The installed file is never opened for writing, and the
+// KH2ReSource root itself can't be moved or removed. Install prunes
+// install-assets twins from all but the newest six finished sandboxes, within
+// a fixed work and time budget.
 // ============================================================================
 
 #include <cstdint>

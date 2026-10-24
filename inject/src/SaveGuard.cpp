@@ -37,10 +37,21 @@ namespace saveguard {
 namespace {
 
 constexpr wchar_t kSaveFolder[] = L"my games\\kingdom hearts hd 1.5+2.5 remix";
-// Installed asset root; its sandbox twins live under kAssetTwins, a name that
-// is itself unguarded.
-constexpr wchar_t kAssetFolder[] = L"\\kh2resource\\";
+// Installed asset root, matched as a whole path component; its sandbox twins
+// live under kAssetTwins, a name that is itself unguarded.
+constexpr wchar_t kAssetFolder[] = L"\\kh2resource";
 constexpr wchar_t kAssetTwins[] = L"\\install-assets\\";
+
+// End of the first "\kh2resource" component in a lowered full path (pointing
+// at its following separator or at the terminator), or nullptr. A sibling
+// such as "\kh2resource-other" doesn't match.
+const wchar_t* AssetRootEnd(const wchar_t* lowered) {
+    constexpr size_t n = sizeof(kAssetFolder) / sizeof(wchar_t) - 1;
+    for (const wchar_t* hit = std::wcsstr(lowered, kAssetFolder); hit; hit = std::wcsstr(hit + 1, kAssetFolder)) {
+        if (hit[n] == L'\\' || hit[n] == L'\0') return hit + n;
+    }
+    return nullptr;
+}
 
 LogFn g_log = nullptr;
 std::atomic<std::uint32_t> g_blocked {0};
@@ -96,7 +107,7 @@ bool IsGuardedPath(LPCWSTR path) {
         wcsncpy_s(full, path, _TRUNCATE);
     }
     Lower(full);
-    return std::wcsstr(full, kSaveFolder) != nullptr || std::wcsstr(full, kAssetFolder) != nullptr ||
+    return std::wcsstr(full, kSaveFolder) != nullptr || AssetRootEnd(full) != nullptr ||
            (g_testDir[0] && std::wcsstr(full, g_testDir) == full);
 }
 
@@ -141,7 +152,8 @@ std::atomic<std::uint32_t> g_redirected {0};
 // Full path of `path` and the offset where its part below the guarded root
 // starts (the root is the save folder, an installed asset root or the
 // self-test directory). `asset` is set for an installed asset, whose tail
-// starts after the root's trailing backslash.
+// starts after the root's separator. The asset root itself has no tail and
+// so no twin: RouteOpen then denies a write open of it and passes reads.
 bool GuardedTail(LPCWSTR path, wchar_t (&full)[1024], size_t& tail, bool& asset) {
     if (!path) return false;
     const DWORD n = GetFullPathNameW(path, 1024, full, nullptr);
@@ -154,8 +166,9 @@ bool GuardedTail(LPCWSTR path, wchar_t (&full)[1024], size_t& tail, bool& asset)
         tail = (hit - lowered) + (sizeof(kSaveFolder) / sizeof(wchar_t) - 1);
         return true;
     }
-    if (const wchar_t* hit = std::wcsstr(lowered, kAssetFolder)) {
-        tail = (hit - lowered) + (sizeof(kAssetFolder) / sizeof(wchar_t) - 1);
+    if (const wchar_t* end = AssetRootEnd(lowered)) {
+        if (*end == L'\0' || end[1] == L'\0') return false;  // the root itself
+        tail = (end - lowered) + 1;
         asset = true;
         return true;
     }
@@ -194,12 +207,34 @@ bool Exists(LPCWSTR path) {
 // A post-boss movie twin is ~63 MB and every instance has its own sandbox, so
 // at install the install-assets trees of older sandboxes in the same log
 // directory are removed. The newest kKeptAssetSandboxes (about three
-// two-instance runs) and any whose process is still running are kept. Only
-// "<dir>\save_sandbox_<digits>\install-assets" trees are ever touched; saved
-// files beside them stay.
+// two-instance runs) and any whose process may still be running are kept.
+// Only "<dir>\save_sandbox_<digits>\install-assets" trees are ever touched;
+// saved files beside them stay. This runs before the launch acknowledgement,
+// so the work is capped: a scan that finds more sandboxes than it can rank
+// prunes nothing, and removal stops at a node, depth or time budget, leaving
+// the rest for a later install.
 constexpr size_t kKeptAssetSandboxes = 6;
+constexpr size_t kMaxSandboxScan = 256;
+constexpr int kMaxTreeDepth = 16;
+constexpr std::uint32_t kMaxRemovals = 1024;
+constexpr ULONGLONG kMaxPruneMs = 1000;
 
-void RemoveTree(const std::wstring& dir) {
+struct PruneBudget {
+    std::uint32_t removals = kMaxRemovals;
+    ULONGLONG deadline = 0;
+    bool exhausted = false;
+    bool Spend() {
+        if (exhausted || removals == 0 || GetTickCount64() > deadline) return !(exhausted = true);
+        --removals;
+        return true;
+    }
+};
+
+void RemoveTree(const std::wstring& dir, int depth, PruneBudget& budget) {
+    if (depth > kMaxTreeDepth) {
+        budget.exhausted = true;
+        return;
+    }
     WIN32_FIND_DATAW found {};
     HANDLE find = FindFirstFileW((dir + L"\\*").c_str(), &found);
     if (find != INVALID_HANDLE_VALUE) {
@@ -208,25 +243,29 @@ void RemoveTree(const std::wstring& dir) {
             if (name == L"." || name == L"..") continue;
             const std::wstring child = dir + L"\\" + name;
             if (found.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                if (!budget.Spend()) break;
                 if (!RemoveDirectoryW(child.c_str())) DeleteFileW(child.c_str());  // never follow a link
             } else if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                RemoveTree(child);
+                RemoveTree(child, depth + 1, budget);
             } else {
+                if (!budget.Spend()) break;
                 SetFileAttributesW(child.c_str(), FILE_ATTRIBUTE_NORMAL);
                 DeleteFileW(child.c_str());
             }
-        } while (FindNextFileW(find, &found));
+        } while (!budget.exhausted && FindNextFileW(find, &found));
         FindClose(find);
     }
-    RemoveDirectoryW(dir.c_str());
+    if (budget.Spend()) RemoveDirectoryW(dir.c_str());  // fails harmlessly if anything was left
 }
 
-bool ProcessRunning(DWORD pid) {
+// Only a process that definitely no longer exists counts as finished; an
+// unreadable or ambiguous liveness result keeps the sandbox.
+bool MaybeRunning(DWORD pid) {
     HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
-    if (!process) return GetLastError() == ERROR_ACCESS_DENIED;  // exists but not ours: keep it
-    const bool running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+    if (!process) return GetLastError() != ERROR_INVALID_PARAMETER;
+    const bool exited = WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
     CloseHandle(process);
-    return running;
+    return !exited;
 }
 
 void PruneAssetTwins(const wchar_t* sandbox) {
@@ -235,10 +274,12 @@ void PruneAssetTwins(const wchar_t* sandbox) {
     const std::wstring parent(sandbox, slash);
     struct Old { FILETIME written; DWORD pid; std::wstring assets; };
     std::vector<Old> olds;
+    size_t scanned = 0;
     WIN32_FIND_DATAW found {};
     HANDLE find = FindFirstFileW((parent + L"\\save_sandbox_*").c_str(), &found);
     if (find == INVALID_HANDLE_VALUE) return;
     do {
+        if (++scanned > kMaxSandboxScan) break;
         const std::wstring name = found.cFileName;
         const std::wstring digits = name.substr(std::wcslen(L"save_sandbox_"));
         if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
@@ -246,27 +287,36 @@ void PruneAssetTwins(const wchar_t* sandbox) {
             digits.find_first_not_of(L"0123456789") != std::wstring::npos || digits.size() > 10) continue;
         const std::wstring dir = parent + L"\\" + name;
         if (_wcsicmp(dir.c_str(), sandbox) == 0) continue;
-        const std::wstring assets = dir + kAssetTwins;
+        const std::wstring assets = dir + L"\\install-assets";
         WIN32_FILE_ATTRIBUTE_DATA info {};
-        if (!GetFileAttributesExW(assets.substr(0, assets.size() - 1).c_str(), GetFileExInfoStandard, &info) ||
+        if (!GetFileAttributesExW(assets.c_str(), GetFileExInfoStandard, &info) ||
             !(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
             (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
-        olds.push_back({found.ftLastWriteTime, static_cast<DWORD>(std::wcstoul(digits.c_str(), nullptr, 10)),
-                        assets.substr(0, assets.size() - 1)});
+        olds.push_back({found.ftLastWriteTime, static_cast<DWORD>(std::wcstoul(digits.c_str(), nullptr, 10)), assets});
     } while (FindNextFileW(find, &found));
     FindClose(find);
+    if (scanned > kMaxSandboxScan) {
+        if (g_log) g_log("[saveguard] prune skipped: more than %zu sandboxes to rank", kMaxSandboxScan);
+        return;
+    }
     std::sort(olds.begin(), olds.end(), [](const Old& a, const Old& b) {
         return CompareFileTime(&a.written, &b.written) > 0;  // newest first
     });
-    std::uint32_t pruned = 0;
-    for (size_t i = kKeptAssetSandboxes; i < olds.size(); ++i) {
-        if (ProcessRunning(olds[i].pid)) continue;
-        RemoveTree(olds[i].assets);
+    PruneBudget budget;
+    budget.deadline = GetTickCount64() + kMaxPruneMs;
+    std::uint32_t pruned = 0, live = 0;
+    for (size_t i = kKeptAssetSandboxes; i < olds.size() && !budget.exhausted; ++i) {
+        if (MaybeRunning(olds[i].pid)) {
+            ++live;
+            continue;
+        }
+        RemoveTree(olds[i].assets, 0, budget);
         ++pruned;
     }
-    if (g_log && pruned) {
-        g_log("[saveguard] pruned install-assets twins of %u old sandboxes (kept newest %zu and running)",
-              pruned, kKeptAssetSandboxes);
+    if (g_log && (pruned || live)) {
+        g_log("[saveguard] pruned install-assets twins of %u old sandboxes (kept newest %zu, %u possibly running; "
+              "removals %u/%u, budget %s)", pruned, kKeptAssetSandboxes, live, kMaxRemovals - budget.removals,
+              kMaxRemovals, budget.exhausted ? "exhausted, rest left for a later install" : "ok");
     }
 }
 
