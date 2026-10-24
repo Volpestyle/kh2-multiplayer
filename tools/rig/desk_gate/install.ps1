@@ -30,6 +30,7 @@ if ($Action -eq 'install') {
   if ($console -ne $explorer[0].SessionId) { throw "active console session $console is not Explorer's $($explorer[0].SessionId)" }
   # One install at a time: a second one could stop the agent the first just started, with a job in it.
   $lock = try { [IO.File]::Open("$gate\install.lock", 'CreateNew', 'Write') } catch { throw "another install is running (or one died: delete $gate\install.lock)" }
+  $ownHold = $false
   try {
     $existing = Get-ScheduledTask -TaskName desk-agent -ErrorAction SilentlyContinue
     if ($existing) {
@@ -40,8 +41,13 @@ if ($Action -eq 'install') {
     # Stopping the agent ends its job object, so let the running job finish first. The hold keeps queued
     # jobs waiting (not refused); a state.json written after the hold, with no job, means none can start.
     # An agent from before the hold (2026-10-23) ignores it: replace one only while its queue is empty.
+    # Someone else's hold (a lane pausing the queue) stays after the install.
     $held = (Get-Date).ToUniversalTime()
-    New-Item -ItemType File -Force "$gate\hold" | Out-Null
+    if (Test-Path "$gate\hold") {
+      "leaving the existing gate\hold (written $((Get-Item "$gate\hold").LastWriteTimeUtc.ToString('o'))) in place: queued jobs wait until whoever set it removes it"
+    } else {
+      try { New-Item -ItemType File "$gate\hold" | Out-Null; $ownHold = $true } catch { if (-not (Test-Path "$gate\hold")) { throw } }
+    }
     for ($i = 0; ; $i++) {
       $alive = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like '*C:\desk\agent.ps1*' }).Count
       $state = try { Get-Content -Raw "$gate\state.json" | ConvertFrom-Json } catch { $null }
@@ -70,8 +76,8 @@ if ($Action -eq 'install') {
     Get-Content "$desk\agent.log" -Tail 2
   } finally {
     # Released on success or failure: a failure before Stop-Agent leaves the old agent running its queue,
-    # and after it there is no agent left to admit anything.
-    Remove-Item "$gate\hold" -ErrorAction SilentlyContinue
+    # and after it there is no agent left to admit anything. Only a hold this install created is removed.
+    if ($ownHold) { Remove-Item "$gate\hold" -ErrorAction SilentlyContinue }
     $lock.Close(); Remove-Item "$gate\install.lock" -ErrorAction SilentlyContinue
   }
 } elseif ($Action -eq 'uninstall') {

@@ -101,14 +101,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File C:\desk\gate\incoming\instal
 `gate\install.lock`. It then:
 1. compiles `Gate.cs` as a check;
 2. exports the existing `desk-agent` task to `gate\desk-agent-before-<utc>.xml`;
-3. creates `gate\hold` and waits up to 60 min for a running job to finish. While the hold exists, the
+3. creates `gate\hold` (or keeps an existing one, and says so) and waits up to 60 min for a running job to finish. While the hold exists, the
    agent leaves queued jobs in `jobs\`, neither running nor refusing them, and `state.json` shows
    `hold: true`. An agent from before 2026-10-23 17:30Z ignores the hold, so install replaces it only
    while its queue is empty: agree on a gap with whoever queues there;
 4. stops only the `C:\desk\agent.ps1` process;
 5. registers `desk-agent` for the user: AtLogOn, Interactive, Limited (not elevated), no time limit,
    IgnoreNew, restart on failure;
-6. starts it and removes the hold, on failure too.
+6. starts it and removes the hold, on failure too. A hold that existed before the install (a lane pausing
+   the queue) is left in place.
+
+The task's restart-on-failure does not bring back an agent that exits: on 2026-10-24 bld's agent ended
+with `0xC000013A` (`STATUS_CONTROL_C_EXIT`; what sent it is unknown), and the task sat at `Ready` until
+`Start-ScheduledTask -TaskName desk-agent`. With no agent nothing is admitted, but `state.json` and the
+availability log stop: treat a `state.json` older than a few seconds as no gate. The task also starts
+at each logon.
 
 A restarted agent starts a new idle interval, so on an idle-gated PC (`bld`) jobs that waited through the
 hold are refused with `recent-input` once it lifts. Queue them again after 15 min.
