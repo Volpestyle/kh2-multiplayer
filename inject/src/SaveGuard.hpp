@@ -11,6 +11,14 @@
 // redirect is safer than a denial. Deletes, moves, copies, replaces and
 // directory removals there fail with ERROR_ACCESS_DENIED. Everything is
 // logged as [saveguard]. Reads of the real save work as before.
+//
+// Installed assets under any "\KH2ReSource\" folder get the same treatment
+// (VUH-2775): the game's cipher movies decrypt their header in place before
+// playback and restore it afterwards, so a write open there is redirected to
+// <sandbox>\install-assets\<path below KH2ReSource> (a full copy of the
+// original, about 63 MB for a post-boss movie) and later reads of that file
+// follow the twin. The installed file is never opened for writing. Install
+// prunes install-assets twins from all but the newest six finished sandboxes.
 // ============================================================================
 
 #include <cstdint>
