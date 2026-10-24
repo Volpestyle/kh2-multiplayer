@@ -1810,10 +1810,16 @@ Three layers:
     mid-movie left `me4.mp4` decrypted (VUH-2763). Write opens there go to
     `save_sandbox_<pid>/install-assets/<path below KH2ReSource>`, a full copy
     of the original (about 63 MB for a post-boss movie), and the movie plays
-    from that copy. At install, the guard removes the `install-assets` trees
-    of older sandboxes in the same log directory, keeping the newest six
-    (about three two-instance runs) and any whose process is still running.
-    Saved files in those sandboxes stay.
+    from that copy. `KH2ReSource` is matched as a whole path component, so
+    the root folder itself can't be moved, removed or opened for writing,
+    while a sibling such as `KH2ReSource-other` is ordinary. At install, the
+    guard removes the `install-assets` trees of older sandboxes in the same
+    log directory, keeping the newest six (about three two-instance runs)
+    and any whose process might still be running. Because this runs before
+    the launch acknowledgement, it's capped: it ranks at most 256 sandboxes
+    (more than that and it prunes nothing), recurses at most 16 levels, and
+    stops after 1024 removals or one second, leaving the rest for a later
+    install. Saved files in those sandboxes stay.
   - **Everything else is denied:** copies (`CopyFileA/W/ExW/2`), moves
     (`MoveFileExA/W`, `MoveFileWithProgressW`), `ReplaceFileW`, deletes
     (`DeleteFileA/W`) and `RemoveDirectoryA/W`. Copy goes to NtCreateFile

@@ -35,6 +35,22 @@ int wmain(int argc, wchar_t** argv) {
         Write(argv[3], ((deleted ? "deleted|" : "blocked|") + readBack).c_str());
         return deleted ? 3 : 0;
     }
+    if (argc == 4 && std::wstring(argv[1]) == L"--child-root") {
+        // argv[2]: an empty exact KH2ReSource root, whose sibling KH2ReSource-other sits beside it.
+        const fs::path assetRoot = argv[2], sibling = assetRoot.wstring() + L"-other";
+        HANDLE dir = CreateFileW(assetRoot.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                 OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        const bool wrote = dir != INVALID_HANDLE_VALUE;
+        if (wrote) CloseHandle(dir);
+        const bool moved = MoveFileExW(assetRoot.c_str(), (assetRoot.wstring() + L"-moved").c_str(), 0) != FALSE;
+        const bool movedA = MoveFileExA(assetRoot.string().c_str(), (assetRoot.string() + "-movedA").c_str(), 0) != FALSE;
+        const bool removed = RemoveDirectoryW(assetRoot.c_str()) != FALSE;
+        const bool siblingMoved = MoveFileExW(sibling.c_str(), (sibling.wstring() + L"-moved").c_str(), 0) != FALSE;
+        Write(argv[3], (std::string("write=") + (wrote ? "1" : "0") + " move=" + (moved ? "1" : "0") +
+                        " moveA=" + (movedA ? "1" : "0") + " remove=" + (removed ? "1" : "0") +
+                        " sibling=" + (siblingMoved ? "1" : "0")).c_str());
+        return 0;
+    }
     wchar_t exe[MAX_PATH] {}, temp[MAX_PATH] {};
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     GetTempPathW(MAX_PATH, temp);
@@ -66,11 +82,11 @@ int wmain(int argc, wchar_t** argv) {
     SetEnvironmentVariableW(L"KH2COOP_SAVEGUARD_TEST_DIR", nullptr);
     SetEnvironmentVariableW(L"KH2COOP_PREINJECT_TEST_FAIL_GUARD", nullptr);
     const auto dll = fs::path(exe).parent_path() / L"kh2coop_preinject_guard.dll";
-    auto spawn = [&](const fs::path& save, const fs::path& marker) {
+    auto spawn = [&](const fs::path& save, const fs::path& marker, const wchar_t* mode = L"--child") {
         STARTUPINFOW startup {};
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION info {};
-        std::wstring command = L"\"" + std::wstring(exe) + L"\" --child \"" + save.wstring() + L"\" \"" + marker.wstring() + L"\"";
+        std::wstring command = L"\"" + std::wstring(exe) + L"\" " + mode + L" \"" + save.wstring() + L"\" \"" + marker.wstring() + L"\"";
         if (!CreateProcessW(exe, command.data(), nullptr, nullptr, FALSE,
                             CREATE_SUSPENDED, nullptr, root.c_str(), &startup, &info))
             throw std::runtime_error("offline child creation failed");
@@ -122,6 +138,34 @@ int wmain(int argc, wchar_t** argv) {
                       text.find("Save guard installed:") < static_cast<std::size_t>(ack.position()),
                       "actual DLL install/ack log precedes observed main-thread resume");
             }
+        }
+    }
+    {
+        // The exact asset root (no trailing separator) is guarded as a whole component: its write open,
+        // moves and removal are denied and it gets no twin, while a "KH2ReSource-other" sibling stays
+        // ordinary. The same install meets an oversized old asset tree and stops at its removal budget.
+        const auto emptyRoot = root / L"other" / L"KH2ReSource";
+        fs::create_directories(emptyRoot);
+        fs::create_directories(root / L"other" / L"KH2ReSource-other");
+        const auto big = logs / L"save_sandbox_9000101";
+        fs::create_directories(big / L"install-assets" / L"bulk");
+        for (int i = 0; i < 1100; ++i) Write(big / L"install-assets" / L"bulk" / (std::to_wstring(i) + L".bin"), "x");
+        fs::last_write_time(big, fs::file_time_type::clock::now() - std::chrono::hours(30));
+        const auto marker = root / "root.marker";
+        auto info = spawn(emptyRoot, marker, L"--child-root");
+        Child child(info);
+        const auto error = child.ProtectAndResume([&](DWORD pid) { return InjectDll(pid, dll); }, 10000);
+        Check(error.empty(), "install with an over-budget old asset tree still acknowledges before resume");
+        if (error.empty()) {
+            Check(WaitForSingleObject(info.hProcess, 10000) == WAIT_OBJECT_0, "root-control child exits");
+            Check(Read(marker) == "write=0 move=0 moveA=0 remove=0 sibling=1" && fs::exists(emptyRoot),
+                  "exact KH2ReSource root write/move/removal denied; sibling directory unaffected");
+            const auto sandbox = logs / (L"save_sandbox_" + std::to_wstring(info.dwProcessId));
+            Check(!fs::exists(sandbox / L"install-assets"), "asset root gets no sandbox twin");
+            const auto text = Read(logs / (L"preinject_guard_" + std::to_wstring(info.dwProcessId) + L".log"));
+            Check(fs::exists(big / L"install-assets") && !fs::exists(olds[2] / L"install-assets") &&
+                      text.find("budget exhausted, rest left for a later install") != std::string::npos,
+                  "prune stops at its removal budget, logs it and leaves the rest for a later install");
         }
     }
     for (int mode = 0; mode < 5; ++mode) {
