@@ -1,0 +1,27 @@
+﻿{
+    "ok":  true,
+    "attempt":  "bot01r-ac5280e-bld01",
+    "failures":  [
+
+                 ],
+    "notes":  [
+
+              ],
+    "needsVerify":  null,
+    "markerAfterBaseline":  false,
+    "clearable":  false,
+    "installCaptureExit":  0,
+    "installDiffExit":  0,
+    "savesChecked":  6,
+    "savesAdded":  [
+
+                   ],
+    "ownedGames":  [
+
+                   ],
+    "buildHelpers":  [
+
+                     ],
+    "safetyReceipt":  "C:/kh2rig/wt/.local/evidence/bot01-replay/bot01r-ac5280e-bld01/safety-verify-20261024T050008Z.json",
+    "utc":  "2026-10-24T05:01:15.1798324Z"
+}

@@ -1,0 +1,58 @@
+﻿[
+    {
+        "sha256":  "460efee72365f6f7298df55d17d4adde9097bbc5bb0cfd14d6f40637ae5d2787",
+        "path":  ".local/bot01-replay/net_twilight_thorn_bots.json"
+    },
+    {
+        "sha256":  "0783a89dcfcf0992128bef2156f57cf93d86cfb150530ea87910ea2fec50f86f",
+        "path":  ".local/bot01-replay/run_bot01.py"
+    },
+    {
+        "sha256":  "d93884b1fa02a66c4aeb61e70f13ee3f232e92b29d17fb2253a086afc05198c4",
+        "path":  "tools/scenario/run.py"
+    },
+    {
+        "sha256":  "789746fc055d5f8e71860abc93071e3339820723c5e51fbe9f72ab2292102892",
+        "path":  "tools/scenario/run_thorn.py"
+    },
+    {
+        "sha256":  "fbb68383ea97f9421187a89d09fd168a143a1ba692bf337bd0c3f526a3efb141",
+        "path":  "tools/rig/route_pilot/thorn.py"
+    },
+    {
+        "sha256":  "a1f57aae60cfb20db3591620757dab865a855b62a270ac367f5cc694251e6345",
+        "path":  "tools/rig/route_pilot/pilot.py"
+    },
+    {
+        "sha256":  "022d945c4bb1b35d585e116ca1dbd8873197cbb684e6a086cd2b0b300344017b",
+        "path":  "tools/rig/install_manifest.py"
+    },
+    {
+        "sha256":  "013468851b2ac0d9583f70c5339e1cb4a3b29145deccec2362ac63e28efba20c",
+        "path":  "tools/rig/route_pilot/routes/twilight_thorn_awakening_door.json"
+    },
+    {
+        "sha256":  "679fee6e2a7bfb882cdd4ce1cbde455a2c7854573e11db3f00cdddc8e6b51b97",
+        "path":  "tools/rig/route_pilot/routes/twilight_thorn_calling_path.json"
+    },
+    {
+        "sha256":  "f6146dcb3a0cc31be8773f371f9a06832307f46793179f98947aa13a9e356e45",
+        "path":  "tools/rig/route_pilot/routes/twilight_thorn_fight.json"
+    },
+    {
+        "sha256":  "54aadfdb7a768a017459c35045b54ee28a80d834cc267210e0ac4b2c95903594",
+        "path":  "tools/rig/route_pilot/routes/twilight_thorn_host_fight.json"
+    },
+    {
+        "sha256":  "8336cc3ed6b9d7f3f714669321d0a7733da16969a598aed001bd5111c94215c2",
+        "path":  "tools/rig/route_pilot/routes/twilight_thorn_menu_tutorial.json"
+    },
+    {
+        "sha256":  "4d63cc76e8117024db2ffbe71b2db10fc8f24f012b8996aa61fb83bf17b50a77",
+        "path":  "tools/rig/route_pilot/routes/twilight_thorn_serenity_door.json"
+    },
+    {
+        "sha256":  "bd033e3a3a0772a053c1ecc5728d802b95cd8ae2d58fea76781efd7646d6405c",
+        "path":  "../ops/desk-scenario.ps1"
+    }
+]

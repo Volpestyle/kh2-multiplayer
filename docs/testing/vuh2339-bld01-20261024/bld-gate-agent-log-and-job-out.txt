@@ -1,0 +1,24 @@
+2026-10-23T17:12:06.5444061Z agent up session 1 pid 16244 (gated, bld)
+2026-10-24T01:32:16.1241557Z agent up session 1 pid 2460 (gated, bld)
+2026-10-24T04:25:51.7628489Z agent up session 1 pid 33208 (gated, bld)
+2026-10-24T04:41:43.1469879Z admitted vuh2339-bot01r-ac5280e-bld01.ps1 level=launch child=8280
+Captured 538 files: .local\evidence\bot01-replay\bot01r-ac5280e-bld01\install-before.json
+exit=1 stopped= out=C:\kh2rig\wt/build/rig/operator-logs/desk-scenario/bot01-replay-bot01r-ac5280e-bld01.out
+Captured 538 files: .local\evidence\bot01-replay\bot01r-ac5280e-bld01\install-after.json
+Install content unchanged (538 files): .local\evidence\bot01-replay\bot01r-ac5280e-bld01\install-diff.json
+{
+    "tag":  "bot01-replay-bot01r-ac5280e-bld01",
+    "utc":  "2026-10-24T04:57:36.5261431Z",
+    "saveFiles":  6,
+    "foreignFiles":  14,
+    "gameRootFiles":  11,
+    "assetFiles":  527,
+    "findings":  [
+
+                 ],
+    "processes":  [
+
+                  ]
+}
+bot01-replay bot01r-ac5280e-bld01 fail: C:\kh2rig\wt\build\scenarios\20261023-234445_net_twilight_thorn_bots_1
+

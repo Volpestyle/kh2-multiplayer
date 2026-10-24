@@ -1,0 +1,107 @@
+## good
+run good: status=fail seconds=571.8
+  step 42 assert fail: An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block.
+Thorn HP: start 390, min 175, last 175 (157 rows)
+Thorn phases (frame:motion@hp): 4230:44@None 4290:234@None 4350:12@None 4410:11@None 4530:12@None 4590:13@None 4620:12@None 15180:204@390 15420:205@390 15570:206@380 15720:226@380 15960:207@380 16890:208@370 17400:209@370 17910:210@340 18420:211@263 18570:202@237 20760:222@185 20940:153@185 21690:202@185
+second opening after HP<170: none
+kill: no
+
+432 completions: 38
+  f=19026 owner=0 b7 dist=1572 cam=0.99 aim=neutral(None) chip150=0 soleEvent=False
+  f=19026 owner=0 b7 dist=1572 cam=0.99 aim=neutral(None) chip150=0 soleEvent=False
+  f=19086 owner=0 b6 dist=1616 cam=0.92 aim=sideways(0.4) chip150=0 soleEvent=False
+  f=19086 owner=0 b6 dist=1616 cam=0.92 aim=sideways(0.4) chip150=0 soleEvent=False
+  f=19146 owner=0 b7 dist=1741 cam=0.96 aim=neutral(None) chip150=0 soleEvent=False
+  f=19266 owner=0 b7 dist=1910 cam=0.97 aim=toward(0.51) chip150=0 soleEvent=False
+  f=19326 owner=0 b6 dist=1853 cam=0.93 aim=neutral(None) chip150=0 soleEvent=False
+  f=19386 owner=0 b7 dist=1822 cam=0.94 aim=neutral(None) chip150=0 soleEvent=False
+  f=19566 owner=0 b6 dist=1677 cam=0.88 aim=neutral(None) chip150=5 soleEvent=True
+  f=19566 owner=0 b6 dist=1677 cam=0.88 aim=neutral(None) chip150=5 soleEvent=True
+  f=19626 owner=0 b7 dist=1874 cam=0.9 aim=neutral(None) chip150=5 soleEvent=True
+  f=19682 owner=0 b6 dist=1737 cam=0.92 aim=neutral(None) chip150=4 soleEvent=True
+  f=19740 owner=0 b7 dist=1555 cam=0.95 aim=neutral(None) chip150=4 soleEvent=True
+  f=19800 owner=0 b6 dist=1814 cam=0.95 aim=neutral(None) chip150=5 soleEvent=True
+  f=19800 owner=0 b6 dist=1814 cam=0.95 aim=neutral(None) chip150=5 soleEvent=True
+  f=19860 owner=0 b7 dist=1835 cam=0.97 aim=neutral(None) chip150=5 soleEvent=True
+  f=19920 owner=0 b6 dist=1786 cam=0.95 aim=neutral(None) chip150=0 soleEvent=True
+  f=19980 owner=0 b7 dist=1821 cam=0.96 aim=neutral(None) chip150=5 soleEvent=True
+  f=20160 owner=0 b6 dist=1597 cam=0.99 aim=neutral(None) chip150=0 soleEvent=True
+  f=20220 owner=0 b7 dist=1834 cam=0.91 aim=neutral(None) chip150=0 soleEvent=True
+  f=20220 owner=0 b7 dist=1834 cam=0.91 aim=neutral(None) chip150=0 soleEvent=True
+  f=20340 owner=0 b7 dist=1831 cam=0.98 aim=neutral(None) chip150=0 soleEvent=False
+  f=20520 owner=0 b6 dist=1613 cam=0.94 aim=neutral(None) chip150=5 soleEvent=False
+  f=20580 owner=0 b7 dist=1882 cam=1.0 aim=toward(0.68) chip150=0 soleEvent=False
+  f=20700 owner=0 b7 dist=1522 cam=1.0 aim=sideways(-0.05) chip150=0 soleEvent=False
+  f=22138 owner=1 b6 dist=304 cam=-0.68 aim=neutral(None) chip150=0 soleEvent=True
+  f=22558 owner=0 b5 dist=557 cam=0.88 aim=neutral(None) chip150=0 soleEvent=True
+  f=22558 owner=1 b5 dist=364 cam=-0.88 aim=toward(0.96) chip150=0 soleEvent=True
+  f=22558 owner=0 b5 dist=557 cam=0.88 aim=neutral(None) chip150=0 soleEvent=True
+  f=22618 owner=0 b6 dist=1114 cam=1.0 aim=neutral(None) chip150=0 soleEvent=True
+  f=22678 owner=0 b5 dist=1129 cam=0.73 aim=neutral(None) chip150=0 soleEvent=False
+  f=22678 owner=0 b5 dist=1129 cam=0.73 aim=neutral(None) chip150=0 soleEvent=False
+  f=22736 owner=0 b6 dist=1338 cam=0.68 aim=sideways(-0.04) chip150=0 soleEvent=False
+  f=22848 owner=0 b6 dist=1248 cam=0.69 aim=neutral(None) chip150=0 soleEvent=True
+  f=23088 owner=0 b6 dist=1234 cam=0.74 aim=neutral(None) chip150=0 soleEvent=True
+  f=23088 owner=0 b6 dist=1234 cam=0.74 aim=neutral(None) chip150=0 soleEvent=True
+  f=23268 owner=1 b5 dist=645 cam=-0.94 aim=away(-0.91) chip150=0 soleEvent=True
+  f=23328 owner=1 b6 dist=765 cam=-0.86 aim=away(-0.52) chip150=0 soleEvent=True
+owner 0: 34 completions, 19 at 1600-1900, 9 sole-event chips, 43 HP
+owner 1: 4 completions, 0 at 1600-1900, 0 sole-event chips, 0 HP
+
+host: minHp=0 downed=0 revived=0 coop_revive=2 coop_hold_begin=0 stuck=1
+  thorn_reflect rows 0 (still 0); distances []; facing []
+  counters None
+
+friend: minHp=1 downed=0 revived=0 coop_revive=3 coop_hold_begin=0 stuck=1
+  thorn_reflect rows 0 (still 0); distances []; facing []
+  counters None
+seat 0 item_slots first None (thorn_00_samples.json) last None (thorn_04_samples.json); potion_stock None->None
+seat 1 item_slots first None (thorn_00_samples.json) last None (thorn_04_samples.json); potion_stock None->None
+clips: 
+all runs: 202: 74s lost 62 (host 57, friend 5) = 0.84/s | interlude: 16s lost 0 (host 0, friend 0) = 0.00/s
+## bld01
+run bld01: status=fail seconds=627.4
+  step 42 assert fail: An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block.
+Thorn HP: start 390, min 207, last 207 (305 rows)
+Thorn phases (frame:motion@hp): 4170:44@None 4230:234@None 4260:12@None 4320:11@None 4350:10@None 4380:13@None 4410:10@None 4440:13@None 4470:10@None 4500:13@None 4530:10@None 4560:13@None 4590:10@None 15060:204@390 15300:205@390 15450:206@380 15600:226@380 15840:207@380 16770:208@370 17250:209@370 17700:210@345 18150:211@263 18300:202@232 20310:222@212 20430:152@212 20820:202@212 22920:222@212 23100:152@212 23340:153@212 23760:153@212 23970:202@212 26070:222@207 26190:152@207 26370:152@207 26790:152@207 27150:202@207 29010:222@207 29130:153@207
+second opening after HP<170: none
+kill: no
+
+432 completions: 21
+  f=18966 owner=0 b6 dist=438 cam=0.35 aim=toward(0.91) chip150=0 soleEvent=True
+  f=18966 owner=0 b6 dist=438 cam=0.35 aim=toward(0.91) chip150=0 soleEvent=True
+  f=19263 owner=0 b6 dist=372 cam=0.15 aim=neutral(None) chip150=0 soleEvent=True
+  f=19263 owner=0 b6 dist=372 cam=0.15 aim=neutral(None) chip150=0 soleEvent=True
+  f=19323 owner=0 b6 dist=726 cam=0.36 aim=neutral(None) chip150=0 soleEvent=True
+  f=19323 owner=0 b6 dist=726 cam=0.36 aim=neutral(None) chip150=0 soleEvent=True
+  f=19383 owner=0 b6 dist=1346 cam=0.73 aim=toward(1.0) chip150=0 soleEvent=True
+  f=19443 owner=0 b6 dist=1787 cam=0.99 aim=toward(0.99) chip150=5 soleEvent=True
+  f=19443 owner=0 b6 dist=1787 cam=0.99 aim=toward(0.99) chip150=5 soleEvent=True
+  f=19503 owner=0 b6 dist=1809 cam=0.98 aim=neutral(None) chip150=5 soleEvent=False
+  f=19551 owner=0 b6 dist=1800 cam=0.99 aim=neutral(None) chip150=0 soleEvent=False
+  f=19730 owner=0 b7 dist=1694 cam=0.99 aim=sideways(-0.11) chip150=0 soleEvent=True
+  f=19790 owner=0 b6 dist=1807 cam=0.81 aim=neutral(None) chip150=5 soleEvent=True
+  f=19904 owner=0 b6 dist=1616 cam=0.91 aim=neutral(None) chip150=0 soleEvent=True
+  f=21356 owner=0 b7 dist=1611 cam=0.73 aim=neutral(None) chip150=0 soleEvent=True
+  f=22013 owner=1 b6 dist=109 cam=-0.96 aim=sideways(0.49) chip150=0 soleEvent=True
+  f=22132 owner=1 b6 dist=383 cam=0.99 aim=away(-0.8) chip150=0 soleEvent=True
+  f=22252 owner=1 b6 dist=1029 cam=1.0 aim=away(-0.67) chip150=0 soleEvent=True
+  f=22312 owner=1 b7 dist=1099 cam=1.0 aim=sideways(0.07) chip150=0 soleEvent=True
+  f=22662 owner=1 b7 dist=1324 cam=0.96 aim=neutral(None) chip150=0 soleEvent=True
+  f=22720 owner=1 b6 dist=1322 cam=1.0 aim=neutral(None) chip150=0 soleEvent=True
+owner 0: 15 completions, 8 at 1600-1900, 3 sole-event chips, 15 HP
+owner 1: 6 completions, 0 at 1600-1900, 0 sole-event chips, 0 HP
+
+host: minHp=1 downed=0 revived=0 coop_revive=5 coop_hold_begin=0 stuck=1
+  thorn_reflect rows 0 (still 0); distances []; facing []
+  counters None
+
+friend: minHp=6 downed=0 revived=0 coop_revive=5 coop_hold_begin=5 stuck=1
+  thorn_reflect rows 0 (still 0); distances []; facing []
+  counters None
+seat 0 item_slots first None (thorn_00_samples.json) last None (thorn_04_samples.json); potion_stock None->None
+seat 1 item_slots first None (thorn_00_samples.json) last None (thorn_04_samples.json); potion_stock None->None
+clips: 
+all runs: 202: 134s lost 25 (host 25, friend 0) = 0.19/s | interlude: 50s lost 0 (host 0, friend 0) = 0.00/s
+   pc1-ac5280e: 202   74s lost  62 | host 432 34 (19 in band): 6 drops 37 HP | friend 432: 0 drops  0 HP | min HP 175
+   bld-ac5280e: 202  134s lost  25 | host 432 15 ( 8 in band): 2 drops 10 HP | friend 432: 0 drops  0 HP | min HP 207

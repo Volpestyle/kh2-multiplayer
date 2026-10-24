@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "bld-evidence/assets.json",
+      "size": 97741,
+      "sha256": "5af325760e8d9f5e8e77313c33408d6b6a140d81103323e537a4033aa3579c49",
+      "url": "clankie://evidence/sha256/5af325760e8d9f5e8e77313c33408d6b6a140d81103323e537a4033aa3579c49"
+    },
+    {
+      "path": "bld-evidence/install-after-verify-20261024T050008Z.json",
+      "size": 96940,
+      "sha256": "9fae2a3f232b6503fd660fe0d5cbfb012f4e55a9150d501fc9b3f9128705ddf5",
+      "url": "clankie://evidence/sha256/9fae2a3f232b6503fd660fe0d5cbfb012f4e55a9150d501fc9b3f9128705ddf5"
+    },
+    {
+      "path": "bld-evidence/install-after.json",
+      "size": 96940,
+      "sha256": "cb7d7bf04635d22210a24621bd82099257d5ecd15f66accf4833ef9b04374aad",
+      "url": "clankie://evidence/sha256/cb7d7bf04635d22210a24621bd82099257d5ecd15f66accf4833ef9b04374aad"
+    },
+    {
+      "path": "bld-evidence/install-before.json",
+      "size": 96940,
+      "sha256": "f5b6ada45580ebf50f85b9338942091cda8dff94a6905a3c4d5daaa47506f4b9",
+      "url": "clankie://evidence/sha256/f5b6ada45580ebf50f85b9338942091cda8dff94a6905a3c4d5daaa47506f4b9"
+    },
+    {
+      "path": "bld-run/friend_thorn/pilot.jsonl",
+      "size": 447388,
+      "sha256": "c04dbd6c9afeb2efce95726d07a515c74c75c319ee4c6d78a60aacf313ed6fc1",
+      "url": "clankie://evidence/sha256/c04dbd6c9afeb2efce95726d07a515c74c75c319ee4c6d78a60aacf313ed6fc1"
+    },
+    {
+      "path": "bld-run/host_thorn/pilot.jsonl",
+      "size": 321394,
+      "sha256": "2bb689fa6366ccffaa510335cd0c94c5c20137881c10f64d50a22f84c14b51dc",
+      "url": "clankie://evidence/sha256/2bb689fa6366ccffaa510335cd0c94c5c20137881c10f64d50a22f84c14b51dc"
+    },
+    {
+      "path": "bld-run/kh2coop_inject_15284.log",
+      "size": 1793820,
+      "sha256": "1166152e177eedd49017d77ccab20c8e8a8a48b826a8585716abc1e304f55128",
+      "url": "clankie://evidence/sha256/1166152e177eedd49017d77ccab20c8e8a8a48b826a8585716abc1e304f55128"
+    },
+    {
+      "path": "bld-run/kh2coop_inject_9100.log",
+      "size": 2027963,
+      "sha256": "0d153fb90d6fa2860597489c6271fd066720ea7976ced2885c9e546e90e8fdb0",
+      "url": "clankie://evidence/sha256/0d153fb90d6fa2860597489c6271fd066720ea7976ced2885c9e546e90e8fdb0"
+    },
+    {
+      "path": "bld-run/relay.log",
+      "size": 57189,
+      "sha256": "de04ab6a0c834f74188817371c61193cc3ed82277861f6c65cd568fdda06e721",
+      "url": "clankie://evidence/sha256/de04ab6a0c834f74188817371c61193cc3ed82277861f6c65cd568fdda06e721"
+    }
+  ]
+}

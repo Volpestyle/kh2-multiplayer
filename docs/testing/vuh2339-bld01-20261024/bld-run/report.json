@@ -1,0 +1,559 @@
+{
+  "scenario": "net_twilight_thorn_bots",
+  "file": ".local\\bot01-replay\\net_twilight_thorn_bots.json",
+  "attempt": 1,
+  "started": "2026-10-23T23:44:45",
+  "status": "fail",
+  "steps": [
+    {
+      "index": 0,
+      "do": "boot",
+      "status": "pass",
+      "result": {
+        "processId": 15284,
+        "instance": 0,
+        "world": 2,
+        "room": 32
+      },
+      "seconds": 47.47
+    },
+    {
+      "index": 1,
+      "do": "boot",
+      "status": "pass",
+      "result": {
+        "processId": 9100,
+        "instance": 1,
+        "world": 2,
+        "room": 32
+      },
+      "seconds": 46.73
+    },
+    {
+      "index": 2,
+      "do": "assert",
+      "status": "pass",
+      "result": {
+        "value": "True"
+      },
+      "seconds": 0.02
+    },
+    {
+      "index": 3,
+      "do": "assert",
+      "status": "pass",
+      "result": {
+        "value": "True"
+      },
+      "seconds": 0.03
+    },
+    {
+      "index": 4,
+      "do": "assert",
+      "status": "pass",
+      "result": {
+        "value": "True"
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 5,
+      "do": "relay",
+      "status": "pass",
+      "result": {
+        "pid": 9540,
+        "port": "27809"
+      },
+      "seconds": 1.03
+    },
+    {
+      "index": 6,
+      "do": "runtime",
+      "status": "pass",
+      "result": {
+        "pid": 22224,
+        "role": "player",
+        "link": {}
+      },
+      "seconds": 0.53
+    },
+    {
+      "index": 7,
+      "do": "runtime",
+      "status": "pass",
+      "result": {
+        "pid": 12216,
+        "role": "friend1",
+        "link": {}
+      },
+      "seconds": 0.52
+    },
+    {
+      "index": 8,
+      "do": "wait_until",
+      "status": "pass",
+      "result": {},
+      "seconds": 0.52
+    },
+    {
+      "index": 9,
+      "do": "hang_check",
+      "status": "pass",
+      "result": {},
+      "seconds": 0.0
+    },
+    {
+      "index": 10,
+      "do": "hang_check",
+      "status": "pass",
+      "result": {},
+      "seconds": 0.0
+    },
+    {
+      "index": 11,
+      "do": "save",
+      "status": "pass",
+      "result": {
+        "evidence_scope": "{'topology': 'single-PC loopback, two native seats', 'input': 'pad mailbox; no OS focus', 'boot': 'FM-00 rehearsal, not New Game acceptance', 'clips': '30-second two-screen blocks; encoding gaps are not continuous footage', 'caption_work': 'Burn in HOST / FRIEND and Single-PC loopback labels during final assembly; retain raw blocks', 'watchdog': 'gameplay hang checks off across native event holds; all steps have fixed deadlines', 'reaction_observation': 'Live08: existing read-only v7 promptHide from product-qualified actionable RC; raw cached RC remains diagnostic; routes/reach/timing/strategy unchanged'}"
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 12,
+      "do": "pilot",
+      "status": "pass",
+      "result": {
+        "exit": 0
+      },
+      "seconds": 9.11
+    },
+    {
+      "index": 13,
+      "do": "wait_until",
+      "status": "pass",
+      "result": {},
+      "seconds": 0.06
+    },
+    {
+      "index": 14,
+      "do": "save",
+      "status": "pass",
+      "result": {
+        "calling_deaths_before": "0"
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 15,
+      "do": "pilot",
+      "status": "pass",
+      "result": {
+        "background": true
+      },
+      "seconds": 0.01
+    },
+    {
+      "index": 16,
+      "do": "pilot",
+      "status": "pass",
+      "result": {
+        "background": true
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 17,
+      "do": "pilot_wait",
+      "status": "pass",
+      "result": {
+        "host_calling_path": {
+          "exit": 0
+        },
+        "friend_calling_path": {
+          "exit": 0
+        }
+      },
+      "seconds": 133.22
+    },
+    {
+      "index": 18,
+      "do": "assert",
+      "status": "pass",
+      "result": {
+        "value": "True"
+      },
+      "seconds": 0.06
+    },
+    {
+      "index": 19,
+      "do": "pilot",
+      "status": "pass",
+      "result": {
+        "exit": 0
+      },
+      "seconds": 14.08
+    },
+    {
+      "index": 20,
+      "do": "pilot",
+      "status": "pass",
+      "result": {
+        "exit": 0
+      },
+      "seconds": 14.11
+    },
+    {
+      "index": 21,
+      "do": "assert",
+      "status": "pass",
+      "result": {
+        "value": "True"
+      },
+      "seconds": 0.03
+    },
+    {
+      "index": 22,
+      "do": "pilot",
+      "status": "pass",
+      "result": {
+        "exit": 0
+      },
+      "seconds": 2.11
+    },
+    {
+      "index": 23,
+      "do": "wait_until",
+      "status": "pass",
+      "result": {},
+      "seconds": 47.5
+    },
+    {
+      "index": 24,
+      "do": "save",
+      "status": "pass",
+      "result": {
+        "thorn_ingress": "[{'location': [2, 34, 0, 157, 157, 157], 'mission': {'name': 'msn/us/TT34_MS304.bar', 'file': 'TT34_MS304.bar', 'flags': 1, 'result': 0, 'gauges': [{'flags': 1, 'max': 0, 'value': 0}, {'flags': 1, 'max': 0, 'value': 0}, {'flags': 1, 'max': 0, 'value': 0}], 'counters': [{'flags': 1, 'max': 0, 'value': 0}, {'flags': 1, 'max': 0, 'value': 0}, {'flags': 1, 'max': 0, 'value': 0}], 'timer': {'value': 0, 'state': 0, 'mode': 0}}, 'boss': [{'address': '0x7FF7EF0DFD10', 'name': 'B_EX100', 'objectId': 307, 'objectType': 12, 'team': 2, 'moveState': 8, 'motionId': 0, 'rotationY': 3.14159, 'motionTime': 34, 'flags': 0, 'modelFlags': 0, 'handler': 140702813071376, 'handlerVtableRva': 6105176, 'updateRva': 4298576, 'status': '0x7FF7EF5E30A8', 'hp': 390, 'maxHp': 390, 'position': {'x': 0, 'y': 0, 'z': 800}}], 'player': [{'address': '0x7FF7EF108130', 'name': 'P_EX110', 'objectId': 90, 'objectType': 0, 'team': 1, 'moveState': 2, 'motionId': 0, 'rotationY': -2.38419e-07, 'motionTime': 159, 'flags': 1048576, 'modelFlags': 0, 'handler': 140702813061888, 'handlerVtableRva': 6076968, 'updateRva': 4213312, 'status': '0x7FF7EF5E3320', 'hp': 20, 'maxHp': 20, 'position': {'x': -37.5, 'y': 0, 'z': -860}}]}, {'location': [2, 34, 0, 157, 157, 157], 'mission': {'name': 'msn/us/TT34_MS304.bar', 'file': 'TT34_MS304.bar', 'flags': 0, 'result': 0, 'gauges': [{'flags': 1, 'max': 0, 'value': 0}, {'flags': 1, 'max': 0, 'value': 0}, {'flags': 1, 'max': 0, 'value': 0}], 'counters': [{'flags': 1, 'max': 0, 'value': 0}, {'flags': 1, 'max': 0, 'value': 0}, {'flags': 1, 'max': 0, 'value': 0}], 'timer': {'value': 0, 'state': 0, 'mode': 0}}, 'boss': [{'address': '0x7FF7EF0DFD10', 'name': 'B_EX100', 'objectId': 307, 'objectType': 12, 'team': 2, 'moveState': 8, 'motionId': 0, 'rotationY': 3.14159, 'motionTime': 50, 'flags': 0, 'modelFlags': 0, 'handler': 140702813071376, 'handlerVtableRva': 6105176, 'updateRva': 4298576, 'status': '0x7FF7EF5E30A8', 'hp': 300, 'maxHp': 300, 'position': {'x': 0, 'y': 0, 'z': 800}}], 'player': [{'address': '0x7FF7EF108130', 'name': 'P_EX110', 'objectId': 90, 'objectType': 0, 'team': 1, 'moveState': 2, 'motionId': 0, 'rotationY': -2.38419e-07, 'motionTime': 26, 'flags': 1048576, 'modelFlags': 0, 'handler': 140702813061888, 'handlerVtableRva': 6076968, 'updateRva': 4213312, 'status': '0x7FF7EF5E3320', 'hp': 20, 'maxHp': 20, 'position': {'x': -107.5, 'y': 0, 'z': -860}}]}]"
+      },
+      "seconds": 0.5
+    },
+    {
+      "index": 25,
+      "do": "assert",
+      "status": "pass",
+      "result": {
+        "value": "True"
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 26,
+      "do": "wait_until",
+      "status": "pass",
+      "result": {},
+      "seconds": 5.44
+    },
+    {
+      "index": 27,
+      "do": "save",
+      "status": "pass",
+      "result": {
+        "thorn_baseline": "{'host_end': 0, 'friend_end': 0, 'victory_start': 0, 'claims': 39, 'downs': [0, 0], 'revives': [0, 0]}"
+      },
+      "seconds": 0.06
+    },
+    {
+      "index": 28,
+      "do": "clip",
+      "status": "pass",
+      "result": {
+        "path": "thorn_00_host_0.mp4",
+        "background": true
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 29,
+      "do": "clip",
+      "status": "pass",
+      "result": {
+        "path": "thorn_00_friend_1.mp4",
+        "background": true
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 30,
+      "do": "pilot",
+      "status": "pass",
+      "result": {
+        "background": true
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 31,
+      "do": "pilot",
+      "status": "pass",
+      "result": {
+        "background": true
+      },
+      "seconds": 0.01
+    },
+    {
+      "index": 32,
+      "do": "fight",
+      "status": "pass",
+      "result": {},
+      "seconds": 34.53
+    },
+    {
+      "index": 33,
+      "do": "clip_wait",
+      "status": "pass",
+      "result": {
+        "clips": [
+          {
+            "path": "thorn_00_host_0.mp4",
+            "ok": true,
+            "error": null
+          },
+          {
+            "path": "thorn_00_friend_1.mp4",
+            "ok": true,
+            "error": null
+          }
+        ]
+      },
+      "seconds": 28.89
+    },
+    {
+      "index": 34,
+      "do": "assert",
+      "status": "pass",
+      "result": {
+        "value": "True"
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 35,
+      "do": "fight",
+      "status": "pass",
+      "result": {
+        "clips": [
+          {
+            "path": "thorn_01_host_0.mp4",
+            "ok": true,
+            "error": null
+          },
+          {
+            "path": "thorn_01_friend_1.mp4",
+            "ok": true,
+            "error": null
+          }
+        ]
+      },
+      "seconds": 61.05
+    },
+    {
+      "index": 36,
+      "do": "assert",
+      "status": "pass",
+      "result": {
+        "value": "True"
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 37,
+      "do": "fight",
+      "status": "pass",
+      "result": {
+        "clips": [
+          {
+            "path": "thorn_02_host_0.mp4",
+            "ok": true,
+            "error": null
+          },
+          {
+            "path": "thorn_02_friend_1.mp4",
+            "ok": true,
+            "error": null
+          }
+        ]
+      },
+      "seconds": 62.72
+    },
+    {
+      "index": 38,
+      "do": "assert",
+      "status": "pass",
+      "result": {
+        "value": "True"
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 39,
+      "do": "fight",
+      "status": "pass",
+      "result": {
+        "clips": [
+          {
+            "path": "thorn_03_host_0.mp4",
+            "ok": true,
+            "error": null
+          },
+          {
+            "path": "thorn_03_friend_1.mp4",
+            "ok": true,
+            "error": null
+          }
+        ]
+      },
+      "seconds": 56.23
+    },
+    {
+      "index": 40,
+      "do": "assert",
+      "status": "pass",
+      "result": {
+        "value": "True"
+      },
+      "seconds": 0.0
+    },
+    {
+      "index": 41,
+      "do": "fight",
+      "status": "pass",
+      "result": {
+        "clips": [
+          {
+            "path": "thorn_04_host_0.mp4",
+            "ok": true,
+            "error": null
+          },
+          {
+            "path": "thorn_04_friend_1.mp4",
+            "ok": true,
+            "error": null
+          }
+        ]
+      },
+      "seconds": 60.23
+    },
+    {
+      "index": 42,
+      "do": "assert",
+      "status": "fail",
+      "error": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block.",
+      "seconds": 0.0
+    }
+  ],
+  "artifacts": [
+    "save_list_0.png",
+    "save_list_1.png",
+    "relay.log",
+    "runtime_0.log",
+    "runtime_1.log",
+    "host_to_calling.log",
+    "host_to_calling/doors.json",
+    "host_to_calling/modules.json",
+    "host_to_calling/pilot.jsonl",
+    "host_calling_path.log",
+    "friend_calling_path.log",
+    "host_calling_path/doors.json",
+    "host_calling_path/modules.json",
+    "host_calling_path/pilot.jsonl",
+    "friend_calling_path/doors.json",
+    "friend_calling_path/modules.json",
+    "friend_calling_path/pilot.jsonl",
+    "host_menu_tutorial.log",
+    "host_menu_tutorial/doors.json",
+    "host_menu_tutorial/menu_after_pages.png",
+    "host_menu_tutorial/menu_closed.png",
+    "host_menu_tutorial/menu_open.png",
+    "host_menu_tutorial/modules.json",
+    "host_menu_tutorial/pilot.jsonl",
+    "friend_menu_tutorial.log",
+    "friend_menu_tutorial/doors.json",
+    "friend_menu_tutorial/menu_after_pages.png",
+    "friend_menu_tutorial/menu_closed.png",
+    "friend_menu_tutorial/menu_open.png",
+    "friend_menu_tutorial/modules.json",
+    "friend_menu_tutorial/pilot.jsonl",
+    "host_to_awakening.log",
+    "host_to_awakening/doors.json",
+    "host_to_awakening/modules.json",
+    "host_to_awakening/pilot.jsonl",
+    "host_thorn.log",
+    "friend_thorn.log",
+    "thorn_00_samples.json",
+    "thorn_00_host_0.mp4",
+    "thorn_00_friend_1.mp4",
+    "thorn_01_samples.json",
+    "thorn_01_host_0.mp4",
+    "thorn_01_friend_1.mp4",
+    "thorn_02_samples.json",
+    "thorn_02_host_0.mp4",
+    "thorn_02_friend_1.mp4",
+    "thorn_03_samples.json",
+    "thorn_03_host_0.mp4",
+    "thorn_03_friend_1.mp4",
+    "thorn_04_samples.json",
+    "thorn_04_host_0.mp4",
+    "thorn_04_friend_1.mp4",
+    "desync-reports",
+    "desync-reports/88d9fe35e873bbecb786add21881523d/1",
+    "desync-reports/88d9fe35e873bbecb786add21881523d/2"
+  ],
+  "playerEnv": {
+    "KH2COOP_ENEMY_MIRROR": "1",
+    "KH2COOP_ENEMY_POPULATION": "1",
+    "KH2COOP_ENEMY_TARGET_ALL": "1",
+    "KH2COOP_COOP_DIFFICULTY": "normal",
+    "KH2COOP_FRIENDLY_FIRE": "1",
+    "KH2COOP_EVENT_HOLD_PRODUCER": "1",
+    "KH2COOP_EVENT_HOLD_CONTROL": "1",
+    "KH2COOP_DOWNED_SPIKE": "1",
+    "KH2COOP_REVIVE_PROMPT": "1",
+    "KH2COOP_ENEMY_POPULATION_SPAWN": "0",
+    "KH2COOP_ENEMY_TARGET_REMOTE": "0",
+    "KH2COOP_ORDINARY_LIFECYCLE_EXPERIMENTAL": "0",
+    "KH2COOP_REVIVE_POLICY": "beginner"
+  },
+  "error": "step 42 (assert): An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block.",
+  "desyncCollection": {
+    "collectionStatus": "partial",
+    "reports": [
+      {
+        "manifest": "desync-reports/88d9fe35e873bbecb786add21881523d/1/manifest.json",
+        "directory": "desync-reports/88d9fe35e873bbecb786add21881523d/1",
+        "collectionStatus": "partial",
+        "reportedStatus": "partial",
+        "key": {
+          "sessionId": "88d9fe35e873bbecb786add21881523d",
+          "reportId": 1
+        }
+      },
+      {
+        "manifest": "desync-reports/88d9fe35e873bbecb786add21881523d/2/manifest.json",
+        "directory": "desync-reports/88d9fe35e873bbecb786add21881523d/2",
+        "collectionStatus": "partial",
+        "reportedStatus": "partial",
+        "key": {
+          "sessionId": "88d9fe35e873bbecb786add21881523d",
+          "reportId": 2
+        }
+      }
+    ],
+    "suppressionSummaries": [],
+    "errors": [],
+    "filesystemEvidence": "present"
+  },
+  "seconds": 627.4,
+  "instances": [
+    15284,
+    9100
+  ]
+}

@@ -1,0 +1,16 @@
+﻿{
+    "machine":  "BLD",
+    "topology":  "single-PC loopback",
+    "safetyPassed":  true,
+    "finishedUtc":  "2026-10-24T04:57:36.9341934Z",
+    "notes":  [
+
+              ],
+    "report":  "C:\\kh2rig\\wt\\build\\scenarios\\20261023-234445_net_twilight_thorn_bots_1",
+    "commit":  "ac5280e1ac5a96cd151a7923a304a030b3855d29",
+    "relayPortFree":  true,
+    "safetyFailure":  null,
+    "savesUnchanged":  true,
+    "status":  "fail",
+    "installDiffExit":  0
+}
