@@ -47,6 +47,11 @@ PC1. The VC++ runtime (14.51.36247) matches too.
    `live.ps1` records that as a note when the file lists and sizes are unchanged and the sha256 diff
    matched. Any content change stops further runs.
 
+   **Run without clips on bld.** Two KH2 instances recording 30 fps clips during a fight drop bld (RTX 3080)
+   to 17–40 fps, and the replay scores in the weak band (bld01: 0.19 HP/s). With clips removed it holds
+   60 fps and matches PC1's strong band (bld02: 1.10 HP/s and a kill; `docs/testing/vuh2339-bld02-noclip-20261024/`).
+   Pass a scenario without `clip`/`clip_wait` steps or fight `clips`, with `-Scenario` and `-Report`.
+
 5. **After a reclaim.** The gate killed `live.ps1` before its closing checks and wrote
    `C:\desk\gate\needs-verify.json`, so launches are refused. Over SSH, run
    `powershell -File C:/kh2rig/ops/verify-after.ps1 -Attempt <name>`. It repeats the closing checks against
