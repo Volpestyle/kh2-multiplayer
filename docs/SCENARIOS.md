@@ -1802,6 +1802,18 @@ Three layers:
   - **Why redirect rather than deny:** the save writer doesn't check
     `_wfopen_s` for NULL before libpng, so a denied open would likely crash
     the game mid-save (repos-60's static read).
+  - **Installed `KH2ReSource` assets are guarded the same way (VUH-2775).**
+    The game's cipher movies (`Axa::CCipherMovie`, native `0x13DA10`) decrypt
+    their first 256 bytes in place before Media Foundation opens them, and a
+    restore thread (`0x13EDC0`) writes the encrypted header back after
+    playback, retrying every second until it can open the file. A game killed
+    mid-movie left `me4.mp4` decrypted (VUH-2763). Write opens there go to
+    `save_sandbox_<pid>/install-assets/<path below KH2ReSource>`, a full copy
+    of the original (about 63 MB for a post-boss movie), and the movie plays
+    from that copy. At install, the guard removes the `install-assets` trees
+    of older sandboxes in the same log directory, keeping the newest six
+    (about three two-instance runs) and any whose process is still running.
+    Saved files in those sandboxes stay.
   - **Everything else is denied:** copies (`CopyFileA/W/ExW/2`), moves
     (`MoveFileExA/W`, `MoveFileWithProgressW`), `ReplaceFileW`, deletes
     (`DeleteFileA/W`) and `RemoveDirectoryA/W`. Copy goes to NtCreateFile

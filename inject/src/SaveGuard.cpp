@@ -7,6 +7,13 @@
 // to NtCreateFile without passing CreateFileW, so copies are hooked by name.
 // A path is guarded when, case-insensitively, its full path contains the
 // save folder name below; both slash styles are accepted.
+//
+// Installed KH2ReSource assets are guarded the same way (VUH-2775). The
+// native cipher movie (Axa::CCipherMovie, 0x13DA10) decrypts a movie's first
+// 256 bytes in place before Media Foundation opens it, and a restore thread
+// (0x13EDC0) writes the encrypted header back after playback. A read-only
+// open would skip the decrypt and the restore would retry forever, so the
+// redirect below gives the game a sandbox copy to decrypt and play instead.
 // ============================================================================
 
 #include "SaveGuard.hpp"
@@ -15,11 +22,14 @@
 #include <Windows.h>
 #include <MinHook.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cwchar>
 #include <cstdio>
 #include <cstring>
 #include <cwctype>
+#include <string>
+#include <vector>
 
 namespace kh2coop {
 namespace inject {
@@ -27,6 +37,10 @@ namespace saveguard {
 namespace {
 
 constexpr wchar_t kSaveFolder[] = L"my games\\kingdom hearts hd 1.5+2.5 remix";
+// Installed asset root; its sandbox twins live under kAssetTwins, a name that
+// is itself unguarded.
+constexpr wchar_t kAssetFolder[] = L"\\kh2resource\\";
+constexpr wchar_t kAssetTwins[] = L"\\install-assets\\";
 
 LogFn g_log = nullptr;
 std::atomic<std::uint32_t> g_blocked {0};
@@ -82,7 +96,7 @@ bool IsGuardedPath(LPCWSTR path) {
         wcsncpy_s(full, path, _TRUNCATE);
     }
     Lower(full);
-    return std::wcsstr(full, kSaveFolder) != nullptr ||
+    return std::wcsstr(full, kSaveFolder) != nullptr || std::wcsstr(full, kAssetFolder) != nullptr ||
            (g_testDir[0] && std::wcsstr(full, g_testDir) == full);
 }
 
@@ -125,16 +139,24 @@ wchar_t g_sandbox[MAX_PATH] = {};
 std::atomic<std::uint32_t> g_redirected {0};
 
 // Full path of `path` and the offset where its part below the guarded root
-// starts (the root is the save folder or the self-test directory).
-bool GuardedTail(LPCWSTR path, wchar_t (&full)[1024], size_t& tail) {
+// starts (the root is the save folder, an installed asset root or the
+// self-test directory). `asset` is set for an installed asset, whose tail
+// starts after the root's trailing backslash.
+bool GuardedTail(LPCWSTR path, wchar_t (&full)[1024], size_t& tail, bool& asset) {
     if (!path) return false;
     const DWORD n = GetFullPathNameW(path, 1024, full, nullptr);
     if (n == 0 || n >= 1024) return false;
     wchar_t lowered[1024];
     wcscpy_s(lowered, full);
     Lower(lowered);
+    asset = false;
     if (const wchar_t* hit = std::wcsstr(lowered, kSaveFolder)) {
         tail = (hit - lowered) + (sizeof(kSaveFolder) / sizeof(wchar_t) - 1);
+        return true;
+    }
+    if (const wchar_t* hit = std::wcsstr(lowered, kAssetFolder)) {
+        tail = (hit - lowered) + (sizeof(kAssetFolder) / sizeof(wchar_t) - 1);
+        asset = true;
         return true;
     }
     if (g_testDir[0] && std::wcsstr(lowered, g_testDir) == lowered) {
@@ -144,12 +166,15 @@ bool GuardedTail(LPCWSTR path, wchar_t (&full)[1024], size_t& tail) {
     return false;
 }
 
-// Sandbox twin of a guarded path, with its parent directories created.
-bool SandboxTwin(LPCWSTR path, wchar_t (&twin)[1024]) {
+// Sandbox twin of a guarded path. Its parent directories are created only
+// for a write, so reads of unredirected assets leave the sandbox alone.
+bool SandboxTwin(LPCWSTR path, wchar_t (&twin)[1024], bool create) {
     wchar_t full[1024];
     size_t tail = 0;
-    if (!g_sandbox[0] || !GuardedTail(path, full, tail)) return false;
-    if (swprintf_s(twin, L"%s%s", g_sandbox, full + tail) < 0) return false;
+    bool asset = false;
+    if (!g_sandbox[0] || !GuardedTail(path, full, tail, asset)) return false;
+    if (swprintf_s(twin, L"%s%s%s", g_sandbox, asset ? kAssetTwins : L"", full + tail) < 0) return false;
+    if (!create) return true;
     for (wchar_t* p = twin + std::wcslen(g_sandbox) + 1; *p; ++p) {
         if (*p == L'\\' || *p == L'/') {
             const wchar_t keep = *p;
@@ -163,6 +188,86 @@ bool SandboxTwin(LPCWSTR path, wchar_t (&twin)[1024]) {
 
 bool Exists(LPCWSTR path) {
     return GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
+}
+
+// ---- Asset twin cleanup ---------------------------------------------------
+// A post-boss movie twin is ~63 MB and every instance has its own sandbox, so
+// at install the install-assets trees of older sandboxes in the same log
+// directory are removed. The newest kKeptAssetSandboxes (about three
+// two-instance runs) and any whose process is still running are kept. Only
+// "<dir>\save_sandbox_<digits>\install-assets" trees are ever touched; saved
+// files beside them stay.
+constexpr size_t kKeptAssetSandboxes = 6;
+
+void RemoveTree(const std::wstring& dir) {
+    WIN32_FIND_DATAW found {};
+    HANDLE find = FindFirstFileW((dir + L"\\*").c_str(), &found);
+    if (find != INVALID_HANDLE_VALUE) {
+        do {
+            const std::wstring name = found.cFileName;
+            if (name == L"." || name == L"..") continue;
+            const std::wstring child = dir + L"\\" + name;
+            if (found.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                if (!RemoveDirectoryW(child.c_str())) DeleteFileW(child.c_str());  // never follow a link
+            } else if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                RemoveTree(child);
+            } else {
+                SetFileAttributesW(child.c_str(), FILE_ATTRIBUTE_NORMAL);
+                DeleteFileW(child.c_str());
+            }
+        } while (FindNextFileW(find, &found));
+        FindClose(find);
+    }
+    RemoveDirectoryW(dir.c_str());
+}
+
+bool ProcessRunning(DWORD pid) {
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (!process) return GetLastError() == ERROR_ACCESS_DENIED;  // exists but not ours: keep it
+    const bool running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+    CloseHandle(process);
+    return running;
+}
+
+void PruneAssetTwins(const wchar_t* sandbox) {
+    const wchar_t* slash = std::wcsrchr(sandbox, L'\\');
+    if (!slash) return;
+    const std::wstring parent(sandbox, slash);
+    struct Old { FILETIME written; DWORD pid; std::wstring assets; };
+    std::vector<Old> olds;
+    WIN32_FIND_DATAW found {};
+    HANDLE find = FindFirstFileW((parent + L"\\save_sandbox_*").c_str(), &found);
+    if (find == INVALID_HANDLE_VALUE) return;
+    do {
+        const std::wstring name = found.cFileName;
+        const std::wstring digits = name.substr(std::wcslen(L"save_sandbox_"));
+        if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+            (found.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) || digits.empty() ||
+            digits.find_first_not_of(L"0123456789") != std::wstring::npos || digits.size() > 10) continue;
+        const std::wstring dir = parent + L"\\" + name;
+        if (_wcsicmp(dir.c_str(), sandbox) == 0) continue;
+        const std::wstring assets = dir + kAssetTwins;
+        WIN32_FILE_ATTRIBUTE_DATA info {};
+        if (!GetFileAttributesExW(assets.substr(0, assets.size() - 1).c_str(), GetFileExInfoStandard, &info) ||
+            !(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+            (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
+        olds.push_back({found.ftLastWriteTime, static_cast<DWORD>(std::wcstoul(digits.c_str(), nullptr, 10)),
+                        assets.substr(0, assets.size() - 1)});
+    } while (FindNextFileW(find, &found));
+    FindClose(find);
+    std::sort(olds.begin(), olds.end(), [](const Old& a, const Old& b) {
+        return CompareFileTime(&a.written, &b.written) > 0;  // newest first
+    });
+    std::uint32_t pruned = 0;
+    for (size_t i = kKeptAssetSandboxes; i < olds.size(); ++i) {
+        if (ProcessRunning(olds[i].pid)) continue;
+        RemoveTree(olds[i].assets);
+        ++pruned;
+    }
+    if (g_log && pruned) {
+        g_log("[saveguard] pruned install-assets twins of %u old sandboxes (kept newest %zu and running)",
+              pruned, kKeptAssetSandboxes);
+    }
 }
 
 void LogRedirect(const char* api, LPCWSTR from, LPCWSTR to) {
@@ -182,7 +287,7 @@ bool RouteOpen(const char* api, LPCWSTR path, DWORD access, DWORD disposition,
     twin[0] = L'\0';
     if (!IsGuardedPath(path)) return false;
     const bool write = IsWriteOpen(access, disposition);
-    if (!SandboxTwin(path, twin)) {
+    if (!SandboxTwin(path, twin, write)) {
         if (write) Deny(api, path);  // no sandbox: fail closed
         return write;
     }
@@ -487,6 +592,7 @@ bool Install(LogFn log) {
             g_sandbox[0] = L'\0';  // no sandbox: write opens fail closed
         }
     }
+    if (g_sandbox[0]) PruneAssetTwins(g_sandbox);
     bool ok = true;
     ok &= HookApi(L"kernelbase", "CreateFileW", reinterpret_cast<void*>(&HookedCreateFileW), &g_createFileW);
     ok &= HookApi(L"kernelbase", "CreateFileA", reinterpret_cast<void*>(&HookedCreateFileA), &g_createFileA);
