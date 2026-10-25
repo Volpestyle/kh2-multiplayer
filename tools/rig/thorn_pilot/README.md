@@ -59,9 +59,42 @@ gate, the engagement bound and the cooldown are described in the review packet's
   - throwbacks still taken;
   - the rescuer's hits, with orb hits (1041/1014) called out.
 
+- **Result (zr112–114, lead #295).** No throwbacks were taken, but 0 kills in 3, and in the failed windows the rescuer
+  took the orb stream instead (6 orb hits each). Lead #302 dropped `rescueNoReversal` from the batch config.
+
+## Waiting out the orb volley while rescuing (lead #302)
+
+`thorn_orbhold.py` sits over `thorn_creeper.py` (not over `thorn_rescue.py`) and is run with `run_orbhold.py` and the
+`_creeper_orbhold` scenario.
+
+- **Why.** Thorn's motion 202 winds up for ~340 frames, then loops a firing segment for up to ~30 s (median ~1805
+  frames). Every orb hit in zr98–114 landed in that loop. Seats 1250+ from Thorn's root took ~0.36 orb hits per second
+  there, against ~0.16 inside 1250. Lost revive windows were the ones spent in the loop with the downed partner far from
+  Thorn: a median firing share of 1.0 with the partner 1584 away, against 0.18 and 1114 for recovered windows. A revive
+  hold needs ~1.3 s, and occurrences are ~16 s apart.
+- **What.** It's opt-in per fight step: `"rescueOrbHold": {"far": 1250, "hold": 1000, "finish": 300, "maxWaitSec": 30}`,
+  on both seats' `_orbhold` routes. The rescuer holds off when all of these are true:
+  - the partner is logically downed and this seat isn't;
+  - Thorn (the existing head observation, reused for 0.25 s) is in 202;
+  - the partner is `far` or more from Thorn's root;
+  - this seat is more than `finish` from the partner.
+
+  While held off, the rescuer moves toward Thorn until within `hold` of the root, then stands. The approach resumes
+  when any of those stops being true, or after `maxWaitSec` held off in one revive window. These go to the revive core
+  unchanged: RCs, a started hold, a hold awaiting release, event reactions and any unknown head. The core's 60 s bound
+  and window marker start at the window's first tick, whoever handles it.
+- **Logs.**
+  - `coop_orb_hold` / `coop_orb_hold_end`, per episode, with the end reason: `released`, `cap`, `timeout`,
+    `peer-recovered` or `core`;
+  - `coop_orb_hold_sample`, every 0.5 s while held off;
+  - `rescue_orb_hold_summary`, per fight.
+- **Measures.** `orbhold_report.py RUN_DIR...`: per revive window, as `rescue_report.py` plus hold-offs. The hit span
+  includes held-off frames, which `rescue_report.py` would miss.
+
 ## Checks and analysis
 
-- `tests/test_thorn_creeper.py` and `tests/test_thorn_rescue.py`: offline controls (ctest `kh2coop_py_test_thorn_*`).
+- `tests/test_thorn_creeper.py`, `tests/test_thorn_rescue.py` and `tests/test_thorn_orbhold.py`: offline controls (ctest
+  `kh2coop_py_test_thorn_*`).
 - `creeper_report.py RUN_DIR...`: per run, the kill, Thorn's end HP, Creeper kills, atk-400 host downs, revive
   exposures and Creeper turns.
 - `downs_report.py RUN_DIR`: per down, the killing hit and what each seat was doing.
