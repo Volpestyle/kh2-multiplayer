@@ -61,7 +61,7 @@ Any other first line means `launch`, the default.
 | `kh2-running` | launch | Something is running from the KH2 install (the game or the official launcher), or an owned game is still up. |
 | `steam-account` | launch | Steam isn't running signed in as `steamAccountId`. The agent never starts Steam or signs anyone in. |
 | `lane-lock` | launch | One of the `laneLocks` files exists. |
-| `disk` | launch | Less than 10 GB is free on `C:`. |
+| `disk` | launch | Less than `minFreeGB` (default 10; PC1 20) is free on `C:`. A paired 30 s clip block needs ~14 GB of raw frames before it's encoded. |
 | `needs-verify` | launch | A launch job was reclaimed and its install and save checks haven't been redone. |
 | `gate-error` | both | A check threw an exception. The agent fails closed and logs the error. |
 

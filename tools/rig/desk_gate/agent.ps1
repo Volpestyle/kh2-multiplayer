@@ -35,6 +35,9 @@ $helperSweep = $config.helperSweep -ne $false
 # Seconds a foreign game or fullscreen app must persist before a running job is reclaimed. PC1 uses 10, so
 # desk-scenario.ps1's own 5 s reclaim stops the run first and its wrapper still runs the closing checks.
 $foreignReclaimSeconds = if ($config.foreignReclaimSeconds) { [int]$config.foreignReclaimSeconds } else { 3 }
+# Launch refuses below this many free GB on C:. A Thorn scenario's paired 30 s clip block holds ~14 GB of raw BMPs
+# until ffmpeg encodes them; on 2026-10-25 a launch admitted at 14 GB filled C: mid-fight (zr111). PC1 uses 20.
+$minFreeGB = if ($config.minFreeGB) { [double]$config.minFreeGB } else { 10 }
 
 function Log([string]$Text) { "$((Get-Date).ToUniversalTime().ToString('o')) $Text" | Out-File -Append -Encoding utf8 "$root\agent.log" }
 function Write-Json($Path, $Value) {
@@ -109,7 +112,7 @@ function Get-Refusals([string]$Level) {
       if (-not $steamUp -or ([int64]$steam.ActiveUser -band 0xFFFFFFFF) -ne [int64]$config.steamAccountId) { $why += 'steam-account' }
       foreach ($lock in $config.laneLocks) { if (Test-Path -LiteralPath (Expand $lock)) { $why += 'lane-lock'; break } }
       if (Test-Path -LiteralPath $verifyPath) { $why += 'needs-verify' }
-      if ((Get-PSDrive C).Free -lt 10GB) { $why += 'disk' }
+      if ((Get-PSDrive C).Free -lt $minFreeGB * 1GB) { $why += 'disk' }
     }
     $why
   } catch {

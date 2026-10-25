@@ -4,6 +4,7 @@
   "reclaimOnInput": false,
   "helperSweep": false,
   "foreignReclaimSeconds": 10,
+  "minFreeGB": 20,
   "requireUnlocked": true,
   "steamAccountId": 249968895,
   "gameDirectory": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\KINGDOM HEARTS -HD 1.5+2.5 ReMIX-",
