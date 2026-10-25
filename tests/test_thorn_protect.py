@@ -422,5 +422,24 @@ with tempfile.TemporaryDirectory() as d:
 check(w[0]["protected"] == {} and w[0]["rcTaken"] == 1 and w[0]["holdEnds"] == {"native-reaction": 1},
       "orbhold_report, protect off: the 432 taken and the hold it ended")
 
+# r5b (Sage, on r5): a protection on a revive window's first tick belongs to that window. The real core writes its
+# `coop_revive peer-logical-downed` marker during the tick, so the protected row must follow it.
+for react, at in ((432, Z119_AT), (667, NEAR)):
+    clock.now = 4000.0
+    p, c = setup(partner=Z119_PARTNER)
+    tick(p, c, own(at, react=react, obs=prompt(17700)))       # the window's first tick, RC already offered
+    kinds = p.kinds()
+    first = kinds.index("coop_revive") if "coop_revive" in kinds else None
+    check(first is not None and "coop_rc_protected" in kinds and first < kinds.index("coop_rc_protected"),
+          f"r5b: on the window's first tick the core's window marker precedes the protected {react}")
+    c.peer_log.downed = False
+    tick(p, c, own(at, obs=prompt(17710)))
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "friend_thorn").mkdir()
+        (Path(d) / "friend_thorn" / "pilot.jsonl").write_text(p.jsonl(), encoding="utf-8")
+        w = orbhold_report.windows(Path(d), "friend_thorn", [])
+    check(len(w) == 1 and w[0]["protected"] == {str(react): 1} and p.protect_stats["byCommand"] == {str(react): 1},
+          f"r5b: orbhold_report counts the first-tick protected {react} in its window")
+
 print(f"failures={failures}")
 sys.exit(1 if failures else 0)
