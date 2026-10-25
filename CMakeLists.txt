@@ -828,6 +828,14 @@ foreach(_kh2coop_target IN LISTS _kh2coop_targets)
         add_test(NAME ${_kh2coop_target} COMMAND ${_kh2coop_target})
     endif()
 endforeach()
+if(TARGET kh2coop_event_hold_input_test)
+    foreach(_event_mode off abort unowned elsewhere closing-315 closing-release closing-abort closing-scope
+                        closing-partial closing-unconverged closing-frozen closing-blocked closing-event
+                        closing-context closing-field closing-menu closing-foreign)
+        add_test(NAME kh2coop_event_hold_input_test_${_event_mode}
+                 COMMAND kh2coop_event_hold_input_test ${_event_mode})
+    endforeach()
+endif()
 if(TARGET kh2coop_resourcetrace_test)
     # Each retained-install failure boundary runs in its own process.
     foreach(_kh2coop_mode identity allocate register pin enable)

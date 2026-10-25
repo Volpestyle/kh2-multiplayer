@@ -225,6 +225,51 @@ int main(int argc,char** argv){
  n::Observe(scope,e::Kind::Transition,3,1,&room,0);n::OwnerAck(scope,1,true,true);
  check(runtime.Arm(GetTickCount64()),"test owner baseline arm");tick();
  e::Command acquire{};acquire.scope=scope;acquire.hostSourceSerial=8;acquire.kind=e::Kind::Acquire;acquire.epoch=1;acquire.eventProgram=1;
+ if(mode.starts_with("closing-")) {
+   // VUH-2807 zr100: death-camera Acquire, Release, then native 315 on the very next host frame.
+   // The real adapter/FIFO must finish its own pause close before consuming the checked start.
+   check(runtime.Publish(acquire,GetTickCount64()),"death-camera acquire published");tick();tick();menu=8;tick();
+   check(n::HoldingInput()&&buttons()==0,"death-camera pause is owned");
+   e::Command release{};release.scope=scope;release.kind=e::Kind::Release;release.hostSourceSerial=9;release.epoch=1;
+   check(runtime.Publish(release,GetTickCount64()),"death-camera release published");tick();
+   check(n::HoldingInput()&&buttons()==8,"release starts closing the owned combat pause");
+   // Exercise both points of the close, including a delayed native menu close.
+   if(mode!="closing-release")tick();
+   acquire.hostSourceSerial=10;acquire.eventProgram=157;acquire.startWorld=2;acquire.startRoom=34;
+   acquire.startId=0x353133;acquire.startFlags=0x12;
+   acquire.startParams={2,0xA5000002,0x00330033,0x33,1,0xFFFFFFFF,3,0,0};
+   check(runtime.Publish(acquire,GetTickCount64()),"315 acquire queued during pause close");
+   tick();tick();tick();
+   check(replays==0&&n::HoldingInput()&&buttons()==0,"315 never replays while the pause remains open");
+   menu=255;tick(); // Closing -> OwnerWait, from this callback's fresh sample.
+   check(replays==0,"the close-observation callback remains neutral");
+   if(mode=="closing-abort")runtime.Invalidate(e::Abort::HeartbeatExpired);
+   if(mode=="closing-scope") {auto wrong=acquire;wrong.scope.generation++;wrong.hostSourceSerial=11;
+     check(!runtime.Publish(wrong,GetTickCount64()),"changed scope aborts the queued lifetime");}
+   if(mode=="closing-partial")*reinterpret_cast<uintptr_t*>(base+offsets::INPUT_STRUCT_PTR)=0;
+   if(mode=="closing-unconverged")n::OwnerAck(scope,1,true,false);
+   if(mode=="closing-frozen")*reinterpret_cast<std::int32_t*>(base+offsets::CONTROLLABLE)=1;
+   if(mode=="closing-blocked")*reinterpret_cast<std::uint32_t*>(base+offsets::PAUSE_STATUS)=1;
+   if(mode=="closing-event")*reinterpret_cast<std::int32_t*>(base+offsets::CUTSCENE_STATE)=2;
+   if(mode=="closing-context")*reinterpret_cast<uintptr_t*>(base+offsets::EVENT_CONTEXT)=0x1234;
+   if(mode=="closing-field")*reinterpret_cast<std::uint8_t*>(base+offsets::IN_FIELD)=0;
+   if(mode=="closing-menu")menu=4;
+   if(mode=="closing-foreign") {gameThreadCurrent=false;check(!n::EnterInput(),"foreign callback rejected");gameThreadCurrent=true;}
+   const bool allowed=mode=="closing-315"||mode=="closing-release";
+   tick();
+   if(allowed)check(replays==1,"315 starts in the first callback after the close is observed");
+   tick();tick();
+   if(allowed) {
+     check(replays==1&&replayed.id==acquire.startId&&replayed.flags==acquire.startFlags&&
+           replayed.worldId==2&&replayed.roomId==34&&replayedProgram==157&&replayed.params==acquire.startParams,
+           "first eligible callback replays 315 once with the complete raw host descriptor");
+     check(!n::HoldingInput()&&buttons()==0x4d4d&&runtime.Reason()==e::Abort::None,
+           "315 supersedes the closed hold without another pause or a release timeout");
+   } else check(replays==0,"queued 315 retains every existing health, scope, affinity, convergence and native safety gate");
+   n::Disable();VirtualFree(memory,0,MEM_RELEASE);
+   std::printf("mode=%.*s checks=%u failures=%u\n",static_cast<int>(mode.size()),mode.data(),checks,failures);
+   return failures?1:0;
+ }
  if(mode=="unowned")menu=10;
  if(mode=="elsewhere")n::OwnerAck(scope,1,true,false);
  check(runtime.Publish(acquire,GetTickCount64()),"acquire published");tick();

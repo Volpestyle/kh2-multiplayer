@@ -279,8 +279,16 @@ bool ApplyInput(void* inputStruct) {
     native.value.safeToPause = native.inField && native.value.menu == 255 && native.eventState == 0 &&
         native.context == 0 && native.frozen == 0 && native.blockers == 0;
     eventhold::Command command {};
-    // One record per actual callback: never collapse an acquire into a release.
-    const auto result = channel.Read(native.value.now, command);
+    // VUH-2807: release and the next checked start (Thorn's 315) can be one host frame apart.
+    // Leave successors in the validated FIFO while our pause closes. Consuming an Acquire here
+    // would skip its replay (menu still 8/10, Holding true) and erase the prior release receipt.
+    // Tick still services the close below; after it observes menu 255, Supersede can retire the
+    // old OwnerWait and the ordinary fresh-sample replay gates apply. No cached start or relaxed
+    // safety predicate: expiry, scope/order checks and successor commands stay on the same FIFO.
+    const bool closingPause = input.OwnedPauseOpen() &&
+        (oldPhase == InputState::Phase::CloseRelease || oldPhase == InputState::Phase::Closing);
+    // At most one record per actual callback: never collapse an acquire into a release.
+    const auto result = closingPause ? eventhold::ReadResult::Empty : channel.Read(native.value.now, command);
     if (result == eventhold::ReadResult::Record) {
         if (command.kind == eventhold::Kind::Reset) inputScope = command.scope;
         else if (command.scope != inputScope) { channel.Invalidate(eventhold::Abort::WrongScope); input.Fail(); }
