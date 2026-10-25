@@ -16,8 +16,10 @@ motion 202, the partner lies `far` or more from Thorn's root and this seat is mo
 rescuer then steers toward Thorn until within `hold` of the root and stands. RCs keep their press (with that
 direction). The approach resumes when Thorn leaves 202, when the partner is no longer far, or after `maxWaitSec` held
 off in one revive window. Thorn is read through the existing head observation (no new reads); an unknown head never
-holds back. While held off, thorn_approach's plateau monitor is reset each tick so the deliberate stand-off doesn't
-trigger its detour/jump escapes toward the partner. Input-only, no native writes.
+holds back. While held off, thorn_approach's plateau monitor must not read the deliberate stand-off as a stall: the
+hook resets its anchor and detour, and the outermost OrbHoldApproachMixin makes its `facts()` empty for the rest of
+a held tick, so the candidate it cached before the core can't start a detour or escape after it (Sage, on r2).
+Input-only, no native writes.
 """
 import math
 import sys
@@ -72,6 +74,22 @@ class OrbHoldPilotMixin:
                 self.write('rescue_orb_hold_summary', **{**self.orbhold_stats,
                                                          'seconds': round(self.orbhold_stats['seconds'], 2)})
             self.orbhold_cfg = None
+
+
+class OrbHoldApproachMixin:
+    """Outermost. thorn_approach.ApproachRevisionMixin caches a plateau candidate before the core runs and, after it,
+    re-reads `facts()` before any detour pulse or jump/vertical escape. On a tick the hook held off, that read is
+    empty, so none of those post-core inputs can follow a deliberate stand-off."""
+    orbhold_tick_held = False
+
+    def step(self, pilot, own, event_reaction=False):
+        self.orbhold_tick_held = False
+        return super().step(pilot, own, event_reaction)
+
+    def facts(self, *args, **kwargs):
+        if self.orbhold_tick_held:
+            return None
+        return super().facts(*args, **kwargs)
 
 
 class OrbHoldCore(thorn.CooperativeFight):
@@ -135,6 +153,7 @@ class OrbHoldCore(thorn.CooperativeFight):
             self.orbhold_end(pilot, reason)
             return result
         hold = held[-1]
+        self.orbhold_tick_held = True  # OrbHoldApproachMixin empties the approach layer's post-core facts
         # Standing off is deliberate: thorn_approach's plateau monitor would read it as a stalled approach and spend
         # its detour/jump escapes walking toward the partner, so a held-off tick resets its anchor and any detour.
         if hasattr(self, 'anchor'):
@@ -156,7 +175,7 @@ class Pilot(OrbHoldPilotMixin, child.Pilot):
     pass
 
 
-class CooperativeFight(child.CooperativeFight, OrbHoldCore):
+class CooperativeFight(OrbHoldApproachMixin, child.CooperativeFight, OrbHoldCore):
     pass
 
 

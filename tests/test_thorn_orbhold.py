@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "rig" / "
 import orbhold_report  # noqa: E402
 import rescue_report  # noqa: E402
 import thorn  # noqa: E402
+import thorn_approach  # noqa: E402
 import thorn_creeper  # noqa: E402
 import thorn_next  # noqa: E402
 import thorn_orbhold as o  # noqa: E402
@@ -385,6 +386,65 @@ check(abs(c.orbhold_waited - 2.0) < 1e-9 and p.kinds().count("coop_orb_hold") ==
       "time between two volleys in one window is not counted; the second volley opens episode 2")
 
 
+# ---- full production MRO: a stalled approach, then a volley (Sage, on r2) ----------------------------------------
+class ApproachCore(thorn_approach.ApproachRevisionMixin, Core):
+    pass
+
+
+class RcGateStub:
+    def drain(self):
+        return []
+
+
+class CallbacksStub:
+    def poll(self):
+        return True, 0
+
+
+thorn_approach.time.sleep = lambda seconds: None
+
+
+def stalled_then_volley(cfg):
+    """Tick 1: an ordinary approach (Thorn in 207) anchors the real plateau monitor. Tick 2, 3 s later at the same
+    positions: Thorn is in its volley and this seat is inside the hold radius. Returns tick 2's pilot and fight."""
+    clock.now = 100.0
+    p, _ = setup(cfg=cfg, observed=head(motion=207))
+    s = own(pos=OWN_IN)
+    p.state = lambda: s
+    seed = ApproachCore(Peer(), Log(), Log(True, actor=PARTNER))
+    c = object.__new__(o.CooperativeFight)
+    c.__dict__.update(seed.__dict__)
+    c.rc_gate, c.callback_reader = RcGateStub(), CallbacksStub()
+    c.step(p, s)
+    p.rows.clear()
+    p.kb.frames.clear()
+    clock.now += 3.0
+    p.observed = head()
+    c.plateau_log_at = clock.now  # skip only the plateau row's memory snapshot
+    c.step(p, s)
+    return p, c
+
+
+p, c = stalled_then_volley(CFG)
+check("coop_orb_hold" in p.kinds() and not any(k in ("coop_detour", "coop_stuck_escape", "coop_vertical_escape")
+                                                for k in p.kinds()),
+      "full MRO, stalled then volley: held off with no detour pulse or escape on that tick")
+check(c.escape_tries == 0 and c.detour is None and not any(f & MOVE_KEYS for f in p.kb.frames),
+      "no escape is spent and the seat stands inside the hold radius")
+check(c.orbhold_tick_held is True and c.facts(p, own(pos=OWN_IN)) is None,
+      "the approach layer's facts read empty for the rest of a held tick")
+clock.now += 0.5
+p.observed = head(motion=207)
+c.step(p, own(pos=OWN_IN))
+f = c.facts(p, own(pos=OWN_IN))
+check(c.orbhold_tick_held is False and f is not None and f[2] == tuple(OWN_IN),
+      "once Thorn leaves 202 the next tick's facts are live again, so approach revision keeps working")
+p, c = stalled_then_volley(None)
+check(any(k == "coop_detour" and f.get("stage") == "pulse" for k, f in p.rows) and c.escape_tries == 1,
+      "control (hold-off off): the same stalled sequence spends escape 1 on a detour pulse")
+clock.now = 1000.0
+
+
 # ---- the report counts hits taken while held off ------------------------------------------------------------------
 p = FakePilot()
 c = Core(Peer(), Log(), Log(True, actor=PARTNER))
@@ -444,9 +504,9 @@ check(pp.seen is None, "the key outside the Thorn fight step is ignored")
 
 mro = o.CooperativeFight.__mro__
 i = mro.index(o.OrbHoldCore)
-check(mro[1] is thorn_creeper.CooperativeFight and mro[i + 1] is thorn.CooperativeFight
+check(mro[1] is o.OrbHoldApproachMixin and mro[2] is thorn_creeper.CooperativeFight and mro[i + 1] is thorn.CooperativeFight
       and mro.index(thorn_next.PreReviveCooperativeMixin) < i,
-      "the hook sits directly above the revive core, below the Potion and every other layer")
+      "the facts guard is outermost; the hook sits directly above the revive core, below the Potion and every other layer")
 check(o.Pilot.__mro__[1] is o.OrbHoldPilotMixin and o.Pilot.__mro__[2] is thorn_creeper.Pilot, "Pilot: orb hold over thorn_creeper")
 
 print(f"failures={failures}")
