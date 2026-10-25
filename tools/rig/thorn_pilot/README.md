@@ -136,10 +136,26 @@ gate, the engagement bound and the cooldown are described in the review packet's
 - **Measures.** `orbhold_report.py` adds, per revive window, protected episodes by command, RCs the core still took
   (`coop_reaction`) and why each hold ended (`coop_hold_end`).
 
+## Keeping the last Potion for a rescue (lead #343)
+
+`thorn_potion.py` sits over `thorn_protect.py` and is run with `run_potion.py` and the `_creeper_potion` scenario.
+
+- **Why.** In zr98–123, 9 of the 11 rescuers that went down within 20 s of a revive window started it under 40% HP.
+  Four of them had no Potion left for the pre-revive heal. In zr102 and zr110 the fight's only Potion had gone to the
+  post-revive grace heal (`vuh2617-rescuer-loss.zip` on VUH-2617).
+- **What.** It's opt-in per fight step: `"rescuePotionReserve": true`, on both seats' `_potion` routes. While this
+  seat holds its fight's last Potion (at most one Potion among its item slots), `heal_available` refuses it unless the
+  partner is logically downed (and this seat isn't, and the party isn't wiped). Ordinary, opening and post-revive-grace
+  heals see it as unavailable, as they see an empty slot. The pre-revive heal still uses it: both its start check and
+  its key-1 recheck run while the partner is down. Every other check and cap is unchanged.
+- **Logs.** `potion_reserved` (at most every 5 s while refusing, with HP and the Potion count) and
+  `rescue_potion_reserve_summary` per fight (refusals, rescue uses).
+- **Not measured.** What a skipped grace heal costs the just-revived seat.
+
 ## Checks and analysis
 
-- `tests/test_thorn_creeper.py`, `tests/test_thorn_rescue.py`, `tests/test_thorn_orbhold.py` and
-  `tests/test_thorn_protect.py`: offline controls (ctest
+- `tests/test_thorn_creeper.py`, `tests/test_thorn_rescue.py`, `tests/test_thorn_orbhold.py`,
+  `tests/test_thorn_protect.py` and `tests/test_thorn_potion.py`: offline controls (ctest
   `kh2coop_py_test_thorn_*`).
 - `creeper_report.py RUN_DIR...`: per run, the kill, Thorn's end HP, Creeper kills, atk-400 host downs, revive
   exposures and Creeper turns.
