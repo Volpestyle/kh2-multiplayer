@@ -87,16 +87,45 @@ function Get-Owned {
 # (another session, the secure desktop, a lost hook, a sleep or stall).
 function Get-IdleBase { [Math]::Max([Math]::Max([Kh2Desk.Gate]::LastHuman, [Kh2Desk.Gate]::HooksAt), [Math]::Max($script:contextResetAt, $script:foreignInjectedAt)) }
 
-# A game or fullscreen app that is neither the rig's (owned.txt) nor this job's (its job object).
+# One process for a reclaim receipt: pid, image name and path (null when it has exited or can't be opened).
+function Get-ProcessDetail([int]$ProcessId) {
+  $p = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  $path = $null
+  if ($p) { try { $path = $p.Path } catch { } }
+  [ordered]@{ pid = $ProcessId; name = $(if ($p) { $p.ProcessName } else { $null }); path = $path }
+}
+
+# A game or fullscreen app that is neither the rig's (owned.txt) nor this job's (its job object). What it saw is
+# left in $script:foreignDetail for the reclaim receipt: on bld, fullscreen reclaims came during KH2's boot with
+# nobody at the desk and the game attributed, and the receipt didn't say what was in front (VUH-2617 bld03b).
 function Get-ForeignActivity($Job) {
+  $script:foreignDetail = $null
   $owned = @(Get-Owned)
   $foreign = @([Kh2Desk.Gate]::Windowed() | Where-Object {
       $_.Pid -notin $owned.pid -and -not ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $_.Pid)) -and
       ($_.Name -match $config.foreignGameNames -or ($_.Path -match $config.foreignGamePaths -and $_.Name -notmatch $config.foreignGameExempt)) })
-  if ($foreign.Count) { return 'foreign-game' }
+  if ($foreign.Count) {
+    $script:foreignDetail = [ordered]@{ activity = 'foreign-game'
+      windows = @($foreign | ForEach-Object { [ordered]@{ pid = $_.Pid; name = $_.Name; path = $_.Path } }) }
+    return 'foreign-game'
+  }
   $front = [Kh2Desk.Gate]::ForegroundPid()
-  if ([Kh2Desk.Gate]::NotificationState() -in 2, 3, 4, 7 -and $front -notin $owned.pid -and -not ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $front))) { return 'fullscreen' }
+  $state = [Kh2Desk.Gate]::NotificationState()
+  if ($state -in 2, 3, 4, 7 -and $front -notin $owned.pid -and -not ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $front))) {
+    $script:foreignDetail = [ordered]@{ activity = 'fullscreen'; notificationState = $state
+      foreground = Get-ProcessDetail $front; ownedPids = @($owned | ForEach-Object pid) }
+    return 'fullscreen'
+  }
   $null
+}
+
+# The foreign activity behind a fullscreen or foreign-game reclaim, as last seen by the job's watch, on its receipt.
+function Add-ForeignDetail($Receipt, $Job, [string]$Reason) {
+  if ($Reason -in 'fullscreen', 'foreign-game' -and $Job -and $Job.foreignDetail) {
+    $Receipt.foreign = $Job.foreignDetail
+    $Receipt.foreign.seconds = $Job.foreignSeconds
+  }
+  $Receipt
 }
 
 function Get-Refusals([string]$Level) {
@@ -180,11 +209,13 @@ function Invoke-Reclaim($Job, [string]$Reason, [long]$TriggerTick) {
     ok = $released; withinBudget = ($released -and $ms.leaseReleased -le $budgetMs); budgetMs = $budgetMs; ms = $ms
     stuck = $stuck; games = @($games | ForEach-Object pid); helpers = $helpers.Count
   }
+  $receipt = Add-ForeignDetail $receipt $Job $Reason
   Write-Json "$gate\reclaims\$((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ'))-$($Job.name).json" $receipt
   # A killed live run never reaches its closing manifest and safety checks: launch stays refused until
   # someone has compared the install and saves and deleted this marker.
   if ($Job.level -ne 'desk') { Write-Json $verifyPath ([ordered]@{ job = $Job.name; reason = $Reason; utc = $receipt.utc }) }
-  Log "reclaim $Reason job=$($Job.name) ok=$released ms=$($ms | ConvertTo-Json -Compress) stuck=$($stuck -join ',')"
+  $front = if ($receipt.Contains('foreign')) { " foreign=$($receipt.foreign | ConvertTo-Json -Compress -Depth 4)" } else { '' }
+  Log "reclaim $Reason job=$($Job.name) ok=$released ms=$($ms | ConvertTo-Json -Compress) stuck=$($stuck -join ',')$front"
   $receipt
 }
 
@@ -285,6 +316,7 @@ while ($true) {
           # $foreignReclaimSeconds, so a window briefly in front while the job launches doesn't count.
           $activity = Get-ForeignActivity $job
           $job.foreignSeconds = if ($activity) { $job.foreignSeconds + 1 } else { 0 }
+          $job.foreignDetail = $script:foreignDetail
           if ($job.foreignSeconds -ge $foreignReclaimSeconds) { $reason = $activity }
         }
       } catch {
@@ -361,7 +393,7 @@ while ($true) {
           $lease.childPid = $p.Id; $lease.childCreated = $p.StartTime.ToFileTimeUtc()
           Set-Content -LiteralPath $leasePath -Value ($lease | ConvertTo-Json -Compress) -Encoding UTF8 -NoNewline
           $job = [pscustomobject]@{ name = $next.Name; base = $next.BaseName; file = $next.FullName; level = $level; process = $p; pid = $p.Id
-                                    created = $lease.childCreated; jobObject = $jobObject; startTick = $startTick; nextCheck = 0; foreignSeconds = 0; stdout = $stdout; stderr = $stderr; warnings = $warnings
+                                    created = $lease.childCreated; jobObject = $jobObject; startTick = $startTick; nextCheck = 0; foreignSeconds = 0; foreignDetail = $null; stdout = $stdout; stderr = $stderr; warnings = $warnings
                                     leaseText = (Get-Content -Raw -LiteralPath $leasePath) }
           Log "admitted $($next.Name) level=$level child=$($p.Id)"
         } catch {

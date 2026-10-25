@@ -16,7 +16,13 @@ The desk driver for a PC that is also someone's everyday desktop, first on `bld`
   4. verifies that all of them exited, then releases the lease.
 
   The job's `.out` says `RECLAIMED gate: <reason>` (after any warning lines, below). A timed receipt goes to `gate\reclaims\`, with
-  `ms` from the input to each stage and `withinBudget` against the 2 s requirement.
+  `ms` from the input to each stage and `withinBudget` against the 2 s requirement. A `fullscreen` or
+  `foreign-game` receipt also has `foreign`, the activity the watch last saw, with `seconds` (how long it had
+  persisted):
+  - for `fullscreen`, the notification state, the foreground window's pid, name and path, and the owned pids;
+  - for `foreign-game`, each foreign window's pid, name and path.
+
+  The agent log's reclaim line carries the same detail.
 
   A launch-level job sends no OS input: its runs drive pad input through the DLL's mailbox. Any
   injected input during one therefore also reclaims it (`injected-input`). The job object is
