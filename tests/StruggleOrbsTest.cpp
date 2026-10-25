@@ -48,7 +48,7 @@ void Codec() {
     const auto birth = Birth(5, 9, 2);
     auto bytes = encode(birth);
     const std::uint8_t* p; std::size_t n;
-    check(PROTOCOL_VERSION == 36 && decodePacketHeader(bytes.data(), bytes.size(), p, n) == PacketType::SpawnEmission &&
+    check(PROTOCOL_VERSION == 37 && decodePacketHeader(bytes.data(), bytes.size(), p, n) == PacketType::SpawnEmission &&
           n == SPAWN_EMISSION_BYTES && n == 71, "v34: an orb row is a 71-byte SpawnEmission");
     const auto back = Decode(bytes);
     check(back.kind == SpawnEmissionKind::OrbBirth && back.orbId == 9 && back.orbType == 2 && back.velocity == birth.velocity &&

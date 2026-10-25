@@ -223,6 +223,15 @@ Normalized table 255 operations carry only these values:
 | 9 | immutable owning role resource plus native player attack arguments |
 | 11 /6 | heartbeat /role end |
 | 13 /14 | native owner attachment flags/bone /detach |
+| 15 /16 | actor birth /end: occurrence low/high, child netId, child object 317 (header: parent netId, object 307; effect = child netId) |
+
+Script-born children (VUH-2605, protocol 37). Twilight Thorn's script creates its Creepers with
+`sysobj_appear` (1/0). The host observes that trap (pinned body, original always called) and records
+only an exact 317 return made inside the announced 307's own executing script. It publishes 255/15
+only after its own census has announced that exact child, so a client always gets a child manifest it
+can wait for. The record repeats on a 60-frame heartbeat while the child is still that announced enemy,
+and 255/16 ends it once. Occurrences never rewind. A client never replays these records as native
+traps. Until the client owner lands, it only validates and counts them.
 
 Actor role resources use the high bit, distinct from attack/effect IDs. Source
 and selected actor handles, status roots and object-entry roots stay local and

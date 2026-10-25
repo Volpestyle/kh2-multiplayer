@@ -67,6 +67,8 @@ struct State {
     std::uint64_t faults = 0, invalid = 0;
     unsigned unmappedLogs = 0;  // this room
     unsigned resourceMissLogs = 0, storedHandleLogs = 0, invalidLogs = 0; // bounded raw-tag diagnostics per room
+    ::kh2coop::inject::scriptbirth::HostBirths births; // VUH-2605: host script-born children announced to clients
+    unsigned birthLogs = 0;         // this room
 };
 static State g_sm;
 static std::atomic<bool> g_smLifetimeReliable{true};
@@ -91,6 +93,7 @@ static bool SmNativeReactionInstall();
 static void SmNativeReactionShutdown();
 static bool SmNativeReactionCallbackAllowed(uintptr_t,std::uint32_t,const std::uint32_t*,D::Record* =nullptr);
 static void SmOwnerReset(bool);
+static uintptr_t SmOwnerVmSource(std::uint16_t&,std::uint32_t&);
 static void SmOwnerFrame();
 static int SmOwnerApply(const R::Call&,uintptr_t);
 static bool SmOwnerAttackSource(std::uint64_t,std::uint16_t&,std::uint32_t&,std::uint8_t&,std::uint32_t&);
@@ -334,6 +337,32 @@ static std::uint16_t SmMirroredSpawn(std::size_t trap, std::uint64_t arg, std::u
     return netId;
 }
 
+// VUH-2605: one exact sysobj_appear return inside the admitted Twilight Thorn's own script. Only the
+// executing VM's announced 307 creating a 317 is recorded; every other appear stays native-only. The host
+// publishes nothing here: SmTickBirths sends the birth once the census has announced that exact child.
+static void SmObserveBirth(const Before& b, const std::uint64_t* after) {
+    namespace SB = ::kh2coop::inject::scriptbirth;
+    if (b.argc < 1 || R::TagOf(b.args[0]) != R::kTagInt || R::BitsOf(b.args[0]) != SB::kChildObjectId) return;
+    std::uint16_t parentNetId = 0;
+    std::uint32_t parentObjectId = 0;
+    const uintptr_t parent = SmOwnerVmSource(parentNetId, parentObjectId);
+    if (!parent || parentObjectId != SB::kParentObjectId) return;
+    std::uint64_t result = 0;
+    uintptr_t entry = 0;
+    std::uint32_t childObjectId = 0;
+    const uintptr_t child = SmCopyArgs(after, &result, 1) && R::TagOf(result) == R::kTagAddress ? SmDecode(R::BitsOf(result)) : 0;
+    const bool exact = child && child != parent && ReadHitTrace(child + offsets::actor::OBJENTRY_PTR, entry) && entry &&
+        ReadHitTrace(entry + offsets::objentry::OBJECT_ID, childObjectId) && childObjectId == SB::kChildObjectId;
+    const auto outcome = exact ? g_sm.births.Add(parentNetId, child, g_frameCounter) : SB::Observe::Refused;
+    if (g_sm.birthLogs < 16) {
+        ++g_sm.birthLogs;
+        const char* what = outcome == SB::Observe::Added ? "recorded" : outcome == SB::Observe::Full ? "full" :
+                           outcome == SB::Observe::Exhausted ? "exhausted" : "not-exact-child";
+        Log("[script-birth] host observe parent=%u child=%llX childObject=%u result=%s occurrence=%llu frame=%u", parentNetId,
+            static_cast<unsigned long long>(child ? child - g_exeBase : 0), childObjectId, what,
+            static_cast<unsigned long long>(outcome == SB::Observe::Added ? g_sm.births.NextOccurrence() - 1 : 0), g_frameCounter);
+    }
+}
 static void SmObserve(std::size_t i, const Before& b, const std::uint64_t* after) {
     ++g_sm.second.raw;
     ++g_sm.second.rawPerTrap[i];
@@ -372,6 +401,8 @@ static void SmObserve(std::size_t i, const Before& b, const std::uint64_t* after
         }
         case R::Kind::ReactionOwner:
         case R::Kind::ReactionOffer: return; // wire-only operations
+        case R::Kind::ActorBirth: return;   // wire-only; the host sends it from SmTickBirths
+        case R::Kind::ActorBirthObserve: SmObserveBirth(b, after); return;
         case R::Kind::Owner:
         case R::Kind::OwnerAttackStart:return;
         case R::Kind::AttackStrike:
@@ -535,6 +566,31 @@ static bool SmSwapAll() {
     return true;
 }
 
+// VUH-2605: publish each recorded child once its census netId exists, repeat on a heartbeat, end it once.
+static void SmTickBirths() {
+    namespace SB = ::kh2coop::inject::scriptbirth;
+    g_sm.births.Tick(g_frameCounter,
+        [](uintptr_t child) -> std::uint16_t { return enemysync::HostEnemyNetId(child, SB::kChildObjectId); },
+        [](SB::Emit kind, const SB::HostBirth& r) {
+            R::Call c {};
+            c.trap = static_cast<std::uint8_t>(R::FindTrap(255, kind == SB::Emit::Begin ? 15 : 16));
+            c.netId = r.parentNetId;
+            c.objectId = SB::kParentObjectId;
+            c.effect = r.childNetId;
+            c.values[0] = R::Tagged(R::kTagInt, static_cast<std::uint32_t>(r.occurrence));
+            c.values[1] = R::Tagged(R::kTagInt, static_cast<std::uint32_t>(r.occurrence >> 32));
+            c.values[2] = R::Tagged(R::kTagInt, r.childNetId);
+            c.values[3] = R::Tagged(R::kTagInt, SB::kChildObjectId);
+            if (!R::ValidCall(c)) return true; // never retry a record the wire rules reject
+            const bool sent = SmEmit(c);
+            if (sent && (kind == SB::Emit::End || !r.sentFrame) && g_sm.birthLogs < 16) {
+                ++g_sm.birthLogs;
+                Log("[script-birth] host %s parent=%u child=%u occurrence=%llu frame=%u", kind == SB::Emit::Begin ? "begin" : "end",
+                    r.parentNetId, r.childNetId, static_cast<unsigned long long>(r.occurrence), g_frameCounter);
+            }
+            return sent;
+        });
+}
 static void SmFlush() {
     g_sm.retirements.Drain(g_sm.sender);
     R::Call batch[32];
@@ -577,6 +633,7 @@ static void SmResetRoom(bool retire = true) {
     SmOwnerReset(retire);
     g_sm.unmappedLogs = 0;
     g_sm.resourceMissLogs = g_sm.storedHandleLogs = g_sm.invalidLogs = 0;
+    g_sm.births.Reset(); g_sm.birthLogs = 0; // clients reset their receipts with the room too
     g_sm.sender.Reset();
     g_sm.retirements.Reset();
     g_sm.occurrences.Reset();g_sm.reactions={};
@@ -867,6 +924,16 @@ static int SmApplyRecord(const enemysync::ScriptCallRecord& r) {
     for (std::size_t a = 0; a < 4; ++a) c.values[a] = r.args[a];
     if ((c.effect != 0) != R::EffectRecord(static_cast<std::size_t>(i)) || !R::ValidValues(static_cast<std::size_t>(i), c.values)) {
         ++g_sm.second.refused;
+        return 0;
+    }
+    if (R::IsActorBirthKind(R::kTraps[i].kind)) {
+        // VUH-2605: a birth has no native replay. Until the client owner consumes it, only count it.
+        if (!R::ValidCall(c)) { ++g_sm.second.refused; return 0; }
+        if (g_sm.birthLogs < 16) {
+            ++g_sm.birthLogs;
+            Log("[script-birth] client received op=%u parent=%u child=%u occurrence=%08X%08X (no consumer yet)", r.index,
+                c.netId, c.effect, static_cast<std::uint32_t>(c.values[1]), static_cast<std::uint32_t>(c.values[0]));
+        }
         return 0;
     }
     if (r.table==2 && r.index==13) {
@@ -1630,11 +1697,11 @@ static void OnFrameStart() {
     if (role != 1 || !generation) {
         if (g_sm.hostActive || g_sm.slots[0].swapped) SmStopHost(role != 1 ? "not-host" : "no-session");
     } else {
-        if (g_sm.hostActive && generation != g_sm.generation) { g_sm.sender.Reset(); g_sm.retirements.Reset(); g_sm.hostEffects.Reset(); g_sm.hostAttacks.Reset(); }
+        if (g_sm.hostActive && generation != g_sm.generation) { g_sm.sender.Reset(); g_sm.retirements.Reset(); g_sm.hostEffects.Reset(); g_sm.hostAttacks.Reset(); g_sm.births.Reset(); }
         if (!g_sm.hostActive && !g_sm.swapRefused) {
             if (SmSwapAll()) g_sm.hostActive = true; else g_sm.swapRefused = true;
         }
-        if (g_sm.hostActive) SmFlush();
+        if (g_sm.hostActive) { SmTickBirths(); SmFlush(); }
     }
     if (generation != g_sm.generation && g_sm.role == 2) {
         SmRetireClientAttacks(); g_sm.clientEffects.Reset(); g_sm.hold.Reset();

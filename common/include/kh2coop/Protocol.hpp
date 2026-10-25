@@ -13,9 +13,11 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 36;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 37;
 
 // ===========================================================================
+// Protocol v37 (VUH-2605): ScriptCall carries normalized actor_birth/actor_birth_end (255/15, 255/16): the
+// host announces a script-born child (Twilight Thorn's Creepers) with its parent, occurrence and child netId.
 // Protocol v36 (VUH-2679): RoomReplayRequest (56). A client whose current room was built in the two-player clone
 // layout asks, once the roster has grown to three seats, for the relay's join replay of the admitted room, for
 // itself alone, and reloads that room natively.

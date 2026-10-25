@@ -53,6 +53,7 @@ enum class Kind : std::uint8_t {
     AttackStart, AttackField, AttackCall, AttackRc, ReactionOffer, ReactionOwner, Owner, OwnerAttackStart, AttackStrike,
     EffectCall,     // arg0 is an effect; the values are sent as passed
     ActorBirth,    // normalized source/child occurrence metadata, never native effect replay
+    ActorBirthObserve, // host-only sysobj_appear observation; never sent as itself (VUH-2605)
 };
 // How a client replays a wire record: through the native trap with its own actor's or effect's
 // handle, obj_set_xyzrot's float4 through its helper, or a field write into the paired effect.
@@ -133,6 +134,8 @@ inline constexpr Trap kTraps[] = {
     {255,15,0,0,Kind::ActorBirth,4,false,Replay::ActorBirth,Group::Event,false,255,15,0,false,nullptr,0,"actor_birth"},
     {255,16,0,0,Kind::ActorBirth,4,false,Replay::ActorBirth,Group::Event,false,255,16,0,true,nullptr,0,"actor_birth_end"},
     {1,133,0x42B640,1,Kind::Actor,0,false,Replay::Trap,Group::Visibility,false,1,133,0,false,KH2_PIN(kObjHide),"obj_hide"},
+    // VUH-2605: observed on the host only; its birth travels as 255/15 once the census announces the child.
+    {1,0,0x42B130,0x40000001,Kind::ActorBirthObserve,0,false,Replay::None,Group::Event,false,255,15,0,false,KH2_PIN(kSysobjAppear),"sysobj_appear"},
     {1,134,0x42B680,1,Kind::Actor,0,false,Replay::Trap,Group::Visibility,false,1,134,0,false,KH2_PIN(kObjShow),"obj_show"},
 
 };
