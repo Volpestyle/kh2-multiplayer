@@ -353,7 +353,8 @@ static void SmObserveBirth(const Before& b, const std::uint64_t* after) {
     const uintptr_t child = SmCopyArgs(after, &result, 1) && R::TagOf(result) == R::kTagAddress ? SmDecode(R::BitsOf(result)) : 0;
     const bool exact = child && child != parent && ReadHitTrace(child + offsets::actor::OBJENTRY_PTR, entry) && entry &&
         ReadHitTrace(entry + offsets::objentry::OBJECT_ID, childObjectId) && childObjectId == SB::kChildObjectId;
-    const auto outcome = exact ? g_sm.births.Add(parentNetId, child, g_frameCounter) : SB::Observe::Refused;
+    const auto outcome = exact ? g_sm.births.Add(parentNetId, child, g_frameCounter, enemysync::WorldSessionGeneration()) :
+                                 SB::Observe::Refused;
     if (g_sm.birthLogs < 16) {
         ++g_sm.birthLogs;
         const char* what = outcome == SB::Observe::Added ? "recorded" : outcome == SB::Observe::Full ? "full" :
@@ -566,11 +567,13 @@ static bool SmSwapAll() {
     return true;
 }
 
-// VUH-2605: publish each recorded child once its census netId exists, repeat on a heartbeat, end it once.
-static void SmTickBirths() {
+// VUH-2605: publish each recorded child once its census netId exists, repeat on a heartbeat while its
+// parent lives, end it once.
+static void SmTickBirths(std::uint32_t generation) {
     namespace SB = ::kh2coop::inject::scriptbirth;
-    g_sm.births.Tick(g_frameCounter,
+    g_sm.births.Tick(g_frameCounter, generation,
         [](uintptr_t child) -> std::uint16_t { return enemysync::HostEnemyNetId(child, SB::kChildObjectId); },
+        [](std::uint16_t parent) { return enemysync::HostEnemyLive(parent, SB::kParentObjectId); },
         [](SB::Emit kind, const SB::HostBirth& r) {
             R::Call c {};
             c.trap = static_cast<std::uint8_t>(R::FindTrap(255, kind == SB::Emit::Begin ? 15 : 16));
@@ -656,6 +659,7 @@ static void SmStopHost(const char* why) {
     g_sm.retirements.Reset();
     g_sm.hostEffects.Reset();
     g_sm.hostAttacks.Reset();
+    g_sm.births.Reset(); // a later host session announces its own children afresh
     Log("[script-mirror] host stop why=%s faults=%llu invalid=%llu", why, static_cast<unsigned long long>(g_sm.faults),
         static_cast<unsigned long long>(g_sm.invalid));
 }
@@ -1694,14 +1698,15 @@ static void OnFrameStart() {
         g_sm.occurrences.Reset();g_sm.reactions={};
     }
     SmTickReactions();
+    if (generation != g_sm.generation) g_sm.births.Reset(); // whatever the role: rows never cross a session
     if (role != 1 || !generation) {
         if (g_sm.hostActive || g_sm.slots[0].swapped) SmStopHost(role != 1 ? "not-host" : "no-session");
     } else {
-        if (g_sm.hostActive && generation != g_sm.generation) { g_sm.sender.Reset(); g_sm.retirements.Reset(); g_sm.hostEffects.Reset(); g_sm.hostAttacks.Reset(); g_sm.births.Reset(); }
+        if (g_sm.hostActive && generation != g_sm.generation) { g_sm.sender.Reset(); g_sm.retirements.Reset(); g_sm.hostEffects.Reset(); g_sm.hostAttacks.Reset(); }
         if (!g_sm.hostActive && !g_sm.swapRefused) {
             if (SmSwapAll()) g_sm.hostActive = true; else g_sm.swapRefused = true;
         }
-        if (g_sm.hostActive) { SmTickBirths(); SmFlush(); }
+        if (g_sm.hostActive) { SmTickBirths(generation); SmFlush(); }
     }
     if (generation != g_sm.generation && g_sm.role == 2) {
         SmRetireClientAttacks(); g_sm.clientEffects.Reset(); g_sm.hold.Reset();

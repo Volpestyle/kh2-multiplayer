@@ -798,6 +798,24 @@ void enetChecks() {
     refusedBy("actor-identity","birth source must match its announced parent class",[&]{clients[0]->sendScriptCall(unknownParent);});
     auto staleBirth=birth;staleBirth.seq=++calls.seq;++staleBirth.location.epoch;
     refusedBy("room-mismatch","birth cannot cross the admitted room scope",[&]{clients[0]->sendScriptCall(staleBirth);});
+    // Sage S3 P2-3: after the parent dies, its child's end and the parent's own attack teardown still close in
+    // one batch; a begin under the dead parent stays refused.
+    clients[0]->sendEnemyDeath({room.epoch,parent.netId});pump();
+    ScriptCall closing=calls;closing.seq=++calls.seq;
+    closing.entries={actorBirthEntry(SCRIPT_ACTOR_BIRTH_END,6,5)};
+    ScriptCallEntry parentFree;parentFree.netId=parent.netId;parentFree.objectId=parent.objectId;
+    parentFree.table=2;parentFree.index=13;parentFree.effect=21;closing.entries.push_back(parentFree);
+    beforeBirth=received[1].size();beforeBirth2=received[2].size();
+    clients[0]->sendScriptCall(closing);pump();
+    check(received[1].size()==beforeBirth+1 && received[2].size()==beforeBirth2+1 &&
+          received[1].back().entries.size()==2 && received[1].back().entries[0].index==SCRIPT_ACTOR_BIRTH_END &&
+          received[1].back().entries[1].table==2 && received[1].back().entries[1].index==13,
+          "a dead parent's child end and attack_free forward together in one batch");
+    auto deadBegin=birth;deadBegin.seq=++calls.seq;
+    refusedBy("actor-identity","a dead parent cannot begin another child",[&]{clients[0]->sendScriptCall(deadBegin);});
+    auto deadBeginAfterEnd=closing;deadBeginAfterEnd.seq=++calls.seq;
+    deadBeginAfterEnd.entries.push_back(actorBirthEntry(SCRIPT_ACTOR_BIRTH_BEGIN,7,5));
+    refusedBy("actor-identity","a begin rides no teardown batch under a dead parent",[&]{clients[0]->sendScriptCall(deadBeginAfterEnd);});
     for (auto& c : clients) if (c) c->disconnect();
     server.stop();
 }

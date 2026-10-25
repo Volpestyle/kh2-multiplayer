@@ -7408,6 +7408,14 @@ std::uint16_t HostEnemyNetId(uintptr_t actor, std::uint32_t objectId) noexcept {
     return static_cast<std::uint16_t>(spawn.spawnIndex + 1);
 }
 
+bool HostEnemyLive(std::uint16_t netId, std::uint32_t objectId) noexcept {
+    if (CurrentRole() != Role::Host || g_epoch == 0 || g_hostBeginPending || !netId) return false;
+    return std::any_of(g_inst.spawns.begin(), g_inst.spawns.end(), [&](const Spawn& spawn) {
+        return static_cast<std::uint32_t>(spawn.spawnIndex) + 1 == netId && spawn.objectId == objectId &&
+               spawn.present && spawn.announced && !spawn.deathSent && !spawn.lifecycleRetired;
+    });
+}
+
 bool SendRemoteHit(std::uint8_t targetSlot, std::uint16_t netId, std::uint32_t objectId, std::uint32_t attackId,
                    std::int32_t damage, std::uint64_t& seqOut) {
     seqOut = 0;

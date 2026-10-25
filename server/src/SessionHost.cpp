@@ -1330,9 +1330,11 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 for (const auto& e : calls.entries) {
                     // A paired collision resource must still be destroyed when
                     // its source has just died/left. This grants only attack_free
-                    // for an identity announced in this epoch, never new work.
+                    // for an identity announced in this epoch, never new work. A
+                    // script-born child's end (255/16) closes under its dead parent
+                    // the same way (VUH-2605); its begin (255/15) does not.
                     const bool teardown=e.effect!=0 && ((e.table==2 && e.index==13) ||
-                        (e.table==255 && e.index==6));
+                        (e.table==255 && e.index==6) || (e.table==255 && e.index==16));
                     bool present = std::any_of(fieldObjects_.begin(), fieldObjects_.end(), [&](const auto& f) {
                         return (f.present || teardown) && f.netId == e.netId && f.objectId == e.objectId;
                     });

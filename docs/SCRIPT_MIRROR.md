@@ -229,9 +229,14 @@ Script-born children (VUH-2605, protocol 37). Twilight Thorn's script creates it
 `sysobj_appear` (1/0). The host observes that trap (pinned body, original always called) and records
 only an exact 317 return made inside the announced 307's own executing script. It publishes 255/15
 only after its own census has announced that exact child, so a client always gets a child manifest it
-can wait for. The record repeats on a 60-frame heartbeat while the child is still that announced enemy,
-and 255/16 ends it once. Occurrences never rewind. A client never replays these records as native
-traps. Until the client owner lands, it only validates and counts them.
+can wait for. The record repeats on a 60-frame heartbeat while the child is still that announced enemy
+and its parent is still a live announced enemy, and 255/16 ends it once. A child netId is published at
+most once per room: a return whose census row still names an earlier child (a reused address, a delayed
+row) waits for a fresh netId and is dropped unpublished if none appears. A dead parent begins nothing,
+but its published children still end; the relay admits 255/16 under a dead parent as teardown, like
+attack_free, and still refuses 255/15. Rows are tagged with the session generation and reset when the
+host stops or the generation changes. Occurrences never rewind. A client never replays these records as
+native traps. Until the client owner lands, it only validates and counts them.
 
 Actor role resources use the high bit, distinct from attack/effect IDs. Source
 and selected actor handles, status roots and object-entry roots stay local and
