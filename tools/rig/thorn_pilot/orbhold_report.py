@@ -6,6 +6,8 @@ peer-logical-downed` until `coop_revive combat` or a stuck row):
 - result (recovered, or the stuck reason), seconds, revive holds begun, closest approach (`coop_approach` horizontal);
 - hold-offs (thorn_orbhold.py): `coop_orb_hold` episodes, their seconds and end reasons, and the partner's distance to
   Thorn when each began;
+- revive-protect (thorn_protect.py, r5): `coop_rc_protected` episodes by command, RCs the core still took
+  (`coop_reaction`) and why each revive hold ended (`coop_hold_end`);
 - the rescuer's hits inside the window, by attack, with the orb (1041/1014) hits called out (rescue_report.hits). The
   window's frame span is the own-game frames of its `coop_approach` rows +-30 (the revive core keeps writing them while
   held off; `coop_orb_hold_sample` rows from r1 logs are read too).
@@ -31,7 +33,8 @@ def windows(run, seat, seat_hits):
     for r in rows:
         k = r.get("kind")
         if k == "coop_revive" and r.get("state") == "peer-logical-downed":
-            cur = dict(rescuer=seat, t=r["t"], holds=0, minDist=None, frames=[], holdOffs=[], ends=collections.Counter())
+            cur = dict(rescuer=seat, t=r["t"], holds=0, minDist=None, frames=[], holdOffs=[], ends=collections.Counter(),
+                       protected=collections.Counter(), rcTaken=0, holdEnds=collections.Counter())
             continue
         if cur is None:
             continue
@@ -44,6 +47,12 @@ def windows(run, seat, seat_hits):
                 cur["minDist"] = d if cur["minDist"] is None else min(cur["minDist"], d)
         elif k == "coop_hold_begin":
             cur["holds"] += 1
+        elif k == "coop_hold_end":
+            cur["holdEnds"][r.get("reason")] += 1
+        elif k == "coop_rc_protected":
+            cur["protected"][str(r.get("command"))] += 1
+        elif k == "coop_reaction":
+            cur["rcTaken"] += 1
         elif k == "coop_orb_hold":
             cur["holdOffs"].append(dict(partnerToThorn=r.get("partnerToThorn"), seconds=None))
         elif k == "coop_orb_hold_end":
@@ -60,6 +69,7 @@ def windows(run, seat, seat_hits):
                 minDist=round(cur["minDist"]) if cur["minDist"] is not None else None,
                 holdOffs=len(cur["holdOffs"]), holdOffSeconds=round(sum(h["seconds"] or 0 for h in cur["holdOffs"]), 1),
                 holdOffEnds=dict(cur["ends"]), partnerToThorn=[h["partnerToThorn"] for h in cur["holdOffs"]],
+                protected=dict(cur["protected"]), rcTaken=cur["rcTaken"], holdEnds=dict(cur["holdEnds"]),
                 orbHits=sum(v for a, v in taken.items() if a in ORB), hits=dict(taken), frames=[lo, hi]))
             cur = None
     return found
@@ -73,9 +83,10 @@ def analyse(run):
     for seat in ("host_thorn", "friend_thorn"):
         out["windows"] += windows(run, seat, rescue_report.hits(seat, logs.get(seat, [])))
         path = run / seat / "pilot.jsonl"
-        summary = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()
-                   if '"rescue_orb_hold_summary"' in x] if path.exists() else []
-        out[f"{seat}Summary"] = {k: v for k, v in summary[-1].items() if k not in ("t", "kind")} if summary else None
+        for kind, key in (("rescue_orb_hold_summary", "Summary"), ("rescue_protect_summary", "Protect")):
+            summary = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()
+                       if f'"{kind}"' in x] if path.exists() else []
+            out[f"{seat}{key}"] = {k: v for k, v in summary[-1].items() if k not in ("t", "kind")} if summary else None
     return out
 
 
@@ -86,4 +97,5 @@ if __name__ == "__main__":
         print(f"  {r['run']}: kill={r['kill']} thornEnd={r['thornEnd']} creeperKills={r['creeperKills']}/{r['creepers']}")
         for w in r["windows"]:
             print(f"    {w['rescuer']}: {w['result']} {w['seconds']}s holds={w['holds']} minDist={w['minDist']} "
-                  f"holdOffs={w['holdOffs']} ({w['holdOffSeconds']}s, {w['holdOffEnds']}) orbHits={w['orbHits']} hits={w['hits']}")
+                  f"holdOffs={w['holdOffs']} ({w['holdOffSeconds']}s, {w['holdOffEnds']}) protected={w['protected']} "
+                  f"rcTaken={w['rcTaken']} holdEnds={w['holdEnds']} orbHits={w['orbHits']} hits={w['hits']}")

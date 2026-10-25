@@ -103,9 +103,43 @@ gate, the engagement bound and the cooldown are described in the review packet's
 - **Measures.** `orbhold_report.py RUN_DIR...`: per revive window, as `rescue_report.py` plus hold-offs. The core keeps
   writing `coop_approach` while held off, so both reports place the same hits.
 
+## Not taking Reversals during a revive (revive-protect r5, lead #328)
+
+`thorn_protect.py` sits over `thorn_orbhold.py` and is run with `run_protect.py` and the `_creeper_protect` scenario.
+
+- **Why.** In the r4d batch (zr118–120) no window was lost to the hold-off; the rescuer's own Reversal presses lost
+  them. In zr119 the rescuer reached its partner (71 away) and began four holds. Three ended when the core met a 432
+  and pressed it (one throwback carried it to 341), one on an orb hit. Then 667 presses kept it 400–700 away until the
+  60 s bound. The core ends any hold for an offered RC and presses it, and Triangle is also the revive button, so a
+  fresh Triangle press with an RC on screen is that RC.
+- **What.** It's opt-in per fight step: `"rescueProtect": {"commands": [432, 667], "within": 300}`, on both seats'
+  `_protect` routes. A listed RC is protected while all of these are true:
+  - the partner is logically downed, and this seat isn't, and the party isn't wiped;
+  - this seat's revive is in progress (a hold, or a full bar awaiting recovery), or it stands within `within` of the
+    partner horizontally.
+
+  On a protected tick the core sees no RC, and the pad sends no fresh Triangle: a hold already held stays held,
+  nothing else adds Triangle. The core keeps all its own rules. A revive prompt hidden behind the RC still releases
+  the hold, and a visible one is pressed afresh once the RC is gone. Since no RC completes, `thorn_approach`'s
+  own-callback resets don't follow.
+
+  Placement: `ProtectCore` is listed after `OrbHoldCore`, so C3 puts it directly above `thorn.CooperativeFight`, under
+  the hold-off and every other layer.
+- **Not covered.** zr118's window-2 stall: there the 667s came 1070–1620 from the partner with no revive in progress,
+  so they are pressed as before. The rescuer can take the hit a Reversal would have countered: `rescueNoReversal`
+  (432/426 within 600) took no throwbacks in zr112–114 but scored 0 kills in 3. Whether native fires an RC from a
+  Triangle that is already held, with no new press, is not established offline.
+- **Logs.**
+  - `coop_rc_protected`, per episode (one command run, split after a 0.5 s gap), with the command, the gap and
+    whether a revive was in progress;
+  - `rescue_protect_summary`, per fight, with the fresh Triangle presses stripped.
+- **Measures.** `orbhold_report.py` adds, per revive window, protected episodes by command, RCs the core still took
+  (`coop_reaction`) and why each hold ended (`coop_hold_end`).
+
 ## Checks and analysis
 
-- `tests/test_thorn_creeper.py`, `tests/test_thorn_rescue.py` and `tests/test_thorn_orbhold.py`: offline controls (ctest
+- `tests/test_thorn_creeper.py`, `tests/test_thorn_rescue.py`, `tests/test_thorn_orbhold.py` and
+  `tests/test_thorn_protect.py`: offline controls (ctest
   `kh2coop_py_test_thorn_*`).
 - `creeper_report.py RUN_DIR...`: per run, the kill, Thorn's end HP, Creeper kills, atk-400 host downs, revive
   exposures and Creeper turns.
