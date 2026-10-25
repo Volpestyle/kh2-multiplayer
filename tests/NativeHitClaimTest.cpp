@@ -3828,10 +3828,14 @@ void TestScriptChildOwnerTransitions() {
         Put(enemy, handle + 1); Put(enemy + offsets::actor::OBJENTRY_PTR, uintptr_t{0});
         Check(ScriptChildHeld(enemy), "a same-class replacement or unreadable roots at a held address stay held (address only)");
         Put(enemy, handle); Put(enemy + offsets::actor::OBJENTRY_PTR, object);
-        ++transition; // the native room changed: its teardown disposed every body in it
+        // Sage 4c976b8 room-boundary: a transition request (pending, nothing disposed yet) releases nothing.
+        ++transition; pendingTransition = true;
+        Check(ScriptChildHeld(enemy) && g_heldScriptChildCount == 1 && g_scriptChildRoomBlocked,
+              "a transition request or pending load keeps the held body quarantined and the room blocked");
+        pendingTransition = false; ++load; // CompleteLoad: the old room's bodies are gone
         Check(!ScriptChildHeld(enemy) && !ScriptChildOwned(enemy) && !g_heldScriptChildCount && !g_scriptChildRoomBlocked,
-              "only a native room change releases the quarantine and the room block");
-        --transition;
+              "only a completed native load releases the quarantine and the room block");
+        --transition; --load;
         Check(!ScriptChildHeld(enemy), "a released quarantine never returns");
     }
     {
@@ -3845,7 +3849,7 @@ void TestScriptChildOwnerTransitions() {
     {
         // A full hold array never releases: the room stops building before any owned child could lack a slot.
         const auto birth = SeedScriptChild(Out::Completed);
-        g_holdLoad = load; g_holdTransition = transition;
+        g_holdLoad = load;
         for (std::size_t i = 0; i < kScriptChildHoldCap; ++i) g_heldScriptChildren[i] = image + 0x60000 + i * 0x10;
         g_heldScriptChildCount = kScriptChildHoldCap - 1;
         g_hitTraceFrame = 101; TickScriptChildBirths();

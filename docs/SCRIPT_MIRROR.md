@@ -251,8 +251,9 @@ host-only). Ownership rules:
   update (it has no VM before its first update), it is hidden with the native obj_hide, and every hold is
   logged ("client HOLD"). A held address is quarantined until native room teardown, fail-closed: it is keyed
   by address only and nothing about the body is read, so a same-class body later at that address in the same
-  room stays held too. No session, generation or role change releases it; only a native room change
-  (transition or load) does. Holds use a fixed array of 16 that never allocates. After any hold, no further
+  room stays held too. No session, generation or role change releases it, and neither does a transition request
+  or a pending load (the old room's bodies still exist). Only a completed native room load (the load serial)
+  does. Holds use a fixed array of 16 that never allocates. After any hold, no further
   script child is built in that room, and no child is ever built unless every owned, unheld child could still
   take a hold slot. Whether a held, never-updated body keeps any collision is not proven; the class-hook gate is
   meant to make holds unreachable.

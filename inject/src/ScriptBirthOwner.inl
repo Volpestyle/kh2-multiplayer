@@ -23,13 +23,13 @@ struct ScriptChild {
 std::vector<ScriptChild> g_scriptChildren;
 // Held addresses (Sage 18ccfc67, lead #270): quarantined until native room teardown, fail-closed by construction.
 // Keyed by address only, nothing read: a same-class body later at a held address stays held. No reset, role or
-// generation change releases them; only a native room change (transition or load serial) does. Fixed capacity,
+// generation change releases them; only a completed native room load (the load serial) does. Fixed capacity,
 // no allocation. Once any hold happens, no further script child is built in that room.
 constexpr std::size_t kScriptChildHoldCap = 16;
 std::array<uintptr_t, kScriptChildHoldCap> g_heldScriptChildren{};
 std::size_t g_heldScriptChildCount = 0;
 bool g_scriptChildRoomBlocked = false;             // a hold (or a full hold array) stops building for the room
-std::uint32_t g_holdLoad = 0, g_holdTransition = 0; // the native room the holds belong to
+std::uint32_t g_holdLoad = 0;                     // the native load the holds belong to
 std::uint64_t g_scriptReturnSerial = 0;           // never rewinds
 EnemyFactoryFn g_scriptChildFactory = nullptr;    // 0x3DF930, prologue byte-checked at install; scoped to this path
 unsigned g_scriptChildLogs = 0;
@@ -127,10 +127,12 @@ bool ReceiveScriptActorBirthImpl(std::uint16_t netId, std::uint32_t objectId, st
     }
 }
 
-// The native room changed since the holds began: its teardown disposed every body in it. The only release.
+// A native room load completed since the holds began: its teardown disposed every body in the old room. The
+// only release.
 void SyncScriptChildHoldRoom() noexcept {
     if (!g_heldScriptChildCount && !g_scriptChildRoomBlocked) return;
-    if (warp::LoadSerial() == g_holdLoad && warp::TransitionSerial() == g_holdTransition) return;
+    // Only a completed load (CompleteLoad): a transition request or a pending load still has the old room's bodies.
+    if (warp::LoadSerial() == g_holdLoad) return;
     if (g_log) g_log("[script-birth] client HOLD released count=%zu blocked=%d reason=room-teardown frame=%u",
                      g_heldScriptChildCount, g_scriptChildRoomBlocked ? 1 : 0, g_hitTraceFrame);
     g_heldScriptChildren = {};
@@ -156,7 +158,7 @@ bool ScriptChildOwnedImpl(uintptr_t actor) noexcept {
 void HoldScriptChildImpl(uintptr_t actor) noexcept {
     if (!actor) return;
     SyncScriptChildHoldRoom();
-    if (!g_heldScriptChildCount && !g_scriptChildRoomBlocked) { g_holdLoad = warp::LoadSerial(); g_holdTransition = warp::TransitionSerial(); }
+    if (!g_heldScriptChildCount && !g_scriptChildRoomBlocked) g_holdLoad = warp::LoadSerial();
     g_scriptChildRoomBlocked = true; // no further script child is built in this room
     for (auto& c : g_scriptChildren) if (c.actor == actor) { c.held = true; c.retired = true; } // never adopted, streamed or driven
     bool already = false;
