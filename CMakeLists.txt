@@ -836,7 +836,9 @@ foreach(_kh2coop_target IN LISTS _kh2coop_targets)
     endif()
 endforeach()
 if(TARGET kh2coop_event_hold_input_test)
-    foreach(_event_mode off abort unowned elsewhere thorn-owned thorn-owned-closing closing-315 closing-release closing-abort closing-scope
+    foreach(_event_mode off abort unowned elsewhere thorn-owned thorn-owned-closing
+                        thorn-late-owner thorn-missing-end thorn-no-end thorn-late-owner-closing
+                        closing-315 closing-release closing-abort closing-scope
                         closing-partial closing-unconverged closing-frozen closing-blocked closing-event
                         closing-context closing-field closing-menu closing-foreign)
         add_test(NAME kh2coop_event_hold_input_test_${_event_mode}

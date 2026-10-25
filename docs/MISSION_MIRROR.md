@@ -204,6 +204,17 @@ observed for deduplication only; it grants no authority to call16. Unknown or
 partial native results abort the control lifetime. The landed Closing FIFO
 deferral, health expiry and ordinary safety predicates remain unchanged.
 
+The reliable host315 may precede the unreliable end16 snapshot, or arrive when
+that snapshot is lost. The input consumer refuses generic replay for the exact
+qualified Thorn315 in every ordering, even without a native owner. It grants no
+end16/prelude authority from315 alone and opens no new PAUSE that could block a
+later qualified native sequence. A late admitted end16 can still run that
+sequence; an independently qualified local native315 can still be observed for
+deduplication. If neither occurs, there is no fabricated victory start; the log
+records `generic replay refused; no qualified owner`. This failure remains a
+live qualification failure, not a timing pass. Ordinary checked scene replay
+and its refusal/Closing behavior are unchanged.
+
 `kh2coop_thorn_defeat_test` covers retained occurrence, scope and one-owner
 rules. `kh2coop_nativehit_test` exercises actual paused admission and resume
 with `host=-`. Its optional `--thorn-native-contract <audit-assets-dir>` fixture
