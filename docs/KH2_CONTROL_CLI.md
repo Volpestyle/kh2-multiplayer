@@ -364,9 +364,11 @@ kh2ctl hit --pid 1234 kill --victim 0x7FF6...              # synthetic killing b
 kh2ctl hit --pid 1234 drop --off
 ```
 
-Actor addresses come from `kh2ctl entities`. The DLL logs every hit as it's
+Actor addresses come from `kh2ctl entities`. The DLL logs hits as they're
 built (`[hit]` lines in the inject log: attacker, atkp id, victim, damage)
-from a post-hook on the hit builder `0x3D23C0`. The drop filter pre-hooks
+from a post-hook on the hit builder `0x3D23C0`: the first 60, plus the first 60
+whose attacker is a boss (`B_` objentry), so a route's earlier fights never use
+up the lines that show a boss's attacks. The drop filter pre-hooks
 `ApplyHitDamage` `0x3D3BA0(victim, hit)` and zeroes the hit's damage
 (`hit+0x28`) when the attacker/victim match (0 = any; `--enemies` limits it to
 objentry type 3/4 victims). Each dropped hit goes into a 64-slot claim ring

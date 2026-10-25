@@ -656,6 +656,7 @@ static constexpr uint8_t kBuildHitBytes[] = {
     0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57};
 static PFN_BuildHit g_origBuildHit = nullptr;
 static uint32_t g_hitsLogged = 0;
+static uint32_t g_bossHitsLogged = 0; // VUH-2617: bosses (B_ objentries) keep their own [hit] budget
 static constexpr uint32_t HIT_LOG_LIMIT = 60;
 
 struct HandleEntry { uint32_t handle; uintptr_t actor; };
@@ -726,17 +727,20 @@ static uintptr_t __fastcall HookedBuildHit(void* atk, void* victim, uint32_t a3,
             enemymirror::NoteHit(attackerActor, reinterpret_cast<uintptr_t>(victim), atkpId, victimName,
                                  *reinterpret_cast<const int32_t*>(hit + 0x28), *reinterpret_cast<const uint8_t*>(hit + 0x25));
         }
-        if (g_hitsLogged >= HIT_LOG_LIMIT) return hit;
-        const int32_t damage = *reinterpret_cast<const int32_t*>(hit + 0x28);
-        const uint8_t stat = *reinterpret_cast<const uint8_t*>(hit + 0x25);
+        // A boss's hits have their own budget: a route's ordinary fights before it never spend the lines that show
+        // the boss's native attacks (the Thorn harness asserts on them).
         char attacker[32], target[32];
         ActorName(attackerActor, attacker);
+        uint32_t& logged = attacker[0] == 'B' && attacker[1] == '_' ? g_bossHitsLogged : g_hitsLogged;
+        if (logged >= HIT_LOG_LIMIT) return hit;
+        const int32_t damage = *reinterpret_cast<const int32_t*>(hit + 0x28);
+        const uint8_t stat = *reinterpret_cast<const uint8_t*>(hit + 0x25);
         ActorName(reinterpret_cast<uintptr_t>(victim), target);
         const int32_t* hp = nullptr;
         const auto status = *reinterpret_cast<const uintptr_t*>(
             reinterpret_cast<uintptr_t>(victim) + 0x5C0);
         if (status > 0x10000) hp = reinterpret_cast<const int32_t*>(status);
-        ++g_hitsLogged;
+        ++logged;
         Log("[hit] frame %u attacker=%s (handle %08X) atkp=%u -> victim=%s@%llX damage=%d stat=%u hpBefore=%d",
             g_frameCounter, attacker, ownerHandle, atkpId, target,
             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(victim)),
