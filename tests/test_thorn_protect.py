@@ -441,5 +441,40 @@ for react, at in ((432, Z119_AT), (667, NEAR)):
     check(len(w) == 1 and w[0]["protected"] == {str(react): 1} and p.protect_stats["byCommand"] == {str(react): 1},
           f"r5b: orbhold_report counts the first-tick protected {react} in its window")
 
+# r5c (Sage, on r5b): coalescing is per revive window. The same protected RC recurring within 0.5 s after a recovery,
+# in a new window, is that window's own row; so is one after a poll that coalesced a recovery and a new downing.
+for react, at in ((432, Z119_AT), (667, NEAR)):
+    clock.now = 5000.0
+    p, c = setup(partner=Z119_PARTNER)
+    tick(p, c, own(at, react=react, obs=prompt(17800)), dt=0.1)     # window 1, protected
+    c.peer_log.downed = False
+    tick(p, c, own(at, obs=prompt(17806)), dt=0.1)                  # recovered: the core ends the window
+    c.peer_log.downed, c.peer_log.downs = True, 2
+    tick(p, c, own(at, react=react, obs=prompt(17812)), dt=0.1)     # window 2, 0.2 s after window 1's row
+    c.peer_log.downed = False
+    tick(p, c, own(at, obs=prompt(17818)))
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "friend_thorn").mkdir()
+        (Path(d) / "friend_thorn" / "pilot.jsonl").write_text(p.jsonl(), encoding="utf-8")
+        w = orbhold_report.windows(Path(d), "friend_thorn", [])
+    check(len(p.rows_of("coop_rc_protected")) == 2 and len(w) == 2
+          and [x["protected"] for x in w] == [{str(react): 1}, {str(react): 1}],
+          f"r5c: a {react} recurring 0.2 s into a new window after a recovery is logged and reported in that window")
+
+    clock.now = 5100.0
+    p, c = setup(partner=Z119_PARTNER)
+    tick(p, c, own(at, react=react, obs=prompt(17900)), dt=0.1)
+    since = c.since
+    c.peer_log.downs = 2                                             # one poll: revived and downed again
+    tick(p, c, own(at, react=react, obs=prompt(17906)), dt=0.1)
+    check(c.since == since and [f["episode"] for f in p.rows_of("coop_rc_protected")] == [1, 2],
+          f"r5c: a coalesced recovery + downing (same since, downs 2) gives the {react} a new row")
+
+    clock.now = 5200.0
+    p, c = setup(partner=Z119_PARTNER)
+    for _ in range(3):
+        tick(p, c, own(at, react=react, obs=prompt(18000)), dt=0.2)
+    check(len(p.rows_of("coop_rc_protected")) == 1, f"r5c control: the same {react} within one window stays one row")
+
 print(f"failures={failures}")
 sys.exit(1 if failures else 0)

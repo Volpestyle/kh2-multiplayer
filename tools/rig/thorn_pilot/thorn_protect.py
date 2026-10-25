@@ -81,7 +81,7 @@ class ProtectPilotMixin:
 
 class ProtectCore(thorn.CooperativeFight):
     """Listed after OrbHoldCore, so C3 places it directly above thorn.CooperativeFight (see CooperativeFight below)."""
-    protect_last = (None, 0.0)  # (command, monotonic) of the last protected tick
+    protect_last = (None, None, 0.0)  # (revive episode, command, monotonic) of the last protected tick
 
     def protect_check(self, pilot, own, event_reaction):
         """(command, horizontal or None, reviving) when this tick's RC is protected, else None."""
@@ -111,12 +111,16 @@ class ProtectCore(thorn.CooperativeFight):
         stats = pilot.protect_stats
         stats['ticks'] += 1
         stats['reviving'] += mask[2]
-        if mask[0] != self.protect_last[0] or now - self.protect_last[1] > 0.5:
+        # Coalescing stays inside one revive episode, the same (since, partner downs) identity thorn_orbhold keys its
+        # cap and latch to: a recovery clears `since`, and one poll can coalesce a recovery and a new downing (Sage,
+        # on r5b).
+        episode = (self.since, getattr(self.peer_log, 'downs', None))
+        if episode != self.protect_last[0] or mask[0] != self.protect_last[1] or now - self.protect_last[2] > 0.5:
             stats['episodes'] += 1
             stats['byCommand'][str(mask[0])] = stats['byCommand'].get(str(mask[0]), 0) + 1
             pilot.write('coop_rc_protected', command=mask[0], horizontal=mask[1], reviving=mask[2],
                         hp=own.get('hp'), peerPid=self.peer.pid, episode=stats['episodes'])
-        self.protect_last = (mask[0], now)
+        self.protect_last = (episode, mask[0], now)
 
     def step(self, pilot, own, event_reaction=False):
         mask = self.protect_check(pilot, own, event_reaction)
