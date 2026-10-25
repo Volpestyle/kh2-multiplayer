@@ -139,7 +139,7 @@ with the ungated one.
 
 | Config | Machine | Idle | Reclaim on |
 |---|---|---|---|
-| `config.bld.json` | `bld`, someone's everyday desktop | 15 min of physical idle | physical or foreign injected input; a foreign game or fullscreen app for 3 s; stop file, session or observer loss |
+| `config.bld.json` | `bld`, someone's everyday desktop | 15 min of physical idle | physical or foreign injected input; a foreign game or fullscreen app for 10 s (as on PC1; 3 s reclaimed bld03b and zz72b during KH2's boot with nobody there); stop file, session or observer loss |
 | `config.pc1.json` | PC1 (`supedupsilly`), James's gaming PC | none (`idleMinutes` 0) | a foreign game or fullscreen app for 10 s; stop file, session or observer loss. Input doesn't reclaim (`reclaimOnInput` false). |
 
 **PC1 profile.** PC1 runs on pad input while James works there, but never while he games. The lead
