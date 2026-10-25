@@ -1,7 +1,8 @@
-"""VUH-2617 desk gate: fullscreen and foreign-game reclaim receipts name what was in front. Runs agent.ps1's real
-Get-ProcessDetail, Get-ForeignActivity and Add-ForeignDetail in Windows PowerShell 5.1, with Kh2Desk.Gate stubbed. The
-reclaim rule itself is unchanged: an owned or in-job foreground never counts, and a foreign game or a fullscreen app
-that isn't the rig's still does.
+"""VUH-2617 desk gate: fullscreen and foreign-game reclaim receipts name what was in front, and busy/fullscreen states
+caused by the rig's own focus-less KH2 are ignored but recorded (bld03c: Discord in front, our game owned). Runs
+agent.ps1's real Get-ProcessDetail, Get-ForeignActivity, Add-ForeignDetail, Add-IgnoredBusy and Finish-Job in Windows
+PowerShell 5.1, with Kh2Desk.Gate stubbed. An owned or in-job foreground never counts; a foreign game window always
+counts; states 2/3 count only when no owned game is live; presentation (4) and quiet time (7) always count.
 
     python -B -m unittest discover -s tests -p test_desk_gate_foreground.py -v
 """
@@ -30,20 +31,24 @@ namespace Kh2Desk {
     public static int ForegroundPid() { return Front; }
     public static int NotificationState() { return State; }
     public static bool InJob(IntPtr job, int pid) { return pid == JobPid; }
+    public static void CloseJob(IntPtr job) { }
   }
 }
 '@
 $ast = [Management.Automation.Language.Parser]::ParseFile($Agent, [ref]$null, [ref]$null)
-foreach ($name in 'Get-ProcessDetail', 'Get-ForeignActivity', 'Add-ForeignDetail') {
+foreach ($name in 'Get-ProcessDetail', 'Get-ForeignActivity', 'Add-ForeignDetail', 'Add-IgnoredBusy', 'Finish-Job') {
   $fn = $ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
   if (@($fn).Count -ne 1) { throw "agent.ps1 has $(@($fn).Count) $name" }
   . ([scriptblock]::Create($fn[0].Extent.Text))
 }
 $script:owned = @()
 function Get-Owned { $script:owned }
+$script:logs = @()
+function Log([string]$Text) { $script:logs += $Text }
+$root = Join-Path $env:TEMP ('gatefg-' + [guid]::NewGuid()); New-Item -ItemType Directory -Force "$root\done" | Out-Null
 $config = [pscustomobject]@{ foreignGameNames = 'Marvel-Win64-Shipping|KINGDOM HEARTS|r5apex'; foreignGamePaths = '\\steamapps\\common\\'
                              foreignGameExempt = '^RiotClient' }
-$job = [pscustomobject]@{ name = 'j'; jobObject = [IntPtr]1; foreignSeconds = 0; foreignDetail = $null }
+$job = [pscustomobject]@{ name = 'j'; base = 'j'; file = "$root\j.ps1"; jobObject = [IntPtr]1; foreignSeconds = 0; foreignDetail = $null; ignoredBusy = $null; stdout = $null; stderr = $null; warnings = $null }
 function Win($procId, $name, $path) { $w = New-Object Kh2Desk.Proc; $w.Pid = $procId; $w.Name = $name; $w.Path = $path; $w }
 function Case($label) {
   $activity = Get-ForeignActivity $job
@@ -83,7 +88,36 @@ $receipts.physical = Add-ForeignDetail ([ordered]@{ job = 'j'; reason = 'physica
 $orphan = [pscustomobject]@{ name = 'old'; jobObject = [IntPtr]::Zero }
 $receipts.orphan = Add-ForeignDetail ([ordered]@{ job = 'old'; reason = 'fullscreen' }) $orphan 'fullscreen'
 $receipts.nojob = Add-ForeignDetail ([ordered]@{ job = 'x'; reason = 'fullscreen' }) $null 'fullscreen'
-[ordered]@{ me = $me; cases = $out; receipts = $receipts } | ConvertTo-Json -Depth 8 -Compress
+# Owned-game busy states (bld03c): our KH2 owned and live, someone else's window in front.
+[Kh2Desk.Gate]::Windows.Clear(); [Kh2Desk.Gate]::Front = $me
+$kh2 = [pscustomobject]@{ pid = 5840; unreadable = $false }
+$busy = @()
+function BusyCase($label, $state, $owned) { [Kh2Desk.Gate]::State = $state; $script:owned = $owned
+  $a = Get-ForeignActivity $job; [pscustomobject]@{ label = $label; activity = $a; detail = $script:foreignDetail; ignored = $script:ignoredBusy } }
+$busy += BusyCase 'owned-busy-2' 2 @($kh2)
+$busy += BusyCase 'owned-d3d-3' 3 @($kh2)
+$busy += BusyCase 'owned-presentation-4' 4 @($kh2)
+$busy += BusyCase 'owned-quiet-7' 7 @($kh2)
+$busy += BusyCase 'unowned-busy-2' 2 @()
+$busy += BusyCase 'unreadable-only-busy-2' 2 @([pscustomobject]@{ pid = 0; unreadable = $true })
+[Kh2Desk.Gate]::Windows.Add((Win 4242 'r5apex' 'C:\Games\Apex\r5apex.exe'))
+$busy += BusyCase 'owned-busy-with-foreign-game' 2 @($kh2)
+[Kh2Desk.Gate]::Windows.Clear()
+# The job's ignored record, its log lines (first, on a foreground change, capped), receipts and the done file.
+$script:logs = @(); $job.ignoredBusy = $null
+[Kh2Desk.Gate]::State = 2; $script:owned = @($kh2)
+for ($i = 0; $i -lt 3; $i++) { $null = Get-ForeignActivity $job; Add-IgnoredBusy $job $script:ignoredBusy }
+$afterSame = @{ checks = $job.ignoredBusy.checks; logs = $script:logs.Count }
+[Kh2Desk.Gate]::Front = 999999
+$null = Get-ForeignActivity $job; Add-IgnoredBusy $job $script:ignoredBusy
+$afterChange = @{ checks = $job.ignoredBusy.checks; logs = $script:logs.Count; last = $job.ignoredBusy.last.foreground.pid; first = $job.ignoredBusy.first.foreground.pid }
+for ($i = 0; $i -lt 60; $i++) { [Kh2Desk.Gate]::Front = $(if ($i % 2) { $me } else { 999999 }); $null = Get-ForeignActivity $job; Add-IgnoredBusy $job $script:ignoredBusy }
+$capped = @{ logs = $script:logs.Count; checks = $job.ignoredBusy.checks }
+$receipts.ignoredOnPhysical = Add-ForeignDetail ([ordered]@{ job = 'j'; reason = 'physical-input' }) $job 'physical-input'
+Finish-Job $job 'RECLAIMED gate: physical-input'
+$doneText = [string](Get-Content -Raw "$root\done\j.out")   # a plain string: Get-Content's PS* notes explode ConvertTo-Json -Depth 8
+Remove-Item -Recurse -Force $root
+[ordered]@{ me = $me; cases = $out; receipts = $receipts; busy = $busy; afterSame = $afterSame; afterChange = $afterChange; capped = $capped; logs = @($script:logs | Select-Object -First 2); done = $doneText } | ConvertTo-Json -Depth 8 -Compress
 """
 
 
@@ -138,6 +172,42 @@ class ForegroundDetail(unittest.TestCase):
         self.assertNotIn("foreign", r["physical"])          # other reasons carry no foreign detail
         self.assertNotIn("foreign", r["orphan"])            # an agent-restart orphan has none, and doesn't throw
         self.assertNotIn("foreign", r["nojob"])
+
+    def busy(self, label):
+        return next(c for c in self.out["busy"] if c["label"] == label)
+
+    def test_owned_game_busy_states_are_ignored_and_recorded(self):
+        for label, state in (("owned-busy-2", 2), ("owned-d3d-3", 3)):
+            with self.subTest(label=label):
+                c = self.busy(label)
+                self.assertIsNone(c["activity"])
+                self.assertIsNone(c["detail"])
+                self.assertEqual(c["ignored"]["activity"], "ignored-busy")
+                self.assertEqual(c["ignored"]["notificationState"], state)
+                self.assertEqual(c["ignored"]["foreground"]["pid"], self.out["me"])
+                self.assertEqual(c["ignored"]["ownedPids"], [5840])
+
+    def test_still_reclaims(self):
+        expect = {"owned-presentation-4": "fullscreen", "owned-quiet-7": "fullscreen", "unowned-busy-2": "fullscreen",
+                  "unreadable-only-busy-2": "fullscreen", "owned-busy-with-foreign-game": "foreign-game"}
+        for label, activity in expect.items():
+            with self.subTest(label=label):
+                c = self.busy(label)
+                self.assertEqual(c["activity"], activity)
+                self.assertIsNone(c["ignored"])
+                self.assertEqual(c["detail"]["activity"], activity)
+
+    def test_ignored_record_logs_and_done_file(self):
+        self.assertEqual(self.out["afterSame"], {"checks": 3, "logs": 1})        # one line for a steady foreground
+        a = self.out["afterChange"]
+        self.assertEqual((a["checks"], a["logs"], a["first"], a["last"]), (4, 2, self.out["me"], 999999))
+        self.assertEqual(self.out["capped"], {"logs": 20, "checks": 64})          # at most 20 lines a job
+        self.assertTrue(self.out["logs"][0].startswith("ignored-busy job=j foreign={"))
+        r = self.out["receipts"]["ignoredOnPhysical"]
+        self.assertEqual(r["ignoredBusy"]["checks"], 64)                          # on any reason's receipt
+        self.assertNotIn("foreign", r)
+        self.assertTrue(self.out["done"].startswith("IGNORED-BUSY gate: 64 busy/fullscreen checks ignored"))
+        self.assertIn("RECLAIMED gate: physical-input", self.out["done"])
 
 
 if __name__ == "__main__":

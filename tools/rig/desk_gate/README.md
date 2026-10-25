@@ -59,7 +59,7 @@ Any other first line means `launch`, the default.
 | `locked` | both | The input desktop isn't `Default` (lock screen or secure desktop). |
 | `session` | both | The agent isn't in the active console session. |
 | `observer` | both | The low-level hooks aren't installed. |
-| `fullscreen` | both | `SHQueryUserNotificationState` reports busy, D3D fullscreen or presentation mode. |
+| `fullscreen` | both | `SHQueryUserNotificationState` reports busy, D3D fullscreen or presentation mode, and the foreground process isn't the rig's. During a job, busy (2) and D3D fullscreen (3) don't count while an owned game is live: the rig's own focus-less KH2 causes them whatever window is in front (bld03c: the owner's Discord). They're recorded as `ignoredBusy` on the job instead: a log line when they start or the foreground changes (20 a job at most), any receipt, and an `IGNORED-BUSY gate:` line in the `.out`. A foreign game window, presentation mode (4) and quiet time (7) still count. |
 | `foreign-game` | both | A game process with a window that the rig doesn't own (same patterns as `desk-scenario.ps1`). |
 | `stopped` | both | `C:\desk\gate\stop` exists. Creating it also reclaims a running job. |
 | `lease-held` | both | A job is running, or a retained lease is waiting for inspection. |

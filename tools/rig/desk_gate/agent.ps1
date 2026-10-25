@@ -100,6 +100,7 @@ function Get-ProcessDetail([int]$ProcessId) {
 # nobody at the desk and the game attributed, and the receipt didn't say what was in front (VUH-2617 bld03b).
 function Get-ForeignActivity($Job) {
   $script:foreignDetail = $null
+  $script:ignoredBusy = $null
   $owned = @(Get-Owned)
   $foreign = @([Kh2Desk.Gate]::Windowed() | Where-Object {
       $_.Pid -notin $owned.pid -and -not ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $_.Pid)) -and
@@ -112,20 +113,50 @@ function Get-ForeignActivity($Job) {
   $front = [Kh2Desk.Gate]::ForegroundPid()
   $state = [Kh2Desk.Gate]::NotificationState()
   if ($state -in 2, 3, 4, 7 -and $front -notin $owned.pid -and -not ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $front))) {
-    $script:foreignDetail = [ordered]@{ activity = 'fullscreen'; notificationState = $state
+    $detail = [ordered]@{ activity = 'fullscreen'; notificationState = $state
       foreground = Get-ProcessDetail $front; ownedPids = @($owned | ForEach-Object pid) }
+    # The rig's own fullscreen KH2 runs without taking focus (pad input), and Windows then reports busy (2) or D3D
+    # fullscreen (3) whatever window is in front: on bld that was the owner's Discord (bld03c). While an owned game
+    # is live those two states alone don't show a foreign fullscreen app; a foreign game window was caught above,
+    # and presentation (4) and quiet time (7) still count. What was ignored is kept as $script:ignoredBusy.
+    if ($state -in 2, 3 -and @($owned | Where-Object { $_.pid -and -not $_.unreadable }).Count) {
+      $detail.activity = 'ignored-busy'
+      $script:ignoredBusy = $detail
+      return $null
+    }
+    $script:foreignDetail = $detail
     return 'fullscreen'
   }
   $null
 }
 
-# The foreign activity behind a fullscreen or foreign-game reclaim, as last seen by the job's watch, on its receipt.
+# The foreign activity behind a fullscreen or foreign-game reclaim, as last seen by the job's watch, on its receipt;
+# and, on any receipt, the busy/fullscreen states the job's watch ignored while its own game was live.
 function Add-ForeignDetail($Receipt, $Job, [string]$Reason) {
   if ($Reason -in 'fullscreen', 'foreign-game' -and $Job -and $Job.foreignDetail) {
     $Receipt.foreign = $Job.foreignDetail
     $Receipt.foreign.seconds = $Job.foreignSeconds
   }
+  if ($Job -and $Job.ignoredBusy) { $Receipt.ignoredBusy = $Job.ignoredBusy }
   $Receipt
+}
+
+# Keeps an ignored busy/fullscreen check on the job (first, last, how many checks) and logs it when it starts and
+# whenever the foreground process changes, at most 20 lines a job, so a masked real fullscreen app stays visible.
+function Add-IgnoredBusy($Job, $Detail) {
+  if (-not $Job.ignoredBusy) {
+    $Job.ignoredBusy = [ordered]@{ checks = 1; first = $Detail; last = $Detail; logged = 1 }
+    Log "ignored-busy job=$($Job.name) foreign=$($Detail | ConvertTo-Json -Compress -Depth 4)"
+    return
+  }
+  $seen = $Job.ignoredBusy
+  $changed = $seen.last.foreground.pid -ne $Detail.foreground.pid
+  $seen.checks++
+  $seen.last = $Detail
+  if ($changed -and $seen.logged -lt 20) {
+    $seen.logged++
+    Log "ignored-busy job=$($Job.name) foreign=$($Detail | ConvertTo-Json -Compress -Depth 4)"
+  }
 }
 
 function Get-Refusals([string]$Level) {
@@ -260,6 +291,10 @@ function Finish-Job($Job, [string]$Prefix) {
     $Prefix = "GIT OWNERSHIP gate: git refused $($Matches[1]): another account owns it. Fix: icacls `"$($Matches[1])`" /setowner $env:USERNAME /T (and the same for its .git\worktrees\<name> folder)`r`n" + $Prefix
   }
   if ($Job.warnings) { $Prefix = (@($Job.warnings) -join "`r`n") + "`r`n" + $Prefix }
+  if ($Job.ignoredBusy) {
+    $b = $Job.ignoredBusy
+    $Prefix = "IGNORED-BUSY gate: $($b.checks) busy/fullscreen checks ignored while the rig's game was live; first front $($b.first.foreground.name) ($($b.first.foreground.pid)), last $($b.last.foreground.name) ($($b.last.foreground.pid))`r`n" + $Prefix
+  }
   Set-Content -LiteralPath "$root\done\$($Job.base).out" -Value ($Prefix + $text) -Encoding UTF8
   if (Test-Path -LiteralPath $Job.file) { Move-Item -LiteralPath $Job.file -Destination "$root\done\$($Job.name)" -Force }
   [Kh2Desk.Gate]::CloseJob($Job.jobObject)
@@ -317,6 +352,7 @@ while ($true) {
           $activity = Get-ForeignActivity $job
           $job.foreignSeconds = if ($activity) { $job.foreignSeconds + 1 } else { 0 }
           $job.foreignDetail = $script:foreignDetail
+          if ($script:ignoredBusy) { Add-IgnoredBusy $job $script:ignoredBusy }
           if ($job.foreignSeconds -ge $foreignReclaimSeconds) { $reason = $activity }
         }
       } catch {
@@ -393,7 +429,7 @@ while ($true) {
           $lease.childPid = $p.Id; $lease.childCreated = $p.StartTime.ToFileTimeUtc()
           Set-Content -LiteralPath $leasePath -Value ($lease | ConvertTo-Json -Compress) -Encoding UTF8 -NoNewline
           $job = [pscustomobject]@{ name = $next.Name; base = $next.BaseName; file = $next.FullName; level = $level; process = $p; pid = $p.Id
-                                    created = $lease.childCreated; jobObject = $jobObject; startTick = $startTick; nextCheck = 0; foreignSeconds = 0; foreignDetail = $null; stdout = $stdout; stderr = $stderr; warnings = $warnings
+                                    created = $lease.childCreated; jobObject = $jobObject; startTick = $startTick; nextCheck = 0; foreignSeconds = 0; foreignDetail = $null; ignoredBusy = $null; stdout = $stdout; stderr = $stderr; warnings = $warnings
                                     leaseText = (Get-Content -Raw -LiteralPath $leasePath) }
           Log "admitted $($next.Name) level=$level child=$($p.Id)"
         } catch {
