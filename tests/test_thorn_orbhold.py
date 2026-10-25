@@ -386,6 +386,65 @@ check(abs(c.orbhold_waited - 2.0) < 1e-9 and p.kinds().count("coop_orb_hold") ==
       "time between two volleys in one window is not counted; the second volley opens episode 2")
 
 
+# ---- r4: the finish latch (zr116's throwback re-arm) -------------------------------------------------------------
+# zr116: held off, reached 173 from the partner, a 432 throwback pushed it back to 350 in the same volley, and the
+# hold-off re-armed and walked it away. Partner at FAR_PARTNER (z 700), 1560 from Thorn throughout.
+p, c = setup()
+c.step(p, own(pos=OWN_OUT))                                   # 400 from the partner: held off
+check(p.kinds().count("coop_orb_hold") == 1, "r4: the volley holds the rescuer off at first")
+clock.now += 0.3
+c.step(p, own(pos=[0.0, 0.0, 527.0]))                         # 173 from the partner: finish
+check(c.orbhold_finished and p.row("coop_orb_hold_end")["reason"] == "finish-latched",
+      "r4: reaching finish (173) latches the window and ends the episode 'finish-latched'")
+clock.now += 0.3
+p.kb.frames.clear()
+c.step(p, own(react=432, pos=[0.0, 0.0, 350.0]))              # the 432 is pressed with the partner's direction
+clock.now += 0.3
+c.step(p, own(pos=[0.0, 0.0, 350.0]))                         # thrown back to 350, Thorn still in 202
+check(p.kinds().count("coop_orb_hold") == 1 and last_move(p) == toward(own(pos=[0.0, 0.0, 350.0]), FAR_PARTNER),
+      "r4: thrown back to 350 in the same volley, it keeps walking to the partner instead of re-arming")
+clock.now += 0.3
+c.step(p, own(pos=OWN_OUT))                                   # even back at 400 or farther
+check(p.kinds().count("coop_orb_hold") == 1, "r4: the latched window never holds off again, however far it is pushed")
+c.peer_log.downed = False
+c.step(p, own(pos=OWN_OUT))
+check(not c.orbhold_finished, "r4: the partner's recovery clears the latch")
+c.peer_log.downed, c.peer_log.actor = True, PARTNER
+clock.now += 0.3
+c.step(p, own(pos=OWN_OUT))
+check(p.kinds().count("coop_orb_hold") == 2, "r4: the next revive window can hold off again")
+
+p, c = setup()
+c.step(p, own(pos=OWN_OUT))
+clock.now += 0.3
+c.step(p, own(pos=[0.0, 0.0, 400.0]))                         # exactly 300: finish is inclusive
+check(c.orbhold_finished, "r4: exactly `finish` (300) from the partner latches")
+p, c = setup()
+c.step(p, own(pos=OWN_OUT))
+clock.now += 0.3
+c.step(p, own(pos=[0.0, 0.0, 399.9]))                         # 300.1: still held off, no latch
+check(not c.orbhold_finished and p.kinds().count("coop_orb_hold") == 1 and "coop_orb_hold_end" not in p.kinds(),
+      "r4: 300.1 from the partner neither latches nor releases")
+
+# Controls: r3 behaviour is unchanged when the rescuer never reaches finish, and outside revive windows.
+p, c = setup()
+c.step(p, own())
+p.observed = head(motion=207)
+clock.now += 0.3
+c.step(p, own())
+p.observed = head()
+clock.now += 0.3
+c.step(p, own())
+check(not c.orbhold_finished and p.kinds().count("coop_orb_hold") == 2,
+      "control: without reaching finish, a second volley in the window still holds off (r3)")
+p, c = setup(peer_down=False)
+c.step(p, own(pos=[0.0, 0.0, 527.0]))
+check(not c.orbhold_finished and "coop_orb_hold" not in p.kinds(), "control: outside a revive window nothing latches")
+p, c = setup(cfg=None)
+c.step(p, own(pos=[0.0, 0.0, 527.0]))
+check(not c.orbhold_finished, "control: switch off, nothing latches")
+
+
 # ---- full production MRO: a stalled approach, then a volley (Sage, on r2) ----------------------------------------
 class ApproachCore(thorn_approach.ApproachRevisionMixin, Core):
     pass

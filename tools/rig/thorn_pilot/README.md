@@ -89,6 +89,9 @@ gate, the engagement bound and the cooldown are described in the review packet's
   are pressed with the hold-off direction. While held off, `thorn_approach`'s plateau anchor and any detour are reset,
   so the stand-off isn't treated as a stall. The outermost `OrbHoldApproachMixin` empties that layer's `facts()` for
   the rest of a held tick (r3), so a plateau candidate cached before the core can't fire a detour or escape after it.
+- **Finish latch (r4, lead #317).** Once the rescuer has come within `finish` of the partner, that revive window
+  never holds off again. The latch clears when the partner recovers. In zr116 a 432 throwback from 173 back out to
+  350 re-armed the hold-off and walked the rescuer away five times. The episode end reason is `finish-latched`.
 - **Logs.**
   - `coop_orb_hold` / `coop_orb_hold_end`, per episode, with the end reason: `released`, `cap`, `timeout`,
     `peer-recovered` or `core`;
