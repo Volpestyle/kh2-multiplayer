@@ -15,7 +15,8 @@ identity and scope, HP). Only the core's single steer toward the downed partner 
 motion 202, the partner lies `far` or more from Thorn's root and this seat is more than `finish` from the partner: the
 rescuer then steers toward Thorn until within `hold` of the root and stands. RCs keep their press (with that
 direction). The approach resumes when Thorn leaves 202, when the partner is no longer far, or after `maxWaitSec` held
-off in one revive window. Thorn is read through the existing head observation (no new reads); an unknown head never
+off in one revive window. Once the rescuer has come within `finish` of the partner, that window never holds off
+again (r4: in zr116 432 throwbacks re-armed it and walked a nearly-arrived rescuer away). Thorn is read through the existing head observation (no new reads); an unknown head never
 holds back. While held off, thorn_approach's plateau monitor must not read the deliberate stand-off as a stall: the
 hook resets its anchor and detour, and the outermost OrbHoldApproachMixin makes its `facts()` empty for the rest of
 a held tick, so the candidate it cached before the core can't start a detour or escape after it (Sage, on r2).
@@ -97,6 +98,7 @@ class OrbHoldCore(thorn.CooperativeFight):
     orbhold_since = None       # monotonic start of the open hold-off episode
     orbhold_last = None        # monotonic of the last held-off tick
     orbhold_waited = 0.0       # seconds held off in this revive window
+    orbhold_finished = False   # this revive window's rescuer has come within `finish` of its partner (r4 latch)
     orbhold_head = (None, -1.0)
 
     def orbhold_end(self, pilot, reason):
@@ -130,7 +132,14 @@ class OrbHoldCore(thorn.CooperativeFight):
             # The core's one steer toward the partner, reached only past all of its refusals.
             reached.append(True)
             peer_pos = (target[0], 0.0, target[1])
-            hold = orb_hold(cfg, self.orbhold_observe(pilot, own), s.get('pos'), peer_pos, self.orbhold_waited)
+            # Once the rescuer has come within `finish` of the partner in this window it never holds off again: in
+            # zr116 a 432 throwback from 173 out to 350 re-armed the hold-off and walked it away from the partner.
+            pos = s.get('pos')
+            if pos and flat(pos, peer_pos) <= cfg['finish']:
+                self.orbhold_finished = True
+            if self.orbhold_finished:
+                return original(s, target, *args, **kwargs)
+            hold = orb_hold(cfg, self.orbhold_observe(pilot, own), pos, peer_pos, self.orbhold_waited)
             if hold is None:
                 return original(s, target, *args, **kwargs)
             held.append(hold)
@@ -145,9 +154,12 @@ class OrbHoldCore(thorn.CooperativeFight):
         if not held:
             if not self.peer_log.downed:
                 self.orbhold_waited = 0.0  # a new revive window gets a fresh cap
+                self.orbhold_finished = False  # and a fresh finish latch
                 reason = 'peer-recovered'
             elif not reached:
                 reason = 'core'
+            elif self.orbhold_finished:
+                reason = 'finish-latched'
             else:
                 reason = 'cap' if self.orbhold_waited >= cfg['maxWaitSec'] else 'released'
             self.orbhold_end(pilot, reason)
