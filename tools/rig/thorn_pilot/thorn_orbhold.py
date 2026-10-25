@@ -132,14 +132,18 @@ class OrbHoldCore(thorn.CooperativeFight):
                     waited=round(self.orbhold_waited, 2), peerPid=self.peer.pid)
         self.orbhold_since = self.orbhold_last = None
 
-    def orbhold_sync(self):
+    def orbhold_sync(self, pilot):
         """The cap and the latch belong to one revive episode: a new window start, its end (since cleared), or a new
         downing counted by the partner's log resets both, on whatever kind of tick it happens (an event reaction
         included; Sage, on r4). The partner's downs count matters because one poll can coalesce a recovery and a fresh
         interception: downs advances while `since` and `downed` stay as they were (Sage, on r4b). A recovery without a
-        new interception ends the window (since cleared), so revives adds nothing."""
+        new interception ends the window (since cleared), so revives adds nothing. A hold-off record open across the
+        change is closed ('episode-changed') with all of its timing, so the new episode starts its own record and its
+        own 30 s cap (Sage, on r4c)."""
         episode = (self.since, getattr(self.peer_log, 'downs', None))
         if episode != self.orbhold_window:
+            # The core clears `since` only when the partner is up again; otherwise a new episode began.
+            self.orbhold_end(pilot, 'peer-recovered' if self.since is None else 'episode-changed')  # clears since/last
             self.orbhold_window = episode
             self.orbhold_waited = 0.0
             self.orbhold_finished = False
@@ -158,7 +162,7 @@ class OrbHoldCore(thorn.CooperativeFight):
             if cfg is not None:
                 self.orbhold_end(pilot, 'core')
             result = super().step(pilot, own, event_reaction)
-            self.orbhold_sync()
+            self.orbhold_sync(pilot)
             return result
         original, held, reached, core_math = base.steer, [], [], CoreMath()
 
@@ -166,7 +170,7 @@ class OrbHoldCore(thorn.CooperativeFight):
             # The core's one steer toward the partner, reached only past all of its refusals.
             reached.append(True)
             # The core has just polled the logs: a coalesced recovery + new downing shows here first (Sage, on r4b).
-            self.orbhold_sync()
+            self.orbhold_sync(pilot)
             # Once the rescuer has come within `finish` of the partner in this window it never holds off again: in
             # zr116 a 432 throwback from 173 out to 350 re-armed the hold-off and walked it away from the partner.
             # The latch is set from the core's own gap after each tick (below).
@@ -184,7 +188,7 @@ class OrbHoldCore(thorn.CooperativeFight):
             result = super().step(pilot, own, event_reaction)
         finally:
             base.steer, thorn.math = original, math
-        self.orbhold_sync()
+        self.orbhold_sync(pilot)
         if self.since is not None and any(g <= cfg['finish'] for g in core_math.gaps):
             self.orbhold_finished = True  # an arrival within 80 never steers; the core's own gap still latches
         now = time.monotonic()
