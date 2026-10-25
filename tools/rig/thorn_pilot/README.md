@@ -33,9 +33,32 @@ python -B tools/rig/thorn_pilot/run_creeper.py tools/rig/thorn_pilot/scenarios/n
 Creeper-first rules are in `creeper_policy.py` (pure) and their execution is in `thorn_creeper.py`. The priority
 gate, the engagement bound and the cooldown are described in the review packet's README.
 
+## No throwback Reversals while rescuing (lead #291)
+
+`thorn_rescue.py` sits over `thorn_creeper.py` and is run with `run_rescue.py` and the `_creeper_rescue` scenario.
+
+- **Why.** In zr98–110 the revive core pressed every offered RC on the way to a downed partner. A completed 432/426
+  from within 600 threw the rescuer back a median +295 to +498. Rescues with three or more such throwbacks recovered
+  1 of 5 (median 55.6 s), against 9 of 9 with one or two.
+- **What.** It's opt-in per fight step: `"rescueNoReversal": {"commands": [432, 426], "within": 600}`, on both seats'
+  `_rescue` routes. When the partner is logically downed, this seat isn't, a listed command is on screen and the
+  partner is within `within` horizontally, the pad drops Triangle for that tick. The revive core is unchanged: it ends
+  a hold for the RC and keeps walking, and the hold starts again once the prompt shows with no RC.
+- **Logs.**
+  - `coop_reversal_suppressed`, once per episode;
+  - `rescue_no_reversal_summary`, per fight.
+  - The core still writes `coop_reaction` for the RC it saw, so in a masked tick that row means it was seen, not
+    pressed.
+- **Measures.** `rescue_report.py RUN_DIR...`, per revive window:
+  - result and length;
+  - holds;
+  - suppressed episodes;
+  - throwbacks still taken;
+  - the rescuer's hits, with orb hits (1041/1014) called out.
+
 ## Checks and analysis
 
-- `tests/test_thorn_creeper.py`: offline controls (ctest `kh2coop_py_test_thorn_creeper`).
+- `tests/test_thorn_creeper.py` and `tests/test_thorn_rescue.py`: offline controls (ctest `kh2coop_py_test_thorn_*`).
 - `creeper_report.py RUN_DIR...`: per run, the kill, Thorn's end HP, Creeper kills, atk-400 host downs, revive
   exposures and Creeper turns.
 - `downs_report.py RUN_DIR`: per down, the killing hit and what each seat was doing.
