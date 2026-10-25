@@ -296,6 +296,35 @@ inline bool ReactionLive(const ReactionWindow& w, std::uint32_t epoch,
         w.epoch == epoch && !w.consumed && w.duration &&
         frame >= w.openedFrame && frame - w.openedFrame < w.duration;
 }
+// Native update 3B2340 clears the script command slots (3B20B0) after every
+// reaction refresh, so a prompt exists only on updates that re-registered it.
+// A client's own native per-frame registration may pass only for the window
+// the host offered to that seat: one role names the source, the role and its
+// window are this seat's on its current connection, the window is live in this
+// epoch and unconsumed, the command matches, and the seat is not logically
+// down. Ownership, liveness and minting a window stay with the host (VUH-2617).
+struct ClientReactionRegistration {
+    std::uint32_t sourceHandle{};
+    std::uint8_t roleSlot{0xFF};
+    bool current{},captureCurrent{};
+    ReactionWindow reaction{};
+};
+inline int SelectClientReactionRegistration(std::uint32_t sourceHandle,std::uint16_t command,std::uint8_t localSlot,
+    std::uint64_t connection,std::uint32_t epoch,std::uint32_t frame,bool locallyDowned,
+    const std::array<ClientReactionRegistration,3>& roles) noexcept {
+    if(!sourceHandle || !command || localSlot==0 || localSlot>=3 || !connection || locallyDowned)return -1;
+    int selected=-1;
+    for(unsigned i=0;i<roles.size();++i) {
+        if(roles[i].sourceHandle!=sourceHandle)continue;
+        if(selected>=0)return -1; // two roles naming one source leave ownership ambiguous
+        selected=static_cast<int>(i);
+    }
+    if(selected<0)return -1;
+    const auto& role=roles[static_cast<unsigned>(selected)];
+    const auto& w=role.reaction;
+    return role.current && role.captureCurrent && role.roleSlot==localSlot && w.slot==localSlot &&
+        w.connection==connection && w.command==command && ReactionLive(w,epoch,frame) ? selected : -1;
+}
 inline bool RefreshReaction(ReactionWindow& w,std::uint32_t epoch,std::uint32_t frame,
                             const std::array<ReactionSeat,3>& seats) noexcept {
     if(!ReactionLive(w,epoch,frame))return false;

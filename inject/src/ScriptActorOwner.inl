@@ -1811,6 +1811,21 @@ static uintptr_t SmOwnerRouteCommand(OwnerCommandFn original,R::OwnerCommandEntr
         if(!ReadHitTrace(g_exeBase+0x2A105D0,canonical) || actor!=canonical ||
            !ReadHitTrace(canonical+0xDD0,canonicalController) || controller!=canonicalController || !SmOwnerScope(scope))
             return SmOwnerCommandRefuse("native-controller-scope",caller,command,sourceHandle);
+        if(scope.localSlot!=0 && command<=UINT16_MAX) {
+            // A client's own host-offered window re-registers natively each
+            // frame; op7 replays alone leave alternate updates empty (VUH-2617).
+            std::array<R::ClientReactionRegistration,3> offered{};
+            for(unsigned i=0;i<g_smRoles.size();++i) {
+                const auto& role=g_smRoles[i];
+                if(!role.resource)continue;
+                offered[i]={role.sourceHandle,role.slot,
+                    role.actor==canonical && SmOwnerCurrent(role,scope) && GetTickCount64()<role.deadline,
+                    SmOwnerCaptureCurrent(role),role.reaction};
+            }
+            if(R::SelectClientReactionRegistration(sourceHandle,static_cast<std::uint16_t>(command),scope.localSlot,
+                scope.connections[scope.localSlot],scope.epoch,g_frameCounter,downedspike::LogicallyDowned(),offered)>=0)
+                return original(controller,kind,command,target,flags,priority);
+        }
         const auto seats=SmOwnerLivingSeats(scope);
         std::array<R::CapturedCommandRoleFacts,3> facts{};
         for(unsigned i=0;i<g_smRoles.size();++i) {
