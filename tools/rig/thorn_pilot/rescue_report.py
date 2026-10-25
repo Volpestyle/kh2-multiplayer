@@ -4,7 +4,8 @@ Usage: rescue_report.py RUN_DIR [RUN_DIR ...]
 Per run: kill / Thorn end HP / Creeper kills (creeper_report.py). Per revive window (a rescuer's `coop_revive
 peer-logical-downed` until `coop_revive combat` or a stuck row):
 - result (recovered, or the stuck reason), seconds, revive holds begun, closest approach (`coop_approach` horizontal);
-- suppressed Reversals: `coop_reversal_suppressed` episodes by command (thorn_rescue.py);
+- suppressed Reversals: `coop_reversal_suppressed` episodes by command (thorn_rescue.py), including the first tick's
+  row, which the mixin writes just before the core's window marker;
 - throwbacks still taken: own RC completions (`coop_approach_reset own-callback-consumed`) of 432/426 whose press burst
   started within 600 of the downed seat and whose next approach row (>= 0.5 s later) was > 200 farther, one per burst;
 - the rescuer's hits inside the window, by attack (host: `[hittrace] input phase=0` on its own actor, placed at the frame
@@ -22,6 +23,7 @@ import creeper_report  # noqa: E402
 
 F = lambda line, key: (re.search(rf"\b{key}=([^\s;]+)", line) or [None, None])[1]
 ORB = ("1041", "1014")
+SAME_TICK = 0.5  # s: a suppression row this close before a window's marker was written by the window's first tick
 
 
 def seat_logs(run):
@@ -61,14 +63,22 @@ def windows(run, seat, seat_hits):
     if not path.exists():
         return []
     rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
-    found, cur, start = [], None, 0
+    found, cur, start, early = [], None, 0, []
     for j, r in enumerate(rows):
         k = r.get("kind")
         if k == "coop_revive" and r.get("state") == "peer-logical-downed":
             cur, start = dict(rescuer=seat, t=r["t"], holds=0, minDist=None, suppressed=collections.Counter(),
                               frames=[], bursts={}), j
+            # thorn_rescue's mixin runs above the revive core, so on a window's first tick its suppression row is
+            # written just before the core's window marker: it belongs to this window (Sage, VUH-2617 26c5559c).
+            for x in early:
+                if r["t"] - x["t"] <= SAME_TICK:
+                    cur["suppressed"][str(x.get("command"))] += 1
+            early = []
             continue
         if cur is None:
+            if k == "coop_reversal_suppressed":
+                early.append(r)
             continue
         if k == "coop_approach":
             d = r.get("horizontal")

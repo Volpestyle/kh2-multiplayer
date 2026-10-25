@@ -243,6 +243,58 @@ except Boom:
 check(raised and p.kb.rescue_mask is None, "the mask is cleared even when a lower layer raises")
 
 
+# ---- rescue_report: the first tick's suppression belongs to its window (Sage, VUH-2617 26c5559c) ----------------
+import json  # noqa: E402
+import tempfile  # noqa: E402
+import rescue_report  # noqa: E402
+
+
+def first_tick_window(command):
+    """Real core + mixin: a window whose first tick suppresses `command`, then walking, then the partner recovers."""
+    p = FakePilot()
+    stamp = [100.0]
+
+    def write(kind, **f):
+        stamp[0] += 0.01
+        p.rows.append((kind, dict(f, t=stamp[0])))
+    p.write = write
+    peer_log = Log(True, actor=PARTNER)
+    c = Core(Peer((0.0, 0.0, 400.0)), Log(), peer_log)
+    c.step(p, own(command))
+    stamp[0] += 0.5
+    c.step(p, own(0))
+    peer_log.downed, peer_log.actor = False, 0
+    stamp[0] += 0.5
+    c.step(p, own(0))
+    return p
+
+
+def report_windows(rows):
+    with tempfile.TemporaryDirectory() as tmp:
+        run = Path(tmp)
+        (run / "friend_thorn").mkdir()
+        (run / "friend_thorn" / "pilot.jsonl").write_text(
+            "".join(json.dumps(dict(f, kind=k)) + "\n" for k, f in rows), encoding="utf-8")
+        return rescue_report.windows(run, "friend_thorn", [])
+
+
+for command in (432, 426):
+    p = first_tick_window(command)
+    kinds = p.kinds()
+    check(kinds.index("coop_reversal_suppressed") < kinds.index("coop_revive") and not pressed(p),
+          f"first-tick {command}: the suppression row precedes the core's window marker, and no Triangle is sent")
+    w = report_windows(p.rows)
+    check(len(w) == 1 and w[0]["result"] == "recovered" and w[0]["suppressed"] == {str(command): 1},
+          f"first-tick {command}: rescue_report counts it in that window")
+rows = [("coop_reversal_suppressed", dict(t=10.0, command=432)), ("coop_revive", dict(t=20.0, state="peer-logical-downed")),
+        ("coop_revive", dict(t=25.0, state="combat")), ("coop_reversal_suppressed", dict(t=30.0, command=426)),
+        ("coop_revive", dict(t=30.2, state="peer-logical-downed")), ("coop_reversal_suppressed", dict(t=31.0, command=432)),
+        ("coop_revive", dict(t=33.0, state="combat")), ("coop_reversal_suppressed", dict(t=40.0, command=432))]
+w = report_windows(rows)
+check([x["suppressed"] for x in w] == [{}, {"426": 1, "432": 1}],
+      "a suppression long before a window, or after it, is not counted; first-tick and in-window rows are")
+
+
 # ---- switch semantics and placement ------------------------------------------------------------------------------
 class FightBase:
     def fight(self, step, deadline):
