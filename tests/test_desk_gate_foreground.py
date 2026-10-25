@@ -35,7 +35,7 @@ namespace Kh2Desk {
     public static int NotificationState() { return State; }
     public static bool InJob(IntPtr job, int pid) { return pid == JobPid; }
     public static void CloseJob(IntPtr job) { }
-    public class Cover { public int Pid; public string Class; public long Monitor; }
+    public class Cover { public int Pid; public string Class; public long Monitor; public bool Owned; }
     public static List<Cover> Covers = new List<Cover>();
     public static List<Cover> Covering() { return Covers; }
     public static HashSet<string> AliveSet = new HashSet<string>();
@@ -59,7 +59,7 @@ $rigA = Join-Path $root 'rigA'; $rigB = Join-Path $root 'rigB'
 foreach ($r in $rigA, $rigB) { New-Item -ItemType Directory -Force "$r\build\rig" | Out-Null }
 function Get-RigRoots { @($rigA, $rigB) }
 function Set-OwnedTxt($rig, $lines) { $f = "$rig\build\rig\owned.txt"; if ($null -eq $lines) { Remove-Item $f -ErrorAction SilentlyContinue } else { Set-Content -LiteralPath $f -Value $lines -Encoding ascii } }
-function Cov($procId, $class) { $c = New-Object Kh2Desk.Gate+Cover; $c.Pid = $procId; $c.Class = $class; $c.Monitor = 1; $c }
+function Cov($procId, $class, $owned = $false) { $c = New-Object Kh2Desk.Gate+Cover; $c.Pid = $procId; $c.Class = $class; $c.Monitor = 1; $c.Owned = $owned; $c }
 $config = [pscustomobject]@{ foreignGameNames = 'Marvel-Win64-Shipping|KINGDOM HEARTS|r5apex'; foreignGamePaths = '\\steamapps\\common\\'
                              foreignGameExempt = '^RiotClient' }
 $job = [pscustomobject]@{ name = 'j'; base = 'j'; file = "$root\j.ps1"; jobObject = [IntPtr]1; foreignSeconds = 0; foreignDetail = $null; ignoredBusy = $null; stdout = $null; stderr = $null; warnings = $null }
@@ -126,6 +126,8 @@ $busy += BusyCase 'owned-quiet-7' 7 @('5840 111') $null $ours
 $busy += BusyCase 'foreign-video-covering-3' 3 @('5840 111') $null @((Cov 5840 'K'), (Cov 31337 'Qt5QWindowIcon'))
 $busy += BusyCase 'foreign-video-covering-2' 2 @('5840 111') $null @((Cov 5840 'K'), (Cov $me 'Chrome_WidgetWin_1'))
 $busy += BusyCase 'owned-but-not-covering-2' 2 @('5840 111') $null @()
+$busy += BusyCase 'foreign-owned-popup-over-ours-2' 2 @('5840 111') $null @((Cov 5840 'K'), (Cov 31338 '#32770' $true))
+$busy += BusyCase 'our-owned-popup-2' 2 @('5840 111') $null @((Cov 5840 'K'), (Cov 5840 '#32770' $true))
 $busy += BusyCase 'unowned-busy-2' 2 $null $null $ours
 $busy += BusyCase 'unmatched-row-2' 2 @('5840 111', '6000 999') $null $ours
 $busy += BusyCase 'unparseable-row-2' 2 @('5840 111', 'garbage') $null $ours
@@ -216,7 +218,7 @@ class ForegroundDetail(unittest.TestCase):
 
     def test_owned_game_busy_states_are_ignored_and_recorded(self):
         for label, state in (("owned-busy-2", 2), ("owned-d3d-3", 3), ("two-roots-both-proven-2", 2),
-                             ("in-job-cover-counts-as-ours-2", 2)):
+                             ("in-job-cover-counts-as-ours-2", 2), ("our-owned-popup-2", 2)):
             with self.subTest(label=label):
                 c = self.busy(label)
                 self.assertIsNone(c["activity"])
@@ -234,7 +236,7 @@ class ForegroundDetail(unittest.TestCase):
                   "owned-but-not-covering-2": "fullscreen", "unowned-busy-2": "fullscreen",
                   "unmatched-row-2": "fullscreen", "unparseable-row-2": "fullscreen", "stale-creation-2": "fullscreen",
                   "unreadable-inventory-2": "fullscreen", "owned-busy-with-foreign-game": "foreign-game",
-                  "in-job-cover-no-proof-2": "fullscreen"}
+                  "in-job-cover-no-proof-2": "fullscreen", "foreign-owned-popup-over-ours-2": "fullscreen"}
         for label, activity in expect.items():
             with self.subTest(label=label):
                 c = self.busy(label)
@@ -246,6 +248,10 @@ class ForegroundDetail(unittest.TestCase):
         d = self.busy("foreign-video-covering-3")["detail"]       # Sage's case: foreign VLC-like window covering, state 3
         self.assertEqual(d["provenOwned"], [5840])
         self.assertEqual([(x["pid"], x["ours"]) for x in d["covering"]], [(5840, True), (31337, False)])
+        d = self.busy("foreign-owned-popup-over-ours-2")["detail"]   # Sage r2: a foreign owned fullscreen popup
+        self.assertEqual([(x["pid"], x["ownedPopup"], x["ours"]) for x in d["covering"]], [(5840, False, True), (31338, True, False)])
+        i = self.busy("our-owned-popup-2")["ignored"]
+        self.assertEqual([(x["pid"], x["ownedPopup"], x["ours"]) for x in i["covering"]], [(5840, False, True), (5840, True, True)])
         for label in ("unmatched-row-2", "unparseable-row-2", "stale-creation-2", "unreadable-inventory-2", "unowned-busy-2"):
             with self.subTest(label=label):
                 self.assertIsNone(self.busy(label)["detail"]["provenOwned"])   # no proof: no exemption
@@ -281,8 +287,40 @@ $cases = [ordered]@{
   aliveZero = [Kh2Desk.Gate]::ProvenAlive(0, 0)
   aliveMissing = [Kh2Desk.Gate]::ProvenAlive(999999, $created)
   coveringRuns = (@([Kh2Desk.Gate]::Covering()).Count -ge 0)
+  candOwnedPopup = [Kh2Desk.Gate]::CoverCandidate($true, $false, $false, $true, '#32770')
+  candPlain = [Kh2Desk.Gate]::CoverCandidate($true, $false, $false, $false, 'UnityWndClass')
+  candHidden = [Kh2Desk.Gate]::CoverCandidate($false, $false, $false, $false, 'UnityWndClass')
+  candMinimized = [Kh2Desk.Gate]::CoverCandidate($true, $true, $false, $false, 'UnityWndClass')
+  candCloaked = [Kh2Desk.Gate]::CoverCandidate($true, $false, $true, $true, '#32770')
+  candProgman = [Kh2Desk.Gate]::CoverCandidate($true, $false, $false, $false, 'Progman')
+  candWorkerW = [Kh2Desk.Gate]::CoverCandidate($true, $false, $false, $true, 'WorkerW')
 }
-$cases | ConvertTo-Json -Compress
+# CoverFrom: the whole per-window decision, on hand-built facts (a 1920x1080 monitor).
+function Facts($over) {
+  $f = New-Object Kh2Desk.Gate+WindowFacts
+  $f.Visible = $true; $f.HasRect = $true; $f.HasMonitor = $true; $f.Class = 'UnityWndClass'; $f.Pid = 5840; $f.Monitor = 65537
+  $f.Left = 0; $f.Top = 0; $f.Right = 1920; $f.Bottom = 1080; $f.MonLeft = 0; $f.MonTop = 0; $f.MonRight = 1920; $f.MonBottom = 1080
+  foreach ($k in $over.Keys) { $f.$k = $over[$k] }
+  $f
+}
+function Row($over) { $c = [Kh2Desk.Gate]::CoverFrom((Facts $over)); if ($c) { [ordered]@{ pid = $c.Pid; owned = $c.Owned; class = $c.Class; monitor = $c.Monitor } } else { $null } }
+$cases.fromOwnedForeignPopup = Row @{ HasOwner = $true; Pid = 31338; Class = '#32770' }
+$cases.fromPlain = Row @{}
+$cases.fromNotCovering = Row @{ Right = 1900 }
+$cases.fromNoMonitor = Row @{ HasMonitor = $false }
+$cases.fromNoRect = Row @{ HasRect = $false }
+$cases.fromHidden = Row @{ Visible = $false }
+$cases.fromMinimized = Row @{ Iconic = $true }
+$cases.fromCloaked = Row @{ Cloaked = $true; HasOwner = $true }
+$cases.fromWorkerW = Row @{ Class = 'WorkerW' }
+$cases.fromNull = ($null -eq [Kh2Desk.Gate]::CoverFrom($null))
+# CoversFrom over a desktop: our covering KH2, a foreign owned fullscreen popup, a hidden window and the shell's WorkerW.
+$desk = New-Object 'System.Collections.Generic.List[Kh2Desk.Gate+WindowFacts]'
+$desk.Add((Facts @{})); $desk.Add((Facts @{ HasOwner = $true; Pid = 31338; Class = '#32770' }))
+$desk.Add((Facts @{ Visible = $false; Pid = 9 })); $desk.Add((Facts @{ Class = 'WorkerW'; Pid = 4 }))
+$cases.desktop = @([Kh2Desk.Gate]::CoversFrom($desk) | ForEach-Object { "$($_.Pid):$($_.Owned)" }) -join ','
+$cases.emptyDesktop = @([Kh2Desk.Gate]::CoversFrom((New-Object 'System.Collections.Generic.List[Kh2Desk.Gate+WindowFacts]'))).Count
+$cases | ConvertTo-Json -Compress -Depth 4
 """
 
 
@@ -299,7 +337,13 @@ class NativeGate(unittest.TestCase):
         self.assertEqual(got, {"exact": True, "larger": True, "shortRight": False, "offsetLeft": False,
                                "secondMonitor": True, "emptyMonitor": False, "aliveSelf": True,
                                "aliveWrongCreation": False, "aliveZero": False, "aliveMissing": False,
-                               "coveringRuns": True})
+                               "coveringRuns": True, "candOwnedPopup": True, "candPlain": True, "candHidden": False,
+                               "candMinimized": False, "candCloaked": False, "candProgman": False, "candWorkerW": False,
+                               "fromOwnedForeignPopup": {"pid": 31338, "owned": True, "class": "#32770", "monitor": 65537},
+                               "fromPlain": {"pid": 5840, "owned": False, "class": "UnityWndClass", "monitor": 65537},
+                               "fromNotCovering": None, "fromNoMonitor": None, "fromNoRect": None, "fromHidden": None,
+                               "fromMinimized": None, "fromCloaked": None, "fromWorkerW": None, "fromNull": True,
+                               "desktop": "5840:False,31338:True", "emptyDesktop": 0})
 
 
 if __name__ == "__main__":

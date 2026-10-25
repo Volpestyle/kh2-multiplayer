@@ -314,37 +314,78 @@ public static class Gate {
         return monRight > monLeft && monBottom > monTop && left <= monLeft && top <= monTop && right >= monRight && bottom >= monBottom;
     }
 
-    // A visible, uncloaked, unminimized top-level window that covers its monitor. The shell's desktop windows
-    // (Progman, WorkerW) cover every monitor and are left out.
-    public class Cover { public int Pid; public string Class; public long Monitor; }
+    // A visible, uncloaked, unminimized top-level window that covers its monitor, owned popups included (each is
+    // attributed by its own pid: a foreign fullscreen popup over the rig's game must block the busy exemption, Sage on
+    // owned-busy r2). The shell's desktop windows (Progman, WorkerW) cover every monitor and are left out.
+    public class Cover { public int Pid; public string Class; public long Monitor; public bool Owned; }
+
+    // Whether a top-level window is a covering candidate before its geometry is checked. Ownership is reported, never
+    // a reason to skip.
+    public static bool CoverCandidate(bool visible, bool iconic, bool cloaked, bool hasOwner, string className) {
+        if (!visible || iconic || cloaked) return false;
+        return className != "Progman" && className != "WorkerW";
+    }
+
+    // What Covering needs to know about one top-level window, gathered without any decision (see Facts).
+    public class WindowFacts {
+        public bool Visible, Iconic, Cloaked, HasOwner, HasRect, HasMonitor;
+        public string Class = "";
+        public int Left, Top, Right, Bottom, MonLeft, MonTop, MonRight, MonBottom, Pid;
+        public long Monitor;
+    }
+
+    // The whole per-window decision, pure so it can be tested without real windows: a covering row, or null.
+    public static Cover CoverFrom(WindowFacts f) {
+        if (f == null || !CoverCandidate(f.Visible, f.Iconic, f.Cloaked, f.HasOwner, f.Class)) return null;
+        if (!f.HasRect || !f.HasMonitor) return null;
+        if (!Covers(f.Left, f.Top, f.Right, f.Bottom, f.MonLeft, f.MonTop, f.MonRight, f.MonBottom)) return null;
+        Cover c = new Cover();
+        c.Pid = f.Pid; c.Class = f.Class; c.Monitor = f.Monitor; c.Owned = f.HasOwner;
+        return c;
+    }
+
+    // Reads one window's facts. An invisible window stops at Visible = false, which CoverFrom rejects anyway.
+    static WindowFacts Facts(IntPtr w) {
+        WindowFacts f = new WindowFacts();
+        f.Visible = IsWindowVisible(w);
+        if (!f.Visible) return f;
+        f.Iconic = IsIconic(w);
+        int cloaked;
+        f.Cloaked = DwmGetWindowAttribute(w, 14, out cloaked, 4) == 0 && cloaked != 0;   // DWMWA_CLOAKED
+        f.HasOwner = GetWindow(w, 4) != IntPtr.Zero;   // GW_OWNER
+        StringBuilder cls = new StringBuilder(256);
+        GetClassName(w, cls, cls.Capacity);
+        f.Class = cls.ToString();
+        RECT r;
+        f.HasRect = GetWindowRect(w, out r);
+        f.Left = r.Left; f.Top = r.Top; f.Right = r.Right; f.Bottom = r.Bottom;
+        IntPtr monitor = MonitorFromWindow(w, 0);   // MONITOR_DEFAULTTONULL
+        MONITORINFO mi = new MONITORINFO();
+        mi.cbSize = (uint)Marshal.SizeOf(typeof(MONITORINFO));
+        f.HasMonitor = monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref mi);
+        f.Monitor = monitor.ToInt64();
+        f.MonLeft = mi.Monitor.Left; f.MonTop = mi.Monitor.Top; f.MonRight = mi.Monitor.Right; f.MonBottom = mi.Monitor.Bottom;
+        uint pid;
+        GetWindowThreadProcessId(w, out pid);
+        f.Pid = (int)pid;
+        return f;
+    }
+
+    // The covering rows for a set of windows' facts: every window CoverFrom accepts, owned popups included.
+    public static List<Cover> CoversFrom(List<WindowFacts> windows) {
+        List<Cover> rows = new List<Cover>();
+        foreach (WindowFacts f in windows) {
+            Cover c = CoverFrom(f);
+            if (c != null) rows.Add(c);
+        }
+        return rows;
+    }
 
     public static List<Cover> Covering() {
-        List<Cover> rows = new List<Cover>();
-        EnumWindowsProc each = delegate(IntPtr w, IntPtr l) {
-            if (!IsWindowVisible(w) || IsIconic(w) || GetWindow(w, 4) != IntPtr.Zero) return true;  // GW_OWNER
-            int cloaked;
-            if (DwmGetWindowAttribute(w, 14, out cloaked, 4) == 0 && cloaked != 0) return true;   // DWMWA_CLOAKED
-            StringBuilder cls = new StringBuilder(256);
-            GetClassName(w, cls, cls.Capacity);
-            string name = cls.ToString();
-            if (name == "Progman" || name == "WorkerW") return true;
-            RECT r;
-            if (!GetWindowRect(w, out r)) return true;
-            IntPtr monitor = MonitorFromWindow(w, 0);  // MONITOR_DEFAULTTONULL
-            if (monitor == IntPtr.Zero) return true;
-            MONITORINFO mi = new MONITORINFO();
-            mi.cbSize = (uint)Marshal.SizeOf(typeof(MONITORINFO));
-            if (!GetMonitorInfo(monitor, ref mi)) return true;
-            if (!Covers(r.Left, r.Top, r.Right, r.Bottom, mi.Monitor.Left, mi.Monitor.Top, mi.Monitor.Right, mi.Monitor.Bottom)) return true;
-            uint pid;
-            GetWindowThreadProcessId(w, out pid);
-            Cover c = new Cover();
-            c.Pid = (int)pid; c.Class = name; c.Monitor = monitor.ToInt64();
-            rows.Add(c);
-            return true;
-        };
+        List<WindowFacts> windows = new List<WindowFacts>();
+        EnumWindowsProc each = delegate(IntPtr w, IntPtr l) { windows.Add(Facts(w)); return true; };
         if (!EnumWindows(each, IntPtr.Zero)) throw new InvalidOperationException("EnumWindows failed");
-        return rows;
+        return CoversFrom(windows);
     }
 
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left; public int Top; public int Right; public int Bottom; }

@@ -146,7 +146,7 @@ function Get-ForeignActivity($Job) {
     if ($state -in 2, 3) {
       $proof = Get-OwnedProof
       $covers = @([Kh2Desk.Gate]::Covering() | ForEach-Object {
-          [ordered]@{ pid = $_.Pid; class = $_.Class; ours = ($proof -and $_.Pid -in $proof) -or ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $_.Pid)) } })
+          [ordered]@{ pid = $_.Pid; class = $_.Class; ownedPopup = $_.Owned; ours = ($proof -and $_.Pid -in $proof) -or ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $_.Pid)) } })
       $detail.provenOwned = $proof
       $detail.covering = $covers
       if ($proof -and @($covers | Where-Object { $_.ours }).Count -and -not @($covers | Where-Object { -not $_.ours }).Count) {
