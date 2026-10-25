@@ -62,6 +62,7 @@ Any other first line means `launch`, the default.
 | `steam-account` | launch | Steam isn't running signed in as `steamAccountId`. The agent never starts Steam or signs anyone in. |
 | `lane-lock` | launch | One of the `laneLocks` files exists. |
 | `disk` | launch | Less than `minFreeGB` (default 10; PC1 20) is free on `C:`. A paired 30 s clip block needs ~14 GB of raw frames before it's encoded. |
+| `disk-config` | launch | `minFreeGB` is present but isn't a finite positive number. The agent fails closed rather than guess a floor. |
 | `needs-verify` | launch | A launch job was reclaimed and its install and save checks haven't been redone. |
 | `gate-error` | both | A check threw an exception. The agent fails closed and logs the error. |
 

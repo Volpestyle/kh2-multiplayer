@@ -37,7 +37,16 @@ $helperSweep = $config.helperSweep -ne $false
 $foreignReclaimSeconds = if ($config.foreignReclaimSeconds) { [int]$config.foreignReclaimSeconds } else { 3 }
 # Launch refuses below this many free GB on C:. A Thorn scenario's paired 30 s clip block holds ~14 GB of raw BMPs
 # until ffmpeg encodes them; on 2026-10-25 a launch admitted at 14 GB filled C: mid-fight (zr111). PC1 uses 20.
-$minFreeGB = if ($config.minFreeGB) { [double]$config.minFreeGB } else { 10 }
+# Absent means 10. Anything but a finite positive JSON number gives $null, which refuses every launch (disk-config).
+function Get-MinFreeGB($Config) {
+  if (-not @($Config.PSObject.Properties.Name -eq 'minFreeGB').Count) { return [double]10 }
+  $v = $Config.minFreeGB
+  if (-not ($v -is [int] -or $v -is [long] -or $v -is [decimal] -or $v -is [double])) { return $null }
+  $gb = [double]$v
+  if ([double]::IsNaN($gb) -or [double]::IsInfinity($gb) -or $gb -le 0) { return $null }
+  $gb
+}
+$minFreeGB = Get-MinFreeGB $config
 
 function Log([string]$Text) { "$((Get-Date).ToUniversalTime().ToString('o')) $Text" | Out-File -Append -Encoding utf8 "$root\agent.log" }
 function Write-Json($Path, $Value) {
@@ -112,7 +121,8 @@ function Get-Refusals([string]$Level) {
       if (-not $steamUp -or ([int64]$steam.ActiveUser -band 0xFFFFFFFF) -ne [int64]$config.steamAccountId) { $why += 'steam-account' }
       foreach ($lock in $config.laneLocks) { if (Test-Path -LiteralPath (Expand $lock)) { $why += 'lane-lock'; break } }
       if (Test-Path -LiteralPath $verifyPath) { $why += 'needs-verify' }
-      if ((Get-PSDrive C).Free -lt $minFreeGB * 1GB) { $why += 'disk' }
+      if ($null -eq $minFreeGB) { $why += 'disk-config' }
+      elseif ((Get-PSDrive C).Free -lt $minFreeGB * 1GB) { $why += 'disk' }
     }
     $why
   } catch {
