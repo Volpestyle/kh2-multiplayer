@@ -8,13 +8,16 @@ gap between occurrences is ~16 s with no orbs (.local/review/vuh2617-orb-hold). 
 
   "rescueOrbHold": {"far": 1250, "hold": 1000, "finish": 300, "maxWaitSec": 30}
 
-While this seat's partner is logically downed (and this seat is not), Thorn is in motion 202, the partner lies `far`
-or more from Thorn's root and this seat is more than `finish` from the partner, the rescuer does not walk to the
-partner: it moves toward Thorn until it is within `hold` of the root, then stands. The approach resumes when Thorn
-leaves 202, when the partner is no longer far, or after `maxWaitSec` of waiting in this revive window. The core's 60 s
-revive bound and window marker run from the window's first tick either way. RCs, a hold already started, a hold
-awaiting release, event reactions and every tick outside a rescue go to the revive core unchanged. Thorn is read through the existing head observation (no new reads); an unknown head never holds back.
-Input-only, no native writes.
+The hold-off lives at the revive core, not above the stack (Sage, VUH-2617, on r1): OrbHoldCore sits directly above
+thorn.CooperativeFight, so every higher layer (the pre-revive Potion, RC gate, Creeper-first, approach revision, ...)
+takes its tick first, and the core still makes every refusal of its own (logs, timeout, event/menu, partner state,
+identity and scope, HP). Only the core's single steer toward the downed partner is changed, and only while Thorn is in
+motion 202, the partner lies `far` or more from Thorn's root and this seat is more than `finish` from the partner: the
+rescuer then steers toward Thorn until within `hold` of the root and stands. RCs keep their press (with that
+direction). The approach resumes when Thorn leaves 202, when the partner is no longer far, or after `maxWaitSec` held
+off in one revive window. Thorn is read through the existing head observation (no new reads); an unknown head never
+holds back. While held off, thorn_approach's plateau monitor is reset each tick so the deliberate stand-off doesn't
+trigger its detour/jump escapes toward the partner. Input-only, no native writes.
 """
 import math
 import sys
@@ -22,7 +25,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import thorn_creeper as child
+import thorn  # noqa: E402
+import thorn_creeper as child  # noqa: E402
 
 base, previous = child.base, child.previous
 VOLLEY = 202
@@ -70,11 +74,11 @@ class OrbHoldPilotMixin:
             self.orbhold_cfg = None
 
 
-class OrbHoldCooperativeMixin:
+class OrbHoldCore(thorn.CooperativeFight):
+    """Listed as the last base, so C3 places it directly above thorn.CooperativeFight (see CooperativeFight below)."""
     orbhold_since = None       # monotonic start of the open hold-off episode
     orbhold_last = None        # monotonic of the last held-off tick
     orbhold_waited = 0.0       # seconds held off in this revive window
-    orbhold_sample_at = 0.0
     orbhold_head = (None, -1.0)
 
     def orbhold_end(self, pilot, reason):
@@ -98,41 +102,45 @@ class OrbHoldCooperativeMixin:
 
     def step(self, pilot, own, event_reaction=False):
         cfg = getattr(pilot, 'orbhold_cfg', None)
-        if cfg is None or (own.get('world'), own.get('room')) != (2, 34):
+        if cfg is None or event_reaction or (own.get('world'), own.get('room')) != (2, 34):
+            if cfg is not None:
+                self.orbhold_end(pilot, 'core')
             return super().step(pilot, own, event_reaction)
-        if own.get('react') and not event_reaction:
-            return super().step(pilot, own, event_reaction)  # the core's RC press; the episode stays open
-        hold = None
-        reason = 'core'
-        if not event_reaction and own.get('free') and self.hold_started is None and not self.waiting_release \
-                and self.own_log.update() and self.peer_log.update():
+        original, held, reached = base.steer, [], []
+
+        def steer(s, target, *args, **kwargs):
+            # The core's one steer toward the partner, reached only past all of its refusals.
+            reached.append(True)
+            peer_pos = (target[0], 0.0, target[1])
+            hold = orb_hold(cfg, self.orbhold_observe(pilot, own), s.get('pos'), peer_pos, self.orbhold_waited)
+            if hold is None:
+                return original(s, target, *args, **kwargs)
+            held.append(hold)
+            return set() if hold['inside'] else original(s, (hold['root'][0], hold['root'][2]), *args, **kwargs)
+
+        base.steer = steer
+        try:
+            result = super().step(pilot, own, event_reaction)
+        finally:
+            base.steer = original
+        now = time.monotonic()
+        if not held:
             if not self.peer_log.downed:
                 self.orbhold_waited = 0.0  # a new revive window gets a fresh cap
                 reason = 'peer-recovered'
-            elif not (self.own_log.downed or self.own_log.full_party or self.peer_log.full_party):
-                try:
-                    peer = self.peer.state()
-                except (OSError, ValueError):
-                    peer = None
-                head = self.orbhold_observe(pilot, own) if peer is not None else None
-                hold = orb_hold(cfg, head, own.get('playerPos'), (peer or {}).get('playerPos'), self.orbhold_waited)
-                reason = 'released' if hold is None else reason
-                if hold is None and self.orbhold_waited >= cfg['maxWaitSec']:
-                    reason = 'cap'
-        now = time.monotonic()
-        if hold is not None:
-            # The core's own window bookkeeping, which it would have done this tick: its 60 s bound starts at the
-            # window's first tick whoever handles it, and the window marker is written before any hold-off row.
-            if self.since is None:
-                self.since = now
-            if now - self.since > self.TIMEOUT:
-                hold, reason = None, 'timeout'  # the core raises its own bound
-            elif self.mode != 'peer-logical-downed':
-                pilot.write('coop_revive', state='peer-logical-downed', peerPid=self.peer.pid)
-                self.mode = 'peer-logical-downed'
-        if hold is None:
+            elif not reached:
+                reason = 'core'
+            else:
+                reason = 'cap' if self.orbhold_waited >= cfg['maxWaitSec'] else 'released'
             self.orbhold_end(pilot, reason)
-            return super().step(pilot, own, event_reaction)
+            return result
+        hold = held[-1]
+        # Standing off is deliberate: thorn_approach's plateau monitor would read it as a stalled approach and spend
+        # its detour/jump escapes walking toward the partner, so a held-off tick resets its anchor and any detour.
+        if hasattr(self, 'anchor'):
+            self.anchor = None
+        if getattr(self, 'detour', None) is not None:
+            self.detour = None
         if self.orbhold_last is not None:
             self.orbhold_waited += now - self.orbhold_last
         self.orbhold_last = now
@@ -141,21 +149,14 @@ class OrbHoldCooperativeMixin:
             pilot.orbhold_stats['episodes'] += 1
             pilot.write('coop_orb_hold', peerPid=self.peer.pid, waited=round(self.orbhold_waited, 2),
                         hp=own.get('hp'), episode=pilot.orbhold_stats['episodes'], **hold)
-        if now - self.orbhold_sample_at >= 0.5:
-            pilot.write('coop_orb_hold_sample', own=list(own['playerPos']), observation=own.get('reactObservation'),
-                        **{k: hold[k] for k in ('partnerToThorn', 'ownToThorn', 'toPartner', 'inside')})
-            self.orbhold_sample_at = now
-        root = hold['root']
-        direction = set() if hold['inside'] else base.steer({**own, 'pos': own['playerPos']}, (root[0], root[2]))
-        pilot.kb.hold(direction)
-        return True
+        return result
 
 
 class Pilot(OrbHoldPilotMixin, child.Pilot):
     pass
 
 
-class CooperativeFight(OrbHoldCooperativeMixin, child.CooperativeFight):
+class CooperativeFight(child.CooperativeFight, OrbHoldCore):
     pass
 
 

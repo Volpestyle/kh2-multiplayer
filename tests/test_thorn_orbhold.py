@@ -1,8 +1,9 @@
-"""Offline controls for tools/rig/thorn_pilot/thorn_orbhold.py (VUH-2617 lead #302, wait out Thorn's orb volley).
+"""Offline controls for tools/rig/thorn_pilot/thorn_orbhold.py (VUH-2617 lead #302/#305, wait out Thorn's orb volley).
 
-The real revive core (thorn.CooperativeFight.step) runs under the real OrbHoldCooperativeMixin and writes the real
-Pad stack; only the downed logs, the partner's state, the head observation, the clock, the pilot's write and the
-mailbox write are fakes. Run: python -B tests/test_thorn_orbhold.py
+The real revive core (thorn.CooperativeFight.step) runs under the real OrbHoldCore hook and writes the real Pad stack;
+the pre-revive Potion case adds the real thorn_next.PreReviveCooperativeMixin above it. Only the downed logs, the
+partner's state, the head observation, the item read, the clock, the pilot's write and the mailbox write are fakes.
+Run: python -B tests/test_thorn_orbhold.py
 """
 import json
 import sys
@@ -10,13 +11,15 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "rig" / "thorn_pilot"))
-import thorn  # noqa: E402
-import thorn_creeper  # noqa: E402
 import orbhold_report  # noqa: E402
 import rescue_report  # noqa: E402
+import thorn  # noqa: E402
+import thorn_creeper  # noqa: E402
+import thorn_next  # noqa: E402
 import thorn_orbhold as o  # noqa: E402
 
 base = o.base
+ORIGINAL_STEER = base.steer
 failures = 0
 REACT_KEY = base.KEYS["react"].upper()
 MOVE_KEYS = {base.KEYS[k].upper() for k in ("up", "down", "left", "right")}
@@ -60,7 +63,7 @@ check(o.orb_hold(CFG, head(root=None), OWN_OUT, FAR_PARTNER, 0.0) is None, "miss
 check(o.orb_hold(CFG, head(), None, FAR_PARTNER, 0.0) is None, "unknown own position: no hold-off")
 
 
-# ---- the real revive core under the mixin ------------------------------------------------------------------------
+# ---- the real revive core under the hook -------------------------------------------------------------------------
 PLAYER, PARTNER = 0x1000, 0x2000
 SCOPE = [2, 34, 0, 157, 157, 157]
 
@@ -74,14 +77,15 @@ class Clock:
 
 
 clock = Clock()
-o.time.monotonic = clock
-thorn.time.monotonic = clock
+for module in (o, thorn, thorn_next):
+    module.time.monotonic = clock
 
 
 class Log:
     def __init__(self, downed=False, full=False, actor=0, known=True):
         self.downed, self.full_party, self.actor, self.known = downed, full, actor, known
-        self.downs = self.revives = 0
+        self.downs = 1 if downed else 0
+        self.revives = 0
         self.path = Path("unused")
 
     def update(self):
@@ -91,14 +95,15 @@ class Log:
 class Peer:
     pid = 222
 
-    def __init__(self, pos=FAR_PARTNER, error=False):
-        self.pos, self.error, self.reads = pos, error, 0
+    def __init__(self, pos=FAR_PARTNER, error=False, **over):
+        self.pos, self.error, self.reads, self.over = pos, error, 0, over
 
     def state(self):
         self.reads += 1
         if self.error:
             raise OSError("peer unreadable")
-        return dict(free=True, roomScope=SCOPE, playerPos=list(self.pos), player=PARTNER)
+        return dict(dict(free=True, roomScope=SCOPE, playerPos=list(self.pos) if self.pos else None, player=PARTNER),
+                    **self.over)
 
 
 def make_pad():
@@ -122,10 +127,10 @@ class FakePilot:
         return self.observed
 
     def write(self, kind, **f):
-        self.rows.append((kind, f))
+        self.rows.append((kind, dict(f, _t=clock.now)))
 
     def jsonl(self):
-        return "".join(json.dumps(dict(t=f.get("_t", 0.0), kind=k, **{x: v for x, v in f.items() if x != "_t"})) + "\n"
+        return "".join(json.dumps(dict(t=f["_t"], kind=k, **{x: v for x, v in f.items() if x != "_t"})) + "\n"
                        for k, f in self.rows)
 
     def kinds(self):
@@ -135,31 +140,35 @@ class FakePilot:
         return next(f for k, f in self.rows if k == kind)
 
 
-class Core(o.OrbHoldCooperativeMixin, thorn.CooperativeFight):
+def init_core(c, peer, own_log, peer_log):
+    # thorn.CooperativeFight's own state, without the base's DownedLog file readers.
+    c.peer, c.own_log, c.peer_log = peer, own_log, peer_log
+    c.since, c.mode = None, ""
+    c.hold_started = c.hold_frame = c.hold_identity = None
+    c.rc_next = c.rc_until = c.observed_at = 0.0
+    c.arm_frame = c.armed_identity = None
+    c.waiting_release = False
+    c.last_progress = 0
+    c.last_hold_hp = None
+
+
+class Core(o.OrbHoldCore):
     def __init__(self, peer, own_log, peer_log):
-        # thorn.CooperativeFight's own state, without the base's DownedLog file readers.
-        self.peer, self.own_log, self.peer_log = peer, own_log, peer_log
-        self.since, self.mode = None, ""
-        self.hold_started = self.hold_frame = self.hold_identity = None
-        self.rc_next = self.rc_until = self.observed_at = 0.0
-        self.arm_frame = self.armed_identity = None
-        self.waiting_release = False
-        self.last_progress = 0
-        self.last_hold_hp = None
+        init_core(self, peer, own_log, peer_log)
 
 
 def own(react=0, pos=OWN_OUT, **kw):
-    s = dict(world=2, room=34, free=True, hp=12, maxHp=20, roomScope=SCOPE, playerPos=list(pos), player=PLAYER,
-             react=react, forward=[0.0, -1.0], reactObservation={}, event=0, menu=255)
+    s = dict(world=2, room=34, free=True, inField=True, hp=12, maxHp=20, roomScope=SCOPE, playerPos=list(pos) if pos else None,
+             player=PLAYER, react=react, forward=[0.0, -1.0], reactObservation={}, event=0, menu=255)
     s.update(kw)
     return s
 
 
 def setup(cfg=CFG, observed=None, partner=FAR_PARTNER, own_down=False, full=False, peer_down=True, known=True,
-          error=False, reader=True):
+          error=False, reader=True, actor=PARTNER, **peer_over):
     p = FakePilot(cfg, observed, reader)
-    c = Core(Peer(partner, error), Log(own_down, full, known=known),
-             Log(peer_down, full, actor=PARTNER if peer_down else 0, known=known))
+    c = Core(Peer(partner, error, **peer_over), Log(own_down, full, known=known),
+             Log(peer_down, full, actor=actor if peer_down else 0, known=known))
     return p, c
 
 
@@ -175,17 +184,18 @@ def toward(state, target):
     return {base.KEYS[k].upper() for k in base.steer({**state, "pos": state["playerPos"]}, (target[0], target[2]))}
 
 
-# Held off: moves toward Thorn, not the partner; the core's approach never runs.
+# Held off: the core's own approach steers toward Thorn, not the partner.
 p, c = setup()
 s = own()
 res = c.step(p, s)
-check(res is True and last_move(p) == toward(s, ROOT) and last_move(p) != toward(s, FAR_PARTNER),
-      "volley + far partner: the rescuer heads toward Thorn, not the partner")
-check("coop_approach" not in p.kinds() and not pressed(p), "the core's approach does not run and no Triangle is sent")
+check(res is True and last_move(p) == toward(s, ROOT) and last_move(p) != toward(s, FAR_PARTNER) and not pressed(p),
+      "volley + far partner: the core's approach heads toward Thorn, not the partner, with no Triangle")
+check(p.kinds()[:2] == ["coop_revive", "coop_approach"] and p.rows[0][1]["state"] == "peer-logical-downed",
+      "the core still writes its window marker and approach row itself")
 row = p.row("coop_orb_hold")
 check(row["partnerToThorn"] == 1560.0 and row["episode"] == 1 and p.orbhold_stats["episodes"] == 1,
       "the hold-off episode is logged once with the partner's distance to Thorn")
-check("coop_orb_hold_sample" in p.kinds(), "a hold-off sample row carries the rescuer's position")
+check(base.steer is ORIGINAL_STEER, "the core's steer is restored after the tick")
 clock.now += 0.1
 c.step(p, own())
 check(p.kinds().count("coop_orb_hold") == 1, "a second held-off tick does not open another episode")
@@ -198,20 +208,136 @@ p, c = setup()
 c.step(p, own(pos=OWN_IN))
 check(last_move(p) == set() and not pressed(p), "inside 1000 of Thorn: the rescuer stands")
 
-# The core's window bookkeeping runs on a held-off first tick.
+# Every core refusal wins (Sage P2 a): the hook is never reached, nothing is held off, no movement.
+for label, kw, state in (("partner not free", dict(free=False), {}),
+                         ("partner in another scope", dict(roomScope=[2, 34, 0, 1, 1, 1]), {}),
+                         ("partner actor replaced", dict(player=0x3000), {}),
+                         ("partner position unknown", dict(), {"partner": None}),
+                         ("own HP 0", dict(), {"hp": 0}),
+                         ("own position unknown", dict(), {"pos": None})):
+    if "partner" in state:
+        p, c = setup(partner=None)
+    else:
+        p, c = setup(**kw)
+    s = own(**{k: v for k, v in state.items() if k != "partner"})
+    c.step(p, s)
+    check("coop_orb_hold" not in p.kinds() and p.head_reads == 0 and not any(f & MOVE_KEYS for f in p.kb.frames),
+          f"{label}: the core refuses, no hold-off, no head read, no movement")
+
+p, c = setup(error=True)
+c.step(p, own())
+check("coop_orb_hold" not in p.kinds() and p.head_reads == 0 and not any(f & MOVE_KEYS for f in p.kb.frames),
+      "unreadable partner: the core stops, no hold-off")
+
 p, c = setup()
-start = clock.now
+c.step(p, own(free=False))
+check("coop_orb_hold" not in p.kinds() and p.head_reads == 0, "own seat not free (menu/event): the core's stop wins")
+
+p, c = setup()
+res = c.step(p, own(), event_reaction=True)
+check("coop_orb_hold" not in p.kinds() and p.head_reads == 0, "an event-reaction tick goes to the core untouched")
+
+for label, kw in (("own logical down", dict(own_down=True)), ("full party down", dict(full=True)),
+                  ("living partner", dict(peer_down=False)), ("unknown logs", dict(known=False))):
+    p, c = setup(**kw)
+    c.step(p, own())
+    check("coop_orb_hold" not in p.kinds() and p.head_reads == 0, f"{label}: no hold-off and no head read")
+
+p, c = setup(reader=False)
 c.step(p, own())
-check(p.kinds()[0] == "coop_revive" and p.rows[0][1]["state"] == "peer-logical-downed" and c.since == start
-      and c.mode == "peer-logical-downed", "a held-off first tick writes the window marker and starts the core's 60 s bound")
-clock.now += 0.3
+check("coop_orb_hold" not in p.kinds() and last_move(p) == toward(own(), FAR_PARTNER),
+      "no head reader on this pilot: the core approaches the partner as before")
+
+p, c = setup(cfg=None)
 c.step(p, own())
-check(p.kinds().count("coop_revive") == 1, "the marker is written once per window")
+check("coop_orb_hold" not in p.kinds() and p.head_reads == 0 and last_move(p) == toward(own(), FAR_PARTNER),
+      "switch off: unchanged core")
+
+p, c = setup()
+c.step(p, own(world=2, room=33))
+check("coop_orb_hold" not in p.kinds() and p.head_reads == 0, "outside the Thorn room: no hold-off")
+
+p, c = setup(partner=[0.0, 0.0, 300.0])
+c.step(p, own(pos=[0.0, 0.0, -300.0]))
+check("coop_orb_hold" not in p.kinds() and last_move(p) == toward(own(pos=[0.0, 0.0, -300.0]), [0.0, 0.0, 300.0]),
+      "partner 1160 from Thorn: the core approaches")
+
+# Inside revive range the core's own hold logic runs; the hook never holds off (finish 300 > 140).
+p, c = setup(partner=[0.0, 0.0, 400.0])
+c.hold_started, c.hold_frame, c.hold_identity = clock.now, 5, (PLAYER, PARTNER, tuple(SCOPE))
+c.step(p, own(pos=[0.0, 0.0, 300.0], reactObservation=dict(source="downed-prompt-v7", frame=9, reviveProgress=300,
+                                                           promptKind=1, promptHide=0)))
+check("coop_orb_hold" not in p.kinds() and any(REACT_KEY in f for f in p.kb.frames),
+      "a started revive hold 100 from the partner keeps holding Triangle")
+
+# RCs: the core's press, steered toward Thorn while held off; the episode stays open.
+p, c = setup()
+c.step(p, own())
+clock.now += 0.1
+res = c.step(p, own(react=432))
+check(res is True and pressed(p) and "coop_reaction" in p.kinds() and "coop_orb_hold_end" not in p.kinds()
+      and last_move(p) == toward(own(), ROOT), "an RC during a hold-off is pressed with the hold-off direction")
+
+# Release paths.
+p, c = setup()
+c.step(p, own())
 p.observed = head(motion=207)
 clock.now += 0.3
-c.step(p, own())
-check(p.kinds().count("coop_revive") == 1 and c.since == start, "the core keeps the same window start after a release")
+res = c.step(p, own())
+end = p.row("coop_orb_hold_end")
+check(res is True and end["reason"] == "released" and last_move(p) == toward(own(), FAR_PARTNER),
+      "Thorn leaves 202: the episode ends 'released' and the core walks to the partner")
+check(p.orbhold_stats["ends"] == {"released": 1}, "the summary counts the release reason")
 
+p, c = setup()
+c.step(p, own())
+clock.now += 0.3
+c.step(p, own(), event_reaction=True)
+check(p.row("coop_orb_hold_end")["reason"] == "core", "an event reaction closes an open episode ('core')")
+
+# The pre-revive Potion wins (Sage P2 b): the real PreReviveCooperativeMixin over the hook.
+class PotionCore(thorn_next.PreReviveCooperativeMixin, o.OrbHoldCore):
+    def __init__(self, peer, own_log, peer_log):
+        init_core(self, peer, own_log, peer_log)
+
+
+def potion_pilot():
+    p = FakePilot()
+    p.head_active, p.next_options = True, {"healBeforeRevive": True}
+    p.preheal_attempted, p.preheal_logged, p.preheal_aborts = set(), set(), 0
+    p.heal_used, p.heal_cfg = 0, {"max": 3}
+    p.observe_items = lambda s: {"known": True, "slot0Potion": True}
+    p.heal_available = lambda s: True
+    p.potions = []
+    p.pre_revive_heal = lambda s: p.potions.append(s["hp"])
+    return p
+
+
+p = potion_pilot()
+c = PotionCore(Peer(), Log(), Log(True, actor=PARTNER))
+res = c.step(p, own(hp=5))
+check(res is True and p.potions == [5] and "coop_orb_hold" not in p.kinds() and p.head_reads == 0,
+      "5/20 HP with a proven Potion during a volley: the pre-revive Potion runs, no hold-off")
+clock.now += 0.3
+c.step(p, own(hp=15))
+check(p.kinds().count("coop_orb_hold") == 1 and p.potions == [5],
+      "after the one Potion attempt (now 15/20) the volley hold-off applies")
+p = potion_pilot()
+c = PotionCore(Peer(), Log(), Log(True, actor=PARTNER))
+c.step(p, own(hp=12))
+check(p.potions == [] and p.kinds().count("coop_orb_hold") == 1, "12/20 HP (not eligible): no Potion, hold-off as usual")
+
+# thorn_approach's plateau monitor does not read the stand-off as a stall.
+p, c = setup()
+c.anchor, c.detour = ("key", (0, 0, 0), (1, 1, 1), 0.0), dict(pulses=0)
+c.step(p, own(pos=OWN_IN))
+check(c.anchor is None and c.detour is None, "a held-off tick resets the approach plateau anchor and any detour")
+p, c = setup(cfg=None)
+c.anchor, c.detour = ("key", (0, 0, 0), (1, 1, 1), 0.0), dict(pulses=0)
+c.step(p, own(pos=OWN_IN))
+check(c.anchor is not None and c.detour is not None, "control: without a hold-off the plateau state is untouched")
+
+# The core's own 60 s bound.
 p, c = setup(cfg=dict(CFG, maxWaitSec=100.0))
 c.step(p, own())
 clock.now += 60.5
@@ -220,71 +346,8 @@ try:
     raised = False
 except base.Stuck as e:
     raised = "exceeded 60s" in str(e)
-check(raised and p.row("coop_orb_hold_end")["reason"] == "timeout",
-      "past the core's 60 s bound the tick goes back to the core, which raises its own Stuck")
-
-# Release paths go to the core and close the episode.
-p, c = setup()
-c.step(p, own())
-p.observed = head(motion=207)
-clock.now += 0.3
-res = c.step(p, own())
-end = p.row("coop_orb_hold_end")
-check(res is True and end["reason"] == "released" and "coop_approach" in p.kinds() and last_move(p) == toward(own(), FAR_PARTNER),
-      "Thorn leaves 202: the episode ends 'released' and the core walks to the partner")
-check(p.orbhold_stats["ends"] == {"released": 1}, "the summary counts the release reason")
-
-p, c = setup()
-c.step(p, own())
-clock.now += 0.1
-res = c.step(p, own(react=432))
-check(res is True and pressed(p) and "coop_reaction" in p.kinds() and "coop_orb_hold_end" not in p.kinds(),
-      "an RC during a hold-off goes to the core's press and the episode stays open")
-clock.now += 0.1
-c.step(p, own())
-check(p.kinds().count("coop_orb_hold") == 1 and "coop_orb_hold_end" not in p.kinds(), "after the RC the same episode resumes")
-
-p, c = setup()
-c.hold_started = clock.now
-c.hold_frame, c.hold_identity = 5, (PLAYER, PARTNER, tuple(SCOPE))
-res = c.step(p, own())
-check("coop_orb_hold" not in p.kinds() and p.head_reads == 0, "a revive hold already started is never held off")
-
-p, c = setup()
-c.waiting_release = True
-c.step(p, own())
-check("coop_orb_hold" not in p.kinds() and p.head_reads == 0, "a hold awaiting release is never held off")
-
-p, c = setup()
-res = c.step(p, own(), event_reaction=True)
-check("coop_orb_hold" not in p.kinds() and p.head_reads == 0, "an event-reaction tick goes to the core")
-
-for label, kw in (("own logical down", dict(own_down=True)), ("full party down", dict(full=True)),
-                  ("living partner", dict(peer_down=False)), ("unknown logs", dict(known=False))):
-    p, c = setup(**kw)
-    c.step(p, own())
-    check("coop_orb_hold" not in p.kinds() and p.head_reads == 0, f"{label}: no hold-off and no head read")
-
-p, c = setup(error=True)
-c.step(p, own())
-check("coop_orb_hold" not in p.kinds() and p.head_reads == 0, "unreadable partner: no hold-off, the core decides")
-
-p, c = setup(reader=False)
-c.step(p, own())
-check("coop_orb_hold" not in p.kinds() and p.head_reads == 0 and "coop_approach" in p.kinds(),
-      "no head reader on this pilot: the core approaches as before")
-
-p, c = setup(cfg=None)
-c.step(p, own())
-check("coop_orb_hold" not in p.kinds() and p.head_reads == 0 and "coop_approach" in p.kinds(), "switch off: unchanged core")
-
-p, c = setup()
-c.step(p, own(world=2, room=33))
-check("coop_orb_hold" not in p.kinds() and p.head_reads == 0, "outside the Thorn room: no hold-off")
-
-p, c = setup(partner=[0.0, 0.0, 300.0])
-c.step(p, own(pos=[0.0, 0.0, -300.0]))
-check("coop_orb_hold" not in p.kinds() and "coop_approach" in p.kinds(), "partner 1160 from Thorn: the core approaches")
+check(raised and base.steer is ORIGINAL_STEER,
+      "past 60 s the core raises its own Stuck, and the steer is restored")
 
 # The 30 s cap, and a fresh cap per revive window.
 p, c = setup()
@@ -294,7 +357,7 @@ for ticks in range(1, 200):
         break
     clock.now += 0.25
 check(p.row("coop_orb_hold_end")["reason"] == "cap" and abs(c.orbhold_waited - 30.0) < 1e-9 and ticks == 122
-      and "coop_approach" in p.kinds(), "after 30 s of holding off in one window the approach resumes ('cap')")
+      and last_move(p) == toward(own(), FAR_PARTNER), "after 30 s of holding off in one window the approach resumes ('cap')")
 n = p.kinds().count("coop_orb_hold")
 c.step(p, own())
 check(p.kinds().count("coop_orb_hold") == n, "the capped window does not hold off again")
@@ -323,18 +386,13 @@ check(abs(c.orbhold_waited - 2.0) < 1e-9 and p.kinds().count("coop_orb_hold") ==
 
 
 # ---- the report counts hits taken while held off ------------------------------------------------------------------
-class TimedPilot(FakePilot):
-    def write(self, kind, **f):
-        self.rows.append((kind, dict(f, _t=clock.now)))
-
-
-p = TimedPilot()
+p = FakePilot()
 c = Core(Peer(), Log(), Log(True, actor=PARTNER))
 for frame in (100, 130, 160):                      # three held-off ticks, own-game frames 100..160
     c.step(p, own(reactObservation={"frame": frame}))
     clock.now += 0.5
 p.observed = head(motion=207)
-c.step(p, own(reactObservation={"frame": 190}))    # released: the core approaches (coop_approach at 190)
+c.step(p, own(reactObservation={"frame": 190}))    # released: the core approaches the partner
 clock.now += 0.5
 c.peer_log.downed = False
 c.step(p, own(reactObservation={"frame": 220}))    # the partner recovered: coop_revive combat
@@ -348,7 +406,8 @@ check(len(w) == 1 and w[0]["result"] == "recovered" and w[0]["holdOffs"] == 1 an
       and w[0]["partnerToThorn"] == [1560.0], "the report shows the window's hold-off, its end reason and the partner's distance")
 check(w[0]["frames"] == [70, 220] and w[0]["orbHits"] == 2 and w[0]["hits"] == {"1041": 2, "400": 1},
       "hits while held off count (frames 70..220): two orb hits and the 400, not the one at 300")
-check(old[0]["orbHits"] == 0, "control: rescue_report's coop_approach-only span would have missed both orb hits")
+check(old[0]["orbHits"] == 2 and old[0]["frames"] == w[0]["frames"],
+      "rescue_report agrees: the core's own approach rows cover the held-off frames")
 
 
 # ---- switch semantics, summary, MRO ------------------------------------------------------------------------------
@@ -383,9 +442,11 @@ pp = P()
 pp.fight({"rescueOrbHold": {}}, 0)
 check(pp.seen is None, "the key outside the Thorn fight step is ignored")
 
-mro = [k.__name__ for k in o.CooperativeFight.__mro__]
-check(mro[:3] == ["CooperativeFight", "OrbHoldCooperativeMixin", "CooperativeFight"]
-      and o.CooperativeFight.__mro__[2] is thorn_creeper.CooperativeFight, "the hold-off sits directly over thorn_creeper")
+mro = o.CooperativeFight.__mro__
+i = mro.index(o.OrbHoldCore)
+check(mro[1] is thorn_creeper.CooperativeFight and mro[i + 1] is thorn.CooperativeFight
+      and mro.index(thorn_next.PreReviveCooperativeMixin) < i,
+      "the hook sits directly above the revive core, below the Potion and every other layer")
 check(o.Pilot.__mro__[1] is o.OrbHoldPilotMixin and o.Pilot.__mro__[2] is thorn_creeper.Pilot, "Pilot: orb hold over thorn_creeper")
 
 print(f"failures={failures}")
