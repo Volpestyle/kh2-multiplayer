@@ -114,10 +114,30 @@ public:
 namespace kh2coop::inject::spawncontroller {
 struct EmissionBirth;
 bool TestEmissionBirthCurrent(const EmissionBirth&) noexcept;
+// VUH-2605 S4: likewise only the script-child resource-lease leaves; the real owner tick, ledger, census,
+// binder and records run below.
+struct TraceStamp;
+struct ScriptChildResourceLease;
+enum class ScriptChildNativeOutcome : std::uint8_t;
+bool TestScriptChildNativeReady() noexcept;
+bool TestCaptureDiagnosticStamp(uintptr_t, TraceStamp&);
+ScriptChildNativeOutcome TestAcquireScriptChildResources(const TraceStamp&, ScriptChildResourceLease&) noexcept;
+bool TestScriptChildResourcesCurrent(const ScriptChildResourceLease&) noexcept;
+ScriptChildNativeOutcome TestReleaseScriptChildResources(ScriptChildResourceLease&) noexcept;
 }
 #define EmissionBirthCurrent TestEmissionBirthCurrent
+#define ScriptChildNativeReady TestScriptChildNativeReady
+#define CaptureDiagnosticStamp TestCaptureDiagnosticStamp
+#define AcquireScriptChildResources TestAcquireScriptChildResources
+#define ScriptChildResourcesCurrent TestScriptChildResourcesCurrent
+#define ReleaseScriptChildResources TestReleaseScriptChildResources
 #include "../inject/src/EnemySync.cpp"
 #undef EmissionBirthCurrent
+#undef ScriptChildNativeReady
+#undef CaptureDiagnosticStamp
+#undef AcquireScriptChildResources
+#undef ScriptChildResourcesCurrent
+#undef ReleaseScriptChildResources
 // This owned-memory harness does not install the field callback hook.
 namespace kh2coop::inject::enemymirror {
 bool EnterFieldCallback() noexcept { return true; }
@@ -264,6 +284,17 @@ bool TestPopNativeConstructionLineage(NativeConstructionLineage& out) {
     ++constructionPopCalls;
     if (constructionRows.empty()) return false;
     out = constructionRows.front(); constructionRows.pop_front(); return true;
+}
+// VUH-2605: the lease always prepares; its release reports whatever the test asks.
+ScriptChildNativeOutcome g_testChildRelease = ScriptChildNativeOutcome::Completed;
+bool TestScriptChildNativeReady() noexcept { return true; }
+bool TestCaptureDiagnosticStamp(uintptr_t, TraceStamp& out) { out = {}; return true; }
+ScriptChildNativeOutcome TestAcquireScriptChildResources(const TraceStamp&, ScriptChildResourceLease& lease) noexcept {
+    lease = {}; lease.prepared = true; return ScriptChildNativeOutcome::Ready;
+}
+bool TestScriptChildResourcesCurrent(const ScriptChildResourceLease& lease) noexcept { return lease.prepared; }
+ScriptChildNativeOutcome TestReleaseScriptChildResources(ScriptChildResourceLease& lease) noexcept {
+    lease.prepared = false; return g_testChildRelease;
 }
 }
 
@@ -3653,6 +3684,134 @@ void TestFieldCatalogTrace() {
     Reset();
 }
 
+// VUH-2605 S4 (Sage CHANGES 5a16f587): script-child owner transitions through the real TickScriptChildBirths,
+// ledger, TrackSpawns census rows and witness provider. Only the five lease leaves above are controlled.
+unsigned scriptFactoryCalls = 0;
+uintptr_t scriptFactoryReturn = 0;
+void* __fastcall TestScriptChildFactory(std::uint32_t objectId, const float*, float) {
+    ++scriptFactoryCalls;
+    return objectId == SCRIPT_ACTOR_BIRTH_CHILD_OBJECT ? reinterpret_cast<void*>(scriptFactoryReturn) : nullptr;
+}
+bool scriptBrainClass = true, scriptBrainBody = true;
+bool TestScriptChildBrain(uintptr_t actor) noexcept { return actor ? scriptBrainBody : scriptBrainClass; }
+uintptr_t scriptHidden = 0; unsigned scriptHides = 0;
+bool TestScriptChildHide(uintptr_t actor) noexcept { ++scriptHides; scriptHidden = actor; return true; }
+std::uint64_t BirthInt(std::uint32_t v) { return (static_cast<std::uint64_t>(SCRIPT_TAG_INT) << 32) | v; }
+ScriptCallEntry SeedScriptChild(kh2coop::inject::spawncontroller::ScriptChildNativeOutcome release) {
+    Reset(true); ResetSpawnEmissions(); g_mirrorRequested = true; g_hitTraceFrame = 100;
+    g_recordBindingRequested = g_recordAuthorityRequested = false;
+    g_bridge.Open(0);
+    // The body the factory returns is the fixture's listed actor, now a 317 with no bound ID.
+    Put(object + offsets::objentry::OBJECT_ID, std::uint32_t{SCRIPT_ACTOR_BIRTH_CHILD_OBJECT});
+    auto& local = g_inst.spawns[0]; local.objectId = SCRIPT_ACTOR_BIRTH_CHILD_OBJECT; local.netId = -1; local.ordinaryBinding = {};
+    HostEnemy parent; parent.objectId = SCRIPT_ACTOR_BIRTH_PARENT_OBJECT; parent.hp = 390; parent.battleProgram = 6;
+    HostEnemy child; child.objectId = SCRIPT_ACTOR_BIRTH_CHILD_OBJECT; child.hp = 100; child.battleProgram = 6; child.spawnPos = {1, 2, 3};
+    g_host.enemies.clear(); g_host.enemies[5] = parent; g_host.enemies[6] = child;
+    ScriptCallEntry birth{};
+    birth.netId = 5; birth.objectId = SCRIPT_ACTOR_BIRTH_PARENT_OBJECT; birth.table = 255; birth.index = SCRIPT_ACTOR_BIRTH_BEGIN;
+    birth.effect = 6; birth.args = {BirthInt(41), BirthInt(0), BirthInt(6), BirthInt(SCRIPT_ACTOR_BIRTH_CHILD_OBJECT)};
+    Check(g_emissionLedger.AddScriptActor(birth) == SpawnEmissionLedger::ScriptActorAdd::Added, "script child fixture receives its birth");
+    g_scriptChildFactory = TestScriptChildFactory; scriptFactoryReturn = enemy; scriptFactoryCalls = 0;
+    scriptBrainClass = scriptBrainBody = true; SetScriptChildBrainGate(&TestScriptChildBrain);
+    scriptHidden = 0; scriptHides = 0; SetScriptChildHide(&TestScriptChildHide);
+    kh2coop::inject::spawncontroller::g_testChildRelease = release;
+    kh2coop::inject::ordinarybinding::Scope scope;
+    Check(ScriptActorConsumerScope(scope), "script child fixture passes the real consumer scope");
+    return birth;
+}
+void TestScriptChildOwnerTransitions() {
+    using Out = kh2coop::inject::spawncontroller::ScriptChildNativeOutcome;
+    using State = SpawnEmissionLedger::ScriptActorReceiptState;
+    auto absent = [] { auto census = CaptureNativeCensus(); census.enemies.clear(); (void)TrackSpawns(census); };
+    auto listed = [] { (void)TrackSpawns(CaptureNativeCensus()); };
+    // P2-1: every non-null factory return is owned, whatever the lease release reported.
+    for (const auto release : {Out::Completed, Out::Fault, Out::Ambiguous}) {
+        const auto birth = SeedScriptChild(release);
+        g_hitTraceFrame = 101; TickScriptChildBirths();
+        Check(scriptFactoryCalls == 1 && g_emissionLedger.ScriptActorState(birth) == State::Consumed &&
+              g_scriptChildren.size() == 1 && ScriptChildOwned(enemy) && !ScriptChildHeld(enemy),
+              "a non-null factory return is tracked and owned after a Completed, Fault or Ambiguous release");
+        g_hitTraceFrame = 102; TickScriptChildBirths();
+        Check(scriptFactoryCalls == 1 && ScriptChildOwned(enemy), "the spent receipt never builds a second body");
+    }
+    {
+        const auto birth = SeedScriptChild(Out::Fault); scriptFactoryReturn = 0;
+        g_hitTraceFrame = 101; TickScriptChildBirths();
+        Check(g_emissionLedger.ScriptActorState(birth) == State::Consumed && g_scriptChildren.empty(),
+              "a null return with a faulted release spends the receipt and owns nothing");
+    }
+    // P2-2: retirement follows census presence, not the retained byActor index.
+    {
+        (void)SeedScriptChild(Out::Completed);
+        g_hitTraceFrame = 101; TickScriptChildBirths();
+        g_hitTraceFrame = 102; listed(); TickScriptChildBirths();
+        Check(g_scriptChildren.size() == 1 && g_scriptChildren.front().row == 0, "the first listing pins the body's census row");
+        g_scriptChildren.front().adopted = true;
+        g_hitTraceFrame = 103; listed(); TickScriptChildBirths();
+        Check(ScriptChildOwned(enemy), "an adopted listed child stays owned");
+        absent();
+        Check(g_inst.byActor.contains(enemy) && !g_inst.spawns[0].present, "fixture: TrackSpawns keeps the absent address indexed");
+        g_hitTraceFrame = 104; TickScriptChildBirths();
+        Check(g_scriptChildren.empty() && !ScriptChildOwned(enemy), "an adopted child absent from the census retires despite its retained index");
+    }
+    {
+        (void)SeedScriptChild(Out::Completed);
+        g_hitTraceFrame = 101; TickScriptChildBirths();
+        absent();
+        g_hitTraceFrame = 101 + kScriptChildCensusFrames; TickScriptChildBirths();
+        Check(ScriptChildOwned(enemy), "an unlisted new child keeps ownership through its census grace");
+        g_hitTraceFrame = 102 + kScriptChildCensusFrames; TickScriptChildBirths();
+        Check(!ScriptChildOwned(enemy), "an unlisted child past its grace retires");
+    }
+    // P2-2: a replacement root at the same address never borrows the record's serial or receipt.
+    {
+        (void)SeedScriptChild(Out::Completed);
+        g_hitTraceFrame = 101; TickScriptChildBirths();
+        g_hitTraceFrame = 102; listed(); TickScriptChildBirths();
+        const auto serial = g_scriptChildren.front().returnSerial;
+        kh2coop::inject::ordinarybinding::Scope scope; (void)ScriptActorConsumerScope(scope);
+        kh2coop::inject::ordinarybinding::ScriptActorWitness witness;
+        Check(QueryScriptActorWitness({ScriptActorUse::Living, scope, enemy, 6, SCRIPT_ACTOR_BIRTH_CHILD_OBJECT, {}}, witness) &&
+              witness.nativeReturnSerial == serial, "fixture: the pinned body yields its witness");
+        const auto replacement = image + 0x50000;
+        Put(replacement, std::int32_t{1000}); Put(replacement + 4, std::int32_t{1000});
+        Put(enemy + ACTOR_STATUS, replacement); // new roots at the same address: TrackSpawns opens a new row
+        g_hitTraceFrame = 103; listed();
+        Check(g_inst.byActor.at(enemy) != 0, "fixture: the replacement root takes a new census row");
+        Check(!QueryScriptActorWitness({ScriptActorUse::Living, scope, enemy, 6, SCRIPT_ACTOR_BIRTH_CHILD_OBJECT, {}}, witness),
+              "a replacement root at the same address gets no witness from the old record");
+        TickScriptChildBirths();
+        Check(!ScriptChildOwned(enemy) && g_scriptChildren.empty(), "the replaced record is dropped, never rebound to the new root");
+    }
+    // P2-3: no child is built without the class brain hook; a body whose own handler is unhooked is held.
+    {
+        const auto birth = SeedScriptChild(Out::Completed); scriptBrainClass = false;
+        g_hitTraceFrame = 101; TickScriptChildBirths();
+        Check(scriptFactoryCalls == 0 && g_emissionLedger.ScriptActorState(birth) == State::Pending && g_scriptChildren.empty(),
+              "without the class brain hook nothing is built and the receipt waits");
+        scriptBrainClass = true; g_hitTraceFrame = 102; TickScriptChildBirths();
+        Check(scriptFactoryCalls == 1 && ScriptChildOwned(enemy) && !ScriptChildHeld(enemy) && scriptHides == 0,
+              "the hooked class then builds the child, neither held nor hidden");
+    }
+    {
+        (void)SeedScriptChild(Out::Completed); scriptBrainBody = false;
+        g_hitTraceFrame = 101; TickScriptChildBirths();
+        Check(ScriptChildOwned(enemy) && ScriptChildHeld(enemy), "a returned body without its brain hook is held before its first update");
+        Check(scriptHides == 1 && scriptHidden == enemy, "a held child is hidden with the native obj_hide once");
+        absent();
+        g_hitTraceFrame = 200 + kScriptChildAdoptFrames; TickScriptChildBirths();
+        Check(ScriptChildOwned(enemy) && ScriptChildHeld(enemy), "a held child stays owned and held while unlisted, past every grace");
+        kh2coop::inject::ordinarybinding::Scope scope; (void)ScriptActorConsumerScope(scope);
+        kh2coop::inject::ordinarybinding::ScriptActorWitness witness;
+        Check(!QueryScriptActorWitness({ScriptActorUse::Stream, scope, 0, 6, SCRIPT_ACTOR_BIRTH_CHILD_OBJECT, {}}, witness),
+              "a held child is never streamed or adopted");
+        ResetSpawnEmissions();
+        Check(!ScriptChildOwned(enemy) && !ScriptChildHeld(enemy), "the room reset releases the held record with the room");
+    }
+    SetScriptChildBrainGate(nullptr); SetScriptChildHide(nullptr); g_scriptChildFactory = nullptr;
+    Reset();
+}
+
 int main() try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr, 0x3000000,
@@ -3976,6 +4135,7 @@ int main() try {
     TestBaileyMissionEndOrdering();
     TestBaileyMissionEndOrdering(true); // VUH-2352: ordinary Shadow death vs MU01 end hold
     TestMoraleBirthLifetime();
+    TestScriptChildOwnerTransitions();
     TestStruggleOrbRows();
     TestFieldCatalogTrace();
     TestBossSitOutNative(); // last: enables event control and leaves this process's mapping expired

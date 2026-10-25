@@ -101,6 +101,15 @@ bool ReceiveScriptActorBirth(std::uint16_t netId, std::uint32_t objectId, std::u
 bool ScriptChildOwned(uintptr_t actor) noexcept;
 using ScriptBirthHostQuery = bool(*)(uintptr_t actor, std::uint16_t netId, std::uint64_t& occurrence, std::uint16_t& parentNetId);
 void SetScriptBirthHostQuery(ScriptBirthHostQuery query) noexcept;
+// A script child held because its brain could not be hooked: its native update must not run (EntityHook).
+bool ScriptChildHeld(uintptr_t actor) noexcept;
+void HoldScriptChild(uintptr_t actor) noexcept;
+// EnemyMirror's brain-hook readiness for a script child (actor 0: the mob class before the factory call).
+using ScriptChildBrainGate = bool(*)(uintptr_t actor) noexcept;
+void SetScriptChildBrainGate(ScriptChildBrainGate gate) noexcept;
+// ScriptMirror's native obj_hide for a held script child.
+using ScriptChildHide = bool(*)(uintptr_t actor) noexcept;
+void SetScriptChildHide(ScriptChildHide hide) noexcept;
 bool FieldActorCurrent(uintptr_t actor) noexcept;
 bool ConsumeFieldLeave(uintptr_t actor) noexcept;
 

@@ -231,12 +231,9 @@ static void MaybeStats() {
 // The actor's class brain thunk is hooked (or already was). Shape-checked:
 // `mov rcx,rdx; jmp 0x3B4460`, a frameless tail thunk, so MinHook's relocated
 // copy needs no unwind data (spike review). Anything else stays on local AI.
-static bool EnsureBrainHook(uintptr_t actor) {
-    std::uint32_t handle = 0;
-    uintptr_t handler = 0, vtable = 0, target = 0;
+static bool EnsureHandlerBrainHook(uintptr_t handler, uintptr_t actor) {
+    uintptr_t vtable = 0, target = 0;
     std::uint8_t bytes[8] {};
-    if (!g_resolveHandle || !ReadHitTrace(actor, handle) || handle == 0) return false;
-    __try { handler = g_resolveHandle(handle); } __except (EXCEPTION_EXECUTE_HANDLER) { handler = 0; }
     if (!handler || !ReadHitTrace(handler, vtable) || !ReadHitTrace(vtable + 0x20, target)) return false;
     for (unsigned i = 0; i < g_brainCount; ++i) if (g_brains[i].target == target) return true;
     for (unsigned i = 0; i < g_refusedCount; ++i) if (g_refusedTargets[i] == target) return false;
@@ -262,6 +259,24 @@ static bool EnsureBrainHook(uintptr_t actor) {
     g_brainCount = slot + 1;  // published after the original is set: the detour only runs once enabled
     NoteLog("brain-hook", actor, target - g_exeBase, vtable - g_exeBase);
     return true;
+}
+static bool EnsureBrainHook(uintptr_t actor) {
+    std::uint32_t handle = 0;
+    uintptr_t handler = 0;
+    if (!g_resolveHandle || !ReadHitTrace(actor, handle) || handle == 0) return false;
+    __try { handler = g_resolveHandle(handle); } __except (EXCEPTION_EXECUTE_HANDLER) { handler = 0; }
+    return EnsureHandlerBrainHook(handler, actor);
+}
+
+// VUH-2605: the brain hook a script-born child depends on (option C). actor 0, before the factory call: the
+// type-4 mob class handler every 317 child is built with (0x419E30 sets object 0x7528E8, vtable 0x5D2D68).
+// Otherwise the returned body's own handler, checked before its first update.
+static constexpr uintptr_t kMobHandlerRva = 0x7528E8, kMobVtableRva = 0x5D2D68;
+bool ScriptChildBrainReady(uintptr_t actor) noexcept {
+    if (actor) return EnsureBrainHook(actor);
+    uintptr_t vtable = 0;
+    return ReadHitTrace(g_exeBase + kMobHandlerRva, vtable) && vtable == g_exeBase + kMobVtableRva &&
+        EnsureHandlerBrainHook(g_exeBase + kMobHandlerRva, 0);
 }
 
 #include "FieldBrain.inl"
@@ -534,8 +549,13 @@ void PreUpdateEntered(uintptr_t actor) {
     if (!OwnerThread()) return;
     PrepareFieldActor(actor);
     // VUH-2605: a script-born child's class brain must be hooked before its first brain call, which follows
-    // this pre-update in the same native update (its initializer runs natively first).
-    if (enemysync::ScriptChildOwned(actor) && !EnsureBrainHook(actor)) NoteLog("script-child-brain-refused", actor, 0, 0);
+    // this pre-update in the same native update (its initializer runs natively first). Without the hook the
+    // child is held: the entity hook skips its whole native update, so neither its initializer nor its brain runs.
+    if (enemysync::ScriptChildOwned(actor) && !enemysync::ScriptChildHeld(actor) && !EnsureBrainHook(actor)) {
+        NoteLog("script-child-brain-refused-hold", actor, 0, 0);
+        enemysync::HoldScriptChild(actor);
+    }
+    if (enemysync::ScriptChildHeld(actor)) return;
     // Certified unbound stale copies are consumed at the owner-frame boundary, independently of native bit28.
     Pose pose {};
     const Gate gate = enemysync::MirrorPose(actor, pose);

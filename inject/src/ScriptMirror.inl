@@ -781,6 +781,9 @@ bool Veil(uintptr_t actor, std::uint32_t handle, bool hide) noexcept {
     return SmCallTrap(static_cast<std::size_t>(i), handle, none, result);
 }
 
+// VUH-2605: a held script child (brain hook refused) is hidden with the same native obj_hide.
+static bool SmHideScriptChild(uintptr_t actor) noexcept { return Veil(actor, VeilHandle(actor), true); }
+
 static void SmRcWindow(D::Record& r,const R::ReactionWindow& w,
                        const std::array<R::ReactionSeat,3>& seats) noexcept {
     r.facts|=D::Window;r.openedFrame=w.openedFrame;r.duration=w.duration;
@@ -1734,6 +1737,7 @@ static void Install() {
     if (g_sm.requested) enemysync::SetScriptCallApply(&SmApplyRecord);
     if (g_sm.requested) enemysync::SetScriptReactionCompletion(&SmCompleteReaction);
     if (g_sm.requested) enemysync::SetScriptBirthHostQuery(&SmHostBirthQuery);
+    if (g_sm.requested) enemysync::SetScriptChildHide(&SmHideScriptChild);
 }
 
 static void Shutdown() {

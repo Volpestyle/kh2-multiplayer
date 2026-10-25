@@ -3731,6 +3731,7 @@ static bool DiscoverAndHookFriendAI(void* actorObj) {
 // ============================================================================
 
 static void __fastcall HookedPerEntityUpdate(void* actorObj) {
+    bool holdUpdate = false; // VUH-2605: an owned script child whose brain hook was refused
     __try {
         // Detect frame boundary: if this is the entity list head, a new
         // frame has started. This works even when OnFrame() is never called
@@ -3798,6 +3799,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
         // VUH-1489: a P_EX100 clone reads neutral input, not pad 0 (default off).
         cloneneutral::Gate(addr);
         enemymirror::PreUpdate(addr); // VUH-1515 step 2 (default off)
+        holdUpdate = enemysync::ScriptChildHeld(addr);
         ThornHitTraceCapture(addr);   // VUH-2617: default off; reads only this updating actor
 
         // VUH-2290: a party member (objentry type 1) never updates holding a freed or dead target.
@@ -3870,11 +3872,13 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
         g_currentFriendSlot = 0;
     }
 
-    // Always call original â€” even if our logic crashed, the game must continue.
+    // Always call original â€” even if our logic crashed, the game must continue. The one exception is an owned
+    // VUH-2605 script child held before its first update: it has no VM yet (proof14), so skipping its update
+    // keeps its BDX from ever running, and room teardown's predicate/dispose skip a null +0x5B0 thread.
     int savedFriendSlot = g_currentFriendSlot;
     __try { ObservePuppetBeforeUpdate(reinterpret_cast<uintptr_t>(actorObj)); }
     __except (EXCEPTION_EXECUTE_HANDLER) { /* Diagnostic cannot suppress the original. */ }
-    g_origPerEntityUpdate(actorObj);
+    if (!holdUpdate) g_origPerEntityUpdate(actorObj);
 
     // POST-UPDATE overrides â€” run after g_origPerEntityUpdate has finished.
     // This is AFTER the motion controller tick (FUN_1403c6740) which writes
@@ -4214,6 +4218,7 @@ bool Initialize(uintptr_t exeBase) {
         if (matches(RVA_RESOLVE_HANDLE, kResolveHandleBytes, sizeof(kResolveHandleBytes))) {
             g_resolveHandle = reinterpret_cast<PFN_ResolveHandle>(exeBase + RVA_RESOLVE_HANDLE);
             Log("  Handle resolver verified (0x4AD270)");
+            enemysync::SetScriptChildBrainGate(&enemymirror::ScriptChildBrainReady); // VUH-2605: needs the resolver
         } else {
             Log("  WARNING: handle resolver bytes don't match; attackers resolve by address bits");
         }

@@ -72,7 +72,11 @@ static uintptr_t g_packActors[3] {};
 // supplied by their separate native controls.
 static bool FieldActorCurrent(uintptr_t) noexcept { return false; }
 static bool SuppressClientDecision(uintptr_t) noexcept { return false; }
-static bool ScriptChildOwned(uintptr_t) noexcept { return false; } // VUH-2605
+// VUH-2605: one owned script child at a time; the hold the mirror requests is recorded.
+static uintptr_t g_scriptOwned = 0, g_scriptHeld = 0;
+static bool ScriptChildOwned(uintptr_t a) noexcept { return a && a == g_scriptOwned; }
+static bool ScriptChildHeld(uintptr_t a) noexcept { return a && a == g_scriptHeld; }
+static void HoldScriptChild(uintptr_t a) noexcept { g_scriptHeld = a; }
 static bool ConsumeFieldLeave(uintptr_t) noexcept { return false; }
 static bool PopulationLeftCleanupRequested(uintptr_t) noexcept { return false; }
 static bool MirrorRequested() noexcept { return g_requested; }
@@ -417,8 +421,36 @@ int main() {
     ++g_frameCounter;
     enemymirror::PreUpdate(other);
     CHECK(!enemymirror::DrivenNow(other) && enemymirror::g_brainCount == 1 && enemymirror::g_mstats.refusedClass == 2);
-    // ---- VUH-1788: the removal-predicate (cull) hook --------------------------------------
+    // ---- VUH-2605: an owned script child whose class brain cannot be hooked is held, never run ----------
     g_mhResult = MH_OK;
+    {
+        const uintptr_t child = reinterpret_cast<uintptr_t>(heap) + 0xD000, child2 = child + 0x800;
+        U(child) = 0x80001234; U(child2) = 0x80001234;
+        Q(g_handler) = vtable2;  // the refused class above
+        enemysync::g_scriptOwned = child; enemysync::g_scriptHeld = 0;
+        const auto refused = enemymirror::g_mstats.refusedClass;
+        ++g_frameCounter;
+        enemymirror::PreUpdate(child);
+        CHECK(enemysync::g_scriptHeld == child && !enemymirror::Find(child) && !enemymirror::DrivenNow(child));
+        ++g_frameCounter;
+        enemymirror::PreUpdate(child);
+        CHECK(enemysync::g_scriptHeld == child && !enemymirror::Find(child) && enemymirror::g_mstats.refusedClass == refused);
+        Q(g_handler) = vtable;   // the hooked mob class: owned, not held
+        enemysync::g_scriptOwned = child2;
+        ++g_frameCounter;
+        enemymirror::PreUpdate(child2);
+        CHECK(enemysync::g_scriptHeld == child && enemymirror::g_brainCount == 1);
+        // Before the factory: the type-4 mob class handler must carry the hooked class.
+        Q(g_exeBase + enemymirror::kMobHandlerRva) = vtable;
+        CHECK(enemymirror::ScriptChildBrainReady(0));
+        Q(g_exeBase + enemymirror::kMobHandlerRva) = vtable2;
+        CHECK(!enemymirror::ScriptChildBrainReady(0));
+        Q(g_exeBase + enemymirror::kMobHandlerRva) = 0;
+        CHECK(!enemymirror::ScriptChildBrainReady(0));
+        CHECK(enemymirror::ScriptChildBrainReady(child2) && !enemymirror::ScriptChildBrainReady(0));
+        enemysync::g_scriptOwned = enemysync::g_scriptHeld = 0;
+    }
+    // ---- VUH-1788: the removal-predicate (cull) hook --------------------------------------
     const uintptr_t predThunk = g_exeBase + 0x419B90, predicate = g_exeBase + 0x3DAC30;
     std::memcpy(image + 0x419B90, head, 4);
     const std::int32_t relP = static_cast<std::int32_t>(static_cast<std::intptr_t>(predicate) - static_cast<std::intptr_t>(predThunk + 8));

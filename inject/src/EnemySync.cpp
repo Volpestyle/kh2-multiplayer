@@ -6411,6 +6411,10 @@ bool ReceiveScriptActorBirth(std::uint16_t netId, std::uint32_t objectId, std::u
 }
 bool ScriptChildOwned(uintptr_t actor) noexcept { return ScriptChildOwnedImpl(actor); }
 void SetScriptBirthHostQuery(ScriptBirthHostQuery query) noexcept { g_scriptBirthHostQuery = query; }
+bool ScriptChildHeld(uintptr_t actor) noexcept { return ScriptChildHeldImpl(actor); }
+void HoldScriptChild(uintptr_t actor) noexcept { HoldScriptChildImpl(actor); }
+void SetScriptChildBrainGate(ScriptChildBrainGate gate) noexcept { g_scriptChildBrainGate = gate; }
+void SetScriptChildHide(ScriptChildHide hide) noexcept { g_scriptChildHide = hide; }
 bool SuppressClientDecision(uintptr_t actor) noexcept {
     enemymirror::FieldCallbackReader reader;if(!reader)return false;
     // Suppress decisions while connected even before binding or during a stream

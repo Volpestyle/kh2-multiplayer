@@ -13,9 +13,12 @@ struct ScriptChild {
     ScriptCallEntry birth{};                       // canonical BEGIN
     std::uint64_t returnSerial{};                  // this client's native-return counter: incarnation, not identity
     uintptr_t actor{};
+    uintptr_t objentry{};                          // read at the native return
     std::uint32_t returnFrame{};
     ordinarybinding::ScriptActorScope scope{};     // full scope captured at the native return
+    int row = -1;                                  // the census row this body took when first listed
     bool adopted{}, retired{};
+    bool held{};                                   // brain hook refused: its native update never runs
 };
 std::vector<ScriptChild> g_scriptChildren;
 std::uint64_t g_scriptReturnSerial = 0;           // never rewinds
@@ -23,6 +26,8 @@ EnemyFactoryFn g_scriptChildFactory = nullptr;    // 0x3DF930, prologue byte-che
 unsigned g_scriptChildLogs = 0;
 std::uint8_t g_scriptChildNullRetries = 0;
 ScriptBirthHostQuery g_scriptBirthHostQuery = nullptr;
+ScriptChildBrainGate g_scriptChildBrainGate = nullptr; // EnemyMirror; none: no child is ever built
+ScriptChildHide g_scriptChildHide = nullptr;           // ScriptMirror's native obj_hide
 constexpr std::uint8_t kScriptChildNullRetries = 3;
 constexpr std::uint32_t kScriptChildAdoptFrames = 300; // a constructed child the binder never adopts stops being a candidate
 constexpr std::uint32_t kScriptChildCensusFrames = 60;  // a returned body never seen by the census is gone
@@ -117,6 +122,25 @@ bool ScriptChildOwnedImpl(uintptr_t actor) noexcept {
     for (const auto& c : g_scriptChildren) if (c.actor == actor) return true;
     return false;
 }
+bool ScriptChildHeldImpl(uintptr_t actor) noexcept {
+    if (!actor || g_role != Role::Client) return false;
+    for (const auto& c : g_scriptChildren) if (c.actor == actor && c.held) return true;
+    return false;
+}
+// Last resort (lead #268): never updated, so it has no VM, status or census row (never a mirror, claim or hit
+// target); hidden with the game's own obj_hide (type-4 mob +0x80: actor+0x124 |= 0x300, flags only); the room
+// teardown disposes it natively, which skips the null +0x5B0 thread. Logged every time, outside the log budget.
+void HoldScriptChildImpl(uintptr_t actor) noexcept {
+    for (auto& c : g_scriptChildren)
+        if (c.actor == actor && !c.held) {
+            c.held = true;
+            c.retired = true; // never adopted, streamed or driven
+            const bool hidden = g_scriptChildHide && g_scriptChildHide(actor);
+            if (g_log)
+                g_log("[script-birth] client HOLD child=%u actor=%llX reason=brain-hook hidden=%d frame=%u (native update skipped until room teardown)",
+                      c.birth.effect, static_cast<unsigned long long>(actor), hidden ? 1 : 0, g_hitTraceFrame);
+        }
+}
 
 
 // The one native creation call for a script child, POD only so SEH is allowed. Game thread.
@@ -129,6 +153,16 @@ void* CallScriptChildFactory(const float* point4, float yaw, bool& fault) noexce
         return nullptr;
     }
 }
+
+// The census row listing this actor this frame, or -1. Presence decides, not byActor: TrackSpawns keeps
+// absent addresses indexed.
+int ScriptChildRow(uintptr_t actor) noexcept {
+    const auto found = g_inst.byActor.find(actor);
+    return found != g_inst.byActor.end() && found->second < g_inst.spawns.size() &&
+        g_inst.spawns[found->second].present && g_inst.spawns[found->second].actor == actor ? static_cast<int>(found->second) : -1;
+}
+// Still the body this record built: listed in the row it took when first listed.
+bool ScriptChildRowCurrent(const ScriptChild& c) noexcept { return c.row >= 0 && ScriptChildRow(c.actor) == c.row; }
 
 // Client owner frame, last in the client branch: no census or container reference is held across the
 // native call, and the next frame's fresh census is what the binder sees.
@@ -143,10 +177,26 @@ void TickScriptChildBirths() {
             ScriptChildLog("[script-birth] client unadopted child=%u actor=%llX frame=%u", c.birth.effect,
                 static_cast<unsigned long long>(c.actor), g_hitTraceFrame);
         }
-    // A record whose body the census no longer tracks is gone (native death/dispose or teardown). A new child
-    // enters the census only after its first update gives it a status, so an unadopted one gets a grace period.
+    // Each record takes the census row its body gets when first listed (same objentry, a 317). A different row
+    // at that address later, or a first row with other roots, is a replacement body that was never ours.
+    for (auto& c : g_scriptChildren) {
+        const int row = ScriptChildRow(c.actor);
+        if (row < 0 || c.held) continue;
+        const auto& s = g_inst.spawns[static_cast<std::size_t>(row)];
+        if (c.row < 0 && s.objentry == c.objentry && s.objectId == enemymirror::kCreeperObjectId) c.row = row;
+        else if (c.row != row) {
+            ScriptChildLog("[script-birth] client replaced child=%u actor=%llX row=%d->%d frame=%u", c.birth.effect,
+                static_cast<unsigned long long>(c.actor), c.row, row, g_hitTraceFrame);
+            c.actor = 0; // erased below; the body at that address keeps its own (non-script) ownership
+        }
+    }
+    // A record whose body this frame's census does not list is gone (native death/dispose or teardown). A new
+    // child enters the census only after its first update gives it a status, so an unadopted one gets a grace
+    // period. A held child never updates, so never gets listed: it stays owned until the room resets.
     std::erase_if(g_scriptChildren, [](const ScriptChild& c) {
-        return !g_inst.byActor.contains(c.actor) && (c.adopted || g_hitTraceFrame - c.returnFrame > kScriptChildCensusFrames);
+        if (!c.actor) return true;
+        if (c.held) return false;
+        return ScriptChildRow(c.actor) < 0 && (c.adopted || g_hitTraceFrame - c.returnFrame > kScriptChildCensusFrames);
     });
     ob::Scope scope;
     ScriptCallEntry pending{};
@@ -166,6 +216,11 @@ void TickScriptChildBirths() {
     if (g_scriptChildren.size() >= SPAWN_EMISSION_CAP) return;
     for (const auto& s : g_inst.spawns)
         if (s.present && s.netId == static_cast<int>(pending.effect)) return; // already bound to a local body
+    // Option C needs the class brain hooked before any child exists: without it, build nothing (retried later).
+    if (!g_scriptChildBrainGate || !g_scriptChildBrainGate(0)) {
+        ScriptChildLog("[script-birth] client wait child=%u reason=brain-hook frame=%u", pending.effect, g_hitTraceFrame);
+        return;
+    }
     spawncontroller::TraceStamp stamp;
     if (!spawncontroller::CaptureDiagnosticStamp(g_exeBase, stamp)) return;
     SpawnEmissionLedger::ScriptActorReservation token;
@@ -195,20 +250,28 @@ void TickScriptChildBirths() {
         (void)g_emissionLedger.CancelScriptActor(token, SpawnEmissionLedger::ScriptActorCancel::QualifiedNormalNull);
         return;
     }
-    if (fault || released == Out::Fault || released == Out::Ambiguous) {
-        (void)g_emissionLedger.CommitScriptActor(token); // never retry an outcome that may have created a body
-    } else if (!actor) {
-        // The factory's null returns precede construction (entry lookup or allocation): bounded retry.
-        if (++g_scriptChildNullRetries < kScriptChildNullRetries)
-            (void)g_emissionLedger.CancelScriptActor(token, SpawnEmissionLedger::ScriptActorCancel::QualifiedNormalNull);
-        else (void)g_emissionLedger.CommitScriptActor(token);
-    } else {
+    if (actor) {
+        // Every constructed body is tracked, whatever the lease release reported: an untracked child would run
+        // its native brain on this client. A release Fault/Ambiguous concerns only our resource references.
         (void)g_emissionLedger.CommitScriptActor(token);
         g_scriptChildNullRetries = 0;
         // A native return at an earlier record's address is a new body: retire the old record first.
         for (auto& c : g_scriptChildren) if (c.actor == actor) c.retired = true;
         std::erase_if(g_scriptChildren, [actor](const ScriptChild& c) { return c.actor == actor; });
-        g_scriptChildren.push_back({pending, ++g_scriptReturnSerial, actor, g_hitTraceFrame, scope.scriptActor, false, false});
+        ScriptChild record{};
+        record.birth = pending; record.returnSerial = ++g_scriptReturnSerial; record.actor = actor;
+        (void)ReadNative(actor + offsets::actor::OBJENTRY_PTR, record.objentry);
+        record.returnFrame = g_hitTraceFrame; record.scope = scope.scriptActor;
+        g_scriptChildren.push_back(record);
+        // Its own handler must already be hooked before its first update; otherwise it is held, never run.
+        if (!g_scriptChildBrainGate(actor)) HoldScriptChildImpl(actor);
+    } else if (fault || released == Out::Fault || released == Out::Ambiguous) {
+        (void)g_emissionLedger.CommitScriptActor(token); // never retry an outcome that may have created a body
+    } else {
+        // The factory's null returns precede construction (entry lookup or allocation): bounded retry.
+        if (++g_scriptChildNullRetries < kScriptChildNullRetries)
+            (void)g_emissionLedger.CancelScriptActor(token, SpawnEmissionLedger::ScriptActorCancel::QualifiedNormalNull);
+        else (void)g_emissionLedger.CommitScriptActor(token);
     }
     ScriptChildLog("[script-birth] client build parent=%u child=%u occurrence=%llu actor=%llX fault=%u release=%u at=(%.0f,%.0f,%.0f) frame=%u",
         pending.netId, pending.effect, static_cast<unsigned long long>(ScriptBirthOccurrence(pending)),
@@ -226,6 +289,8 @@ bool QueryScriptActorWitness(const ScriptActorQuery& q, ordinarybinding::ScriptA
         const int childId = static_cast<int>(c.birth.effect);
         if (q.use == ScriptActorUse::Stream ? childId != q.childId : (c.actor != q.actor || (q.childId && childId != q.childId)))
             continue;
+        // A native witness is only for the body this record built: its own pinned census row, still listed.
+        if (q.use != ScriptActorUse::Stream && !ScriptChildRowCurrent(c)) return false;
         ordinarybinding::Identity roots{};
         if (q.use != ScriptActorUse::Stream && !ScriptChildRoots(c.actor, roots)) return false;
         out = {ScriptBirthOccurrence(c.birth), c.returnSerial, childId, static_cast<int>(c.birth.netId), roots, c.scope};
@@ -236,7 +301,7 @@ bool QueryScriptActorWitness(const ScriptActorQuery& q, ordinarybinding::ScriptA
 bool AdoptScriptActorWitness(const ordinarybinding::ScriptActorWitness& w, ordinarybinding::Scope) noexcept {
     for (auto& c : g_scriptChildren)
         if (!c.retired && c.actor == w.child.actor && c.returnSerial == w.nativeReturnSerial &&
-            static_cast<int>(c.birth.effect) == w.childId) {
+            static_cast<int>(c.birth.effect) == w.childId && ScriptChildRowCurrent(c)) {
             if (!c.adopted)
                 ScriptChildLog("[script-birth] client adopted child=%u actor=%llX frame=%u", c.birth.effect,
                     static_cast<unsigned long long>(c.actor), g_hitTraceFrame);

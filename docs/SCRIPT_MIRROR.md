@@ -236,7 +236,20 @@ row) waits for a fresh netId and is dropped unpublished if none appears. A dead 
 but its published children still end; the relay admits 255/16 under a dead parent as teardown, like
 attack_free, and still refuses 255/15. Rows are tagged with the session generation and reset when the
 host stops or the generation changes. Occurrences never rewind. A client never replays these records as
-native traps. Until the client owner lands, it only validates and counts them.
+native traps.
+
+The client owner (`ScriptBirthOwner.inl`) keeps each 255/15 as a receipt in the SpawnEmission ledger. Once both
+the parent's and the child's own manifests are current, it builds the child once through the native factory at
+the manifest point, under the resident-resource lease (option C: its initializer runs natively, its brain is
+host-only). Ownership rules:
+- Nothing is built unless the type-4 mob class brain hook is installed first.
+- Every non-null factory return is owned, whatever the lease release reported.
+- A record pins the census row its body takes when first listed. It retires when that row is no longer listed,
+  never on the retained `byActor` index. A different row at the same address is a replacement body and gets
+  neither the old witness nor ownership.
+- A body whose own handler cannot be hooked is held as a last resort. The entity hook skips its whole native
+  update (it has no VM before its first update), it is hidden with the native obj_hide, and every hold is
+  logged. The room teardown disposes it.
 
 Actor role resources use the high bit, distinct from attack/effect IDs. Source
 and selected actor handles, status roots and object-entry roots stay local and
