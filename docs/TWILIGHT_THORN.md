@@ -343,6 +343,36 @@ findings are not a runtime victory start receipt and do not enable the row in
 this slice. The full prior implementation/tests/docs are retained in the
 terminal-trim21 baseline and deferred reverse patch.
 
+### VUH-2807 defeat handoff: failed r1 qualification
+
+The original zr100 kill lost the host's checked315 while the friend's generic
+death-event pause was Closing. The retained FIFO fix landed as4408b80 after
+Sage's exact-range approval. The subsequent kill run
+`20261025-140035_net_twilight_thorn_vuh2807_315_handoff_1` drained that handoff,
+but did **not** qualify acceptance. The friend still paused for the host's
+initial death camera and began its own defeat roughly7–10s later. Exact
+wall-time pixel skew remains UNQUALIFIED because the recordings lacked native
+capture-time receipts and had decode warnings.
+
+Friend log180988 records a315 replay at owner frame32178, then a separate native
+315 at32756 (578frames later). Footage showed one continuous camera/bonus/story
+sequence; permanent reward uniqueness and exact context replacement were not
+proved. The friend resumed with mission `host=-`, missing the transient end16
+snapshot, so the expected host-led end seal was absent and step63 failed.
+Story/reward equality, cleanup and onward-control assertions were not reached.
+Full install541→541 and all four protected saves were unchanged; owned processes
+and relay closed. The paired clip, decisive log lines and follow-up proposal
+are attached to [VUH-2807](https://linear.app/vuhlp/issue/VUH-2807).
+
+The r2 candidate retains the validated end16 occurrence and gives one qualified
+native owner the initial death camera through315. The exact content, native
+last-dead-boss focus, helper pins, control lifetime and unchanged input safety
+requirements are documented in [Mission mirror](MISSION_MIRROR.md#twilight-thorn-victory-vuh-2569).
+Its read-only native audit and owned-memory checks do not qualify live timing,
+reward equality or onward control. A new exact-range review and scheduled live
+run remain required. The Closing FIFO and ordinary safety gates remain required;
+Shan-Yu's4/16 exclusion remains unchanged.
+
 ### Full-fight candidate and live11
 
 The subsequent full-fight candidate restores the reviewed host-only terminal

@@ -68,7 +68,8 @@ games run the same mission file and its own mission hasn't ended:
   with its argument. Trap 4/3 completes it: `0x3A33C0(arg)` →
   `0x3A41E0(M, 7 or 0x9C, arg)`, which shows the banner and fires the trigger.
   Trap 4/16, the boss defeat (`0x3A3440(arg)` → `0x3A41E0(M, 0x10, arg)`,
-  `re_deadboss`), is deliberately **not** replayed. The friend's copy of the
+  `re_deadboss`), is deliberately **not** replayed by the generic selector. The
+  exact Thorn contract below has its own native owner. The friend's copy of the
   boss has no brain, so a replayed defeat flow never finishes: run
   `20261017-074315` left the friend on a white loading screen for over 100 s.
   When the host's mission ends that way, the friend sees an end it can't
@@ -167,13 +168,48 @@ native-local plus replay combination, including a late replay after egress.
 
 ## Twilight Thorn victory (VUH-2569)
 
-For exact mission `TT34_MS304.bar`, the host records native 4/16
-`mission_dead_boss` after boss signal4 advances the mission to state2. The
-friend suppresses its own4/16 and seals its mission end from the host receipt
-without replaying the native boss defeat function. Other mission names cannot
-use16 on the wire, and the generic end-trap replay selector never returns16.
-The existing boss-leave and host event/room/progress paths handle retirement
-and onward travel.
+For exact mission `TT34_MS304.bar`, the host records native4/16
+`mission_dead_boss` after boss signal4 advances the mission to state2. VUH-2807
+retains that validated occurrence at admission, before a later inactive snapshot
+can replace it while the friend is paused. Its identity includes session,
+connections/deliveries, generation, epoch, native mission, load and transition.
+It seals once even when the friend resumes with `host=-`. Other mission names
+cannot use16 on the wire; the generic end-trap selector still never returns16.
+
+One exact native Thorn sequence owns the initial death camera through315. Only
+the actual input collector may start it, requiring fresh unchanged field/menu/
+event/context/freeze/blocker safety, matching live control scope and runtime
+writer, matching epoch/ACK/convergence, exact mission and native helper pins.
+The installed TT34 header, its2628-byte `re_deadboss-1a` timeline and the2760-byte
+`00battle.bin` index2 continuation must match their audited content hashes.
+The native last-dead-boss focus must be a current census/binding for307 at0HP;
+the native bone focus must be present. This preserves the native camera's actor
+preconditions rather than inventing an early16 from the host snapshot alone.
+
+The native16 marks ended flags, applies the mission header reward and installs
+the first timeline via3FB000→3AD2D0. Its phase2→3→4 continuation waits for native
+timeline completion, installs the common continuation, then dispatches signal16
+to the authored315. These two fixed timelines do not wait for a BDX boss brain.
+The r1 kill also observed the friend's local native flow completing578frames
+after an early315 replay; this supports the Thorn-specific contract, not a
+change to Shan-Yu's exclusion.
+
+The host recognizes only those exact native prelude/continuation contexts and
+does not publish a generic friend PAUSE for them. An unrelated replacement
+context still publishes the ordinary hold. A validated host315 joins the owned
+sequence instead of replaying315 independently. The native start hook permits
+one315, then verifies its loaded scene resource and every descriptor word in
+the new context. A qualified native315 that beats the host end receipt is
+observed for deduplication only; it grants no authority to call16. Unknown or
+partial native results abort the control lifetime. The landed Closing FIFO
+deferral, health expiry and ordinary safety predicates remain unchanged.
+
+`kh2coop_thorn_defeat_test` covers retained occurrence, scope and one-owner
+rules. `kh2coop_nativehit_test` exercises actual paused admission and resume
+with `host=-`. Its optional `--thorn-native-contract <audit-assets-dir>` fixture
+uses retained exact installed assets over owned memory to check native safety,
+pins/focus, one native prelude, one315, context success/refusal and host PAUSE
+publication. Only the native16 side-effect leaf is stubbed; no game is opened.
 
 Installed tt34 event program157 maps signal16 to eventASCII `315` (`0x353133`,
 flags0x12), then the authored exit world2/room0/door0/programs51. Qualification

@@ -1891,7 +1891,7 @@ protected actor. Protection is best effort during loads.
 | `save` | `as expr` | Store a value in `saved[...]` |
 | `protect` | `on` | Start/stop team-0 protection polling; stopping does not restore the previous team |
 | `capture` | `name` | PNG from inside the renderer; retain the actual CLI response under `receipt` alongside the relative artifact `path` |
-| `clip` | `name seconds fps background` | MP4 → artifact. `background: true` films while the next steps run; `clip_wait` collects every background clip (do it before a `capture` on that instance) |
+| `clip` | `name seconds fps background` | MP4 → artifact with full CLI receipt and adjacent `.receipt.json` / `.capture-time.jsonl` sidecars. `background: true` films while the next steps run; `clip_wait` collects every background clip (do it before a `capture` on that instance) |
 | `clip_wait` | | Waits for the background clips and records their receipts |
 | `avatar_stall` | none | Two-player `net_avatar_stall.json`: suspend the original sender runtime handle for 2 s, move its Sora 150 units in RAM, resume in `finally`; both games and viewer keep running. Six-second viewer clip and bridge samples check active/held/live states. Native `[ptrace]` logs retain per-frame hold and resume positions |
 | `crash`, `freeze` | | Runner self-tests: fault or suspend the instance |
@@ -1961,6 +1961,28 @@ been in the viewer's room for at least 1.5 s.
 `tools/scenario/spikes/pops.py RUN_DIR OWNER VIEWER NAME` lists each pop
 with its context. The sampling runs at about 20–40 Hz per instance, so
 single-frame jitter needs a clip.
+
+## Capture-time receipts
+
+`kh2ctl clip` retains the complete CLI result in `<clip>.receipt.json` and one
+native timing row per frame in `<clip>.capture-time.jsonl`. Rows identify the
+frame, Present sequence, QPC frequency and bounds of the Present callback that
+submitted its pixel copy. These are capture-time bounds, independent of delayed
+GPU readback and MP4 encoding; they do not measure physical monitor scanout.
+The receipt also retains the measured Present rates before and during capture.
+The scenario runner exports both sidecars for foreground, background and fight
+clips.
+
+For same-PC seats, use `tools/scenario/clip_timing.py` with the two receipts,
+zero-based first-visible-defeat frame markers, `--same-pc` and `--out`. Review the
+preceding frame on each seat to establish that defeat was not yet visible.
+Strictly decode each MP4 and match its decoded frame count to the receipt before
+using those markers. Missing/corrupt media cannot qualify a timing result.
+The tool checks complete monotonic timing rows, different seat PIDs and matching
+clock domain/frequency. It bounds onset between the preceding non-defeat capture
+and first defeat capture, and passes only if the entire absolute skew interval
+is within1000ms. A boundary gap or interval crossing that threshold remains
+UNQUALIFIED. Cross-PC QPC clocks cannot be compared with this tool.
 
 ## Example scenarios
 

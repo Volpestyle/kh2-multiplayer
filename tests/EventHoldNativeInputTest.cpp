@@ -4,6 +4,8 @@
 #include "InputCollectorOrder.hpp"
 #include "kh2coop/EventScenes.hpp"
 #include "kh2coop/KH2Offsets.hpp"
+#include "ThornDefeat.hpp"
+#include "ThornDefeatNative.hpp"
 #include <array>
 #include <vector>
 #include <cstdio>
@@ -16,6 +18,15 @@ namespace kh2coop::inject::spawncontroller { bool IsDiagnosticGameThread(){retur
 bool replayStarts=true;unsigned replays=0;kh2coop::EventStart replayed{};std::uint16_t replayedProgram=0;
 namespace kh2coop::inject::eventstartmirror {
 bool Replay(const EventStart& s,std::uint16_t program) noexcept {++replays;replayed=s;replayedProgram=program;return replayStarts;}
+}
+bool thornOwned=false;unsigned thornService=0;
+namespace kh2coop::inject::enemysync {
+int ServiceThornDefeat(const eventhold::Scope&,bool,bool) noexcept {++thornService;return 0;}
+bool OwnsThorn315(const EventStart& s,std::uint16_t program) noexcept {
+ return thornOwned&&s.worldId==2&&s.roomId==34&&s.id==0x353133&&program==157;
+}
+bool PermitThorn315(const EventStart&,std::uint16_t) noexcept {return true;}
+void CompleteThorn315(const EventStart&,std::uint16_t,std::uintptr_t,std::uintptr_t) noexcept {}
 }
 namespace n=kh2coop::inject::eventholdnative;
 // VUH-2640: the collector's real post-call order (InputCollectorOrder.hpp) with the real event-hold apply and
@@ -225,6 +236,35 @@ int main(int argc,char** argv){
  n::Observe(scope,e::Kind::Transition,3,1,&room,0);n::OwnerAck(scope,1,true,true);
  check(runtime.Arm(GetTickCount64()),"test owner baseline arm");tick();
  e::Command acquire{};acquire.scope=scope;acquire.hostSourceSerial=8;acquire.kind=e::Kind::Acquire;acquire.epoch=1;acquire.eventProgram=1;
+ if(mode=="thorn-owned" || mode=="thorn-owned-closing") {
+   if(mode=="thorn-owned-closing") {
+     check(runtime.Publish(acquire,GetTickCount64()),"prior hold published");tick();tick();menu=8;tick();
+     e::Command release{};release.scope=scope;release.kind=e::Kind::Release;release.hostSourceSerial=9;release.epoch=1;
+     check(runtime.Publish(release,GetTickCount64()),"prior release published");tick();tick();
+     menu=255;tick();
+   }
+   acquire.hostSourceSerial=10;acquire.eventProgram=157;acquire.startWorld=2;acquire.startRoom=34;
+   acquire.startId=0x353133;acquire.startFlags=0x12;
+   acquire.startParams={2,2,0x00330033,0x33,1,0xFFFFFFFF,3,0,0};
+   kh2coop::inject::thorndefeat::State defeat;
+   kh2coop::inject::thorndefeat::Key defeatKey;
+   defeatKey.session.fill(1);defeatKey.host=1;defeatKey.hostDelivery=1;defeatKey.self=2;defeatKey.delivery=1;
+   defeatKey.generation=2;defeatKey.epoch=1;defeatKey.load=1;defeatKey.mission=0x1000;defeatKey.slot=1;
+   check(defeat.Observe(defeatKey,true,9)&&defeat.Seal(defeatKey),"retained native owner armed");
+   thornOwned=defeat.Owns315(defeatKey);
+   unsigned nativeStarts=0;
+   if(mode=="thorn-owned"&&defeat.Native315(defeatKey))++nativeStarts;
+   check(runtime.Publish(acquire,GetTickCount64()),"host315 joins owned native defeat");tick();tick();
+   // Exactly one game-side native315 is supplied by the already owned
+   // prelude. A consumer replay here would be a second actual start.
+   if(mode=="thorn-owned-closing"&&defeat.Native315(defeatKey))++nativeStarts;
+   check(!defeat.Native315(defeatKey),"second native315 callback refused by the real occurrence state");
+   check(nativeStarts+replays==1,"exactly one315 with native owner, no consumer replay");
+   check(!n::HoldingInput()&&buttons()==0x4d4d,"owned315 takes no new pause or input overlay");
+   n::Disable();VirtualFree(memory,0,MEM_RELEASE);
+   std::printf("mode=%.*s checks=%u failures=%u\n",static_cast<int>(mode.size()),mode.data(),checks,failures);
+   return failures?1:0;
+ }
  if(mode.starts_with("closing-")) {
    // VUH-2807 zr100: death-camera Acquire, Release, then native 315 on the very next host frame.
    // The real adapter/FIFO must finish its own pause close before consuming the checked start.

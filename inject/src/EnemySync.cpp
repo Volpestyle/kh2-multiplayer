@@ -34,6 +34,9 @@
 #include "PrologueParty.hpp"
 #include "NativePartyHud.hpp"
 #include "MissionMirror.hpp"
+#include "ThornDefeat.hpp"
+#include "ThornDefeatNative.hpp"
+#include "ThornDefeatNativePins.hpp"
 #include "PartyRow.hpp"
 #include "BossLeave.hpp"
 #include "DownedReturn.hpp"
@@ -569,10 +572,14 @@ void AdvanceClientManifestRevision() {
 }
 bool EnsureClientClaimScope();
 bool ReleaseClientClaims(std::uint32_t frame);
+void ResetThornDefeat();
+bool HostThornDefeatCameraCurrent(std::uintptr_t context);
+bool EventControlScopeCurrent(const eventhold::Scope& scope);
 
 void ResetFieldObjects();
 
 void RetireWorldSession() {
+    ResetThornDefeat();
     g_cloneRebuild.Reset(); // VUH-2679: no pending rebuild survives its world session (its seq stays monotonic)
     ResetFieldObjects();
     ResetSpawnEmissions();
@@ -2069,7 +2076,8 @@ bool TickHostEventHold(std::uint32_t frame, bool allowRelease) {
     // VUH-2341: World Map travel holds friends like an event; it ends only
     // after the host lands in a room and the ordinary release rules pass.
     const bool travel = warp::HostTravelling();
-    const bool ownedCamera = OwnedScriptCameraCurrent(before.context,before.state);
+    const bool ownedCamera = OwnedScriptCameraCurrent(before.context,before.state) ||
+        HostThornDefeatCameraCurrent(before.context);
     const bool active = (!ownedCamera && ((before.state >= 2 && before.state <= 4) || before.context != 0)) || travel;
     const bool idle = ((before.state == 0 && before.context == 0) || ownedCamera) && !travel;
     if ((!active && !idle) || active == publication.activePublished) return true;
@@ -5915,6 +5923,19 @@ Role CurrentRole() {
 
 } // namespace
 
+int ServiceThornDefeat(const eventhold::Scope& scope,bool nativeSafe,bool converged) noexcept {
+    return StartThornDefeat(scope,nativeSafe,converged);
+}
+bool OwnsThorn315(const EventStart& start,std::uint16_t program) noexcept {
+    return ThornOwns315(start,program);
+}
+bool PermitThorn315(const EventStart& start,std::uint16_t program) noexcept {
+    return ThornPermit315(start,program);
+}
+void CompleteThorn315(const EventStart& start,std::uint16_t program,uintptr_t before,uintptr_t after) noexcept {
+    ThornComplete315(start,program,before,after);
+}
+
 void SetHashDiagnosticSink(CausalSink sink) {
     char value[8] {};
     const auto length=GetEnvironmentVariableA("KH2COOP_CAUSAL_DIAGNOSTICS",value,sizeof(value));
@@ -6134,6 +6155,7 @@ void OnFrameStart(std::uint32_t frame) {
     const auto load = warp::LoadSerial();
     const bool newLoad = load != g_seenLoad;
     if (transition != g_seenTransition || newLoad || warp::TransitionPending()) {
+        ResetThornDefeat();
         g_hostHealthDifficulty = {};
         g_hostHealthHistory.Clear();
         // Requests invalidate cached pointers before the native fade/teardown;

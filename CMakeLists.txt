@@ -275,6 +275,13 @@ add_executable(kh2coop_spawn_emission_test tests/SpawnEmissionTest.cpp)
 
 # VUH-2342: MissionState codec and the mission mirror's rules (inject/src/MissionMirror.hpp).
 add_executable(kh2coop_mission_mirror_test tests/MissionMirrorTest.cpp)
+add_executable(kh2coop_thorn_defeat_test tests/ThornDefeatTest.cpp)
+target_include_directories(kh2coop_thorn_defeat_test PRIVATE inject/src)
+if(MSVC)
+    target_compile_options(kh2coop_thorn_defeat_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_thorn_defeat_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
 target_link_libraries(kh2coop_mission_mirror_test PRIVATE kh2coop_common)
 target_include_directories(kh2coop_mission_mirror_test PRIVATE inject/src)
 if(MSVC)
@@ -829,7 +836,7 @@ foreach(_kh2coop_target IN LISTS _kh2coop_targets)
     endif()
 endforeach()
 if(TARGET kh2coop_event_hold_input_test)
-    foreach(_event_mode off abort unowned elsewhere closing-315 closing-release closing-abort closing-scope
+    foreach(_event_mode off abort unowned elsewhere thorn-owned thorn-owned-closing closing-315 closing-release closing-abort closing-scope
                         closing-partial closing-unconverged closing-frozen closing-blocked closing-event
                         closing-context closing-field closing-menu closing-foreign)
         add_test(NAME kh2coop_event_hold_input_test_${_event_mode}

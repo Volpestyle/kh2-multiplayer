@@ -2202,13 +2202,22 @@ CommandResult CmdClip(std::vector<std::string> args) {
     std::wostringstream command;
     command << L"ffmpeg -y -loglevel error -framerate " << clipFps << L" -i \""
             << (frameDir / L"f_%05d.bmp").wstring()
-            << L"\" -c:v libx264 -pix_fmt yuv420p -crf 20 \"" << out.wstring() << L"\"";
+            << L"\" -c:v libx264 -threads 2 -pix_fmt yuv420p -crf 20 \"" << out.wstring() << L"\"";
     const auto encode = RunProcessCapture(command.str(), RepoRoot());
     if (!encode.launched || encode.exitCode != 0) {
         return MakeError("ffmpeg failed (is it on PATH?): " + encode.output);
     }
+    const auto timingSource = frameDir / "capture-time.jsonl";
+    const auto timingOut = std::filesystem::path(out.wstring() + L".capture-time.jsonl");
+    if (!std::filesystem::exists(timingSource) || !std::filesystem::file_size(timingSource))
+        return MakeError("Native capture-time receipt missing; clip timing cannot be qualified");
+    std::filesystem::copy_file(timingSource, timingOut, std::filesystem::copy_options::overwrite_existing);
     if (!keepFrames) std::filesystem::remove_all(frameDir);
 
+    char clockDomain[MAX_COMPUTERNAME_LENGTH + 1] {};
+    DWORD clockDomainSize = static_cast<DWORD>(sizeof(clockDomain));
+    if (!GetComputerNameA(clockDomain, &clockDomainSize))
+        return MakeError("Capture clock domain unavailable");
     std::ostringstream json;
     json << "{\"ok\":true,\"processId\":" << pid
          << ",\"path\":" << JsonString(NarrowPath(out))
@@ -2217,7 +2226,17 @@ CommandResult CmdClip(std::vector<std::string> args) {
          << ",\"height\":" << channel.get()->height
          << ",\"clipFps\":" << clipFps
          << ",\"gameFpsBefore\":" << gameFps
-         << ",\"gameFpsDuringCapture\":" << fpsDuring << "}";
+         << ",\"gameFpsDuringCapture\":" << fpsDuring
+         << ",\"captureSeconds\":" << elapsed
+         << ",\"captureInterval\":" << interval
+         << ",\"timingMethod\":\"native-Present-QPC-bounds-v1\""
+         << ",\"clockDomain\":" << JsonString(clockDomain)
+         << ",\"captureTiming\":" << JsonString(NarrowPath(timingOut)) << "}";
+    const auto receiptOut = std::filesystem::path(out.wstring() + L".receipt.json");
+    std::ofstream receipt(receiptOut, std::ios::binary | std::ios::trunc);
+    receipt << json.str() << '\n';
+    receipt.close();
+    if (!receipt) return MakeError("Writing clip/present-rate receipt failed");
     return {0, json.str()};
 }
 

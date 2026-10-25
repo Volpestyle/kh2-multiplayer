@@ -11,6 +11,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <iostream>
+#include <fstream>
 
 namespace kh2coop {
 // Replace only the transport boundary; native census, identity gates, queues,
@@ -3481,6 +3482,153 @@ void ArenaWorld() {
     const char path[] = "msn/us/TT34_MS304.bar";
     std::memcpy(reinterpret_cast<void*>(mission + MR::kPath), path, sizeof(path));
 }
+void TestThornRetainedEnd() {
+    // Production admission and ApplyMission over the owned synthetic mission.
+    // The paused owner sees end16, then an inactive latest snapshot before it
+    // can run ApplyMission; no game/native end call is made by this test.
+    const auto seed=[] {
+        Reset(true); ArenaWorld(); ResetThornDefeat();
+        g_mirrorRequested=true;g_missionParked=0;g_missionChecked=g_missionReady=true;
+        g_missionLatest={};g_missionGeneration=0;g_missionHost={};
+        g_missionReplayed=g_missionWasFollowing=g_missionFallbackPending=g_missionHostFailedSeen=false;
+        g_missionDroppedEnd=-1;g_missionLocalBase=0;
+        g_lastRoomPacket=arrivalTarget;
+        g_eventControlScope={};
+        std::memset(g_eventControlScope.session,'a',sizeof(g_eventControlScope.session));
+        g_eventControlScope.generation=WorldSessionGeneration();g_eventControlScope.slot=1;
+        g_eventControlScope.hostConnection=g_bridge.ConnectionId(0);
+        g_eventControlScope.selfConnection=g_bridge.ConnectionId(1);
+        g_eventControlScope.hostDelivery=g_bridge.PeerDeliverySerial(0);
+        g_eventControlScope.targetDelivery=g_bridge.DeliverySerial();
+    };
+    const auto ended=[] {
+        MissionState packet;packet.location=arrivalTarget;packet.sequence=1;packet.active=true;
+        std::memcpy(packet.file.data(),"TT34_MS304.bar",sizeof("TT34_MS304.bar"));
+        packet.flags=MR::kEnded;packet.endTrap=16;packet.endArg=UINT32_MAX;return packet;
+    };
+    const auto source=[] {
+        return WorldScope{std::string(32,'a'),100,1,700,101,1};
+    };
+    seed();
+    Put(image+offsets::OPEN_MENU,std::uint8_t{8});
+    const auto packet=ended();ReceiveMission(source(),packet);
+    const auto key=ThornKey();
+    Check(g_thornDefeat.Owns315(key) && g_thornDefeat.Source()==700 && !g_thornDefeat.Seal(key),
+          "actual end16 admission seals its exact native mission once while pause is open");
+    auto inactive=packet;inactive.sequence=2;inactive.active=false;inactive.file={};
+    inactive.flags=0;inactive.endTrap=0;inactive.endArg=0;
+    auto later=source();later.hostSourceSerial=701;
+    ReceiveMission(later,inactive);
+    Check(!g_missionHost.active && g_thornDefeat.Owns315(ThornKey()) && g_thornDefeat.Source()==700,
+          "actual latest host=- cannot erase the earlier validated end16 occurrence");
+    Put(image+offsets::OPEN_MENU,std::uint8_t{255});
+    ApplyMission(600);ApplyMission(601);
+    Check(g_missionReplayed && !g_missionFallbackPending && g_missionDroppedEnd==-1 &&
+          g_thornDefeat.Owns315(ThornKey()) && !LocalMissionEnded(false),
+          "resuming with host=- seals the local end guard without an unqualified native16 replay");
+    ++load;
+    Check(!g_thornDefeat.Owns315(ThornKey()),"retained end16 cannot cross a native reload");
+    for(unsigned mutation=0;mutation<4;++mutation) {
+        seed();auto bad=ended();auto from=source();
+        if(mutation==0)++from.sourceConnectionId;
+        if(mutation==1)++from.sourceDeliverySerial;
+        if(mutation==2)++bad.location.epoch;
+        if(mutation==3)bad.endArg=0;
+        ReceiveMission(from,bad);
+        Check(!g_thornDefeat.Owns315(ThornKey()),
+              "wrong host/delivery/epoch/native argument grants no retained victory authority");
+    }
+    ResetThornDefeat();g_eventControlScope={};g_mirrorRequested=false;
+}
+unsigned thornNativeEnds=0;
+void __fastcall ThornNativeEndFixture(std::uint64_t* args) {
+    ++thornNativeEnds;
+    Check(static_cast<std::uint32_t>(args[0])==UINT32_MAX,"native Thorn argument remains -1");
+    const auto mission=image+0x80000,context=image+0x97000;
+    Put(mission+MR::kFlags,std::uint32_t{1|MR::kEnded});
+    Put(mission+0x430,std::uint32_t{2});Put(mission+0x434,std::uint32_t{16});
+    Put(mission+0x438,UINT32_MAX);Put(context+8,Read<uintptr_t>(mission+0xA0));
+    Put(image+offsets::EVENT_CONTEXT,context);
+}
+void TestThornNativeAdapter(const char* directory) {
+    // Optional audit fixture: exact installed timeline bytes are retained in the
+    // review packet, not shipped in the repository. Everything native is owned
+    // synthetic memory; only the16 entry's side effects are stubbed.
+    Reset(true);ArenaWorld();ResetThornDefeat();g_mirrorRequested=true;
+    g_missionParked=0;g_missionChecked=g_missionReady=true;
+    g_eventControlScope={};auto& scope=g_eventControlScope;
+    std::memset(scope.session,'a',32);scope.generation=1;scope.slot=1;
+    scope.hostConnection=100;scope.selfConnection=101;scope.hostDelivery=scope.targetDelivery=1;
+    const auto mission=image+0x80000,header=image+0x90000,prelude=image+0x91000;
+    const auto battle=image+0x92000,continuation=image+0x93000,scene=image+0x96000,context=image+0x98000;
+    auto asset=[directory](const char* name,uintptr_t target,std::size_t size) {
+        std::ifstream f(std::string(directory)+"/"+name,std::ios::binary);
+        f.read(reinterpret_cast<char*>(target),static_cast<std::streamsize>(size));
+        Check(f.good() && f.peek()==std::char_traits<char>::eof(),"exact retained contract asset loaded");
+    };
+    asset("mission-header.bin",header,48);asset("mission-1a.bin",prelude,2628);asset("battle-2.bin",continuation,2760);
+    namespace pins=kh2coop::inject::thorndefeat::pins;
+    std::memcpy(reinterpret_cast<void*>(image+pins::kEndEntryRva),pins::kEndEntry,sizeof(pins::kEndEntry));
+    std::memcpy(reinterpret_cast<void*>(image+pins::kEndRva),pins::kEnd,sizeof(pins::kEnd));
+    std::memcpy(reinterpret_cast<void*>(image+pins::kContinueRva),pins::kContinue,sizeof(pins::kContinue));
+    std::memcpy(reinterpret_cast<void*>(image+pins::kInstallRva),pins::kInstall,sizeof(pins::kInstall));
+    Put(mission+8,header);Put(mission+0xA0,prelude);Put(mission+0xA8,std::uint32_t{0x68F});
+    Put(image+0x2AE5E58,battle);Put(battle,std::uint32_t{0x01524142});Put(battle+4,std::uint32_t{3});
+    for(unsigned i=0;i<3;++i)Put(battle+16+16*i,std::uint16_t{0x16});
+    const auto mask=offsets::active_entity_list::HANDLE_LOW_MASK;
+    Put(image+offsets::active_entity_list::HANDLE_REGION_TABLE+8,continuation&~uintptr_t{mask});
+    Put(battle+16+32+8,std::uint32_t{(1u<<25)|static_cast<std::uint32_t>(continuation&mask)});
+    Put(battle+16+32+12,std::uint32_t{2760});
+    Put(status,std::int32_t{0});Put(image+0x2AE7D30,enemy);Put(image+0x2AE7D38,image+0x99000);
+    Check(ThornContentReady(mission)&&ThornDeathFocusReady(),"real adapter accepts exact content and current307 death focus");
+    Put(image+0x2AE7D30,player);Check(!ThornDeathFocusReady(),"another native death focus refuses Thorn authority");
+    Put(image+0x2AE7D30,enemy);Put(status,std::int32_t{1});
+    Check(!ThornDeathFocusReady(),"a living307 cannot supply defeat camera authority");Put(status,std::int32_t{0});
+    Put(prelude+50,static_cast<std::uint8_t>(Read<std::uint8_t>(prelude+50)^1));
+    Check(!ThornContentReady(mission),"a changed death-camera asset refuses native16");
+    Put(prelude+50,static_cast<std::uint8_t>(Read<std::uint8_t>(prelude+50)^1));
+    namespace ehn=kh2coop::inject::eventholdnative;
+    SetEnvironmentVariableA("KH2COOP_EVENT_HOLD_CONTROL","1");ehn::Install(image,nullptr);
+    eventhold::Channel runtime;Check(runtime.OpenExisting(GetCurrentProcessId())&&runtime.Bind(scope,GetTickCount64()),"native adapter lifetime bound");
+    eventhold::Ack ack{};ack.scope=scope;ack.epoch=9;ack.processedOrdinal=1;
+    ack.flags=eventhold::SafeConverged|eventhold::LiveEligible;
+    Check(ehn::Control().PublishAck(ack)&&runtime.Arm(GetTickCount64()),"native adapter retains actual convergence gates");
+    const auto key=ThornKey();Check(g_thornDefeat.Observe(key,true,700)&&g_thornDefeat.Seal(key),"native adapter admitted occurrence");
+    // Jump only from the owned synthetic trap stub into the controlled leaf.
+    DWORD old=0;Check(VirtualProtect(reinterpret_cast<void*>(image+0x433000),0x1000,PAGE_EXECUTE_READWRITE,&old)!=0,"owned trap page executable");
+    std::uint8_t jump[12]={0x48,0xB8};const auto fn=reinterpret_cast<uintptr_t>(&ThornNativeEndFixture);
+    std::memcpy(jump+2,&fn,sizeof(fn));jump[10]=0xFF;jump[11]=0xE0;
+    std::memcpy(reinterpret_cast<void*>(image+0x4334D0),jump,sizeof(jump));FlushInstructionCache(GetCurrentProcess(),reinterpret_cast<void*>(image+0x4334D0),sizeof(jump));
+    thornNativeEnds=0;
+    std::printf("thorn-adapter gates control=%u pins=%u content=%u focus=%u key=%u ready=%u ackEpoch=%u expectedEpoch=%u\n",
+        ThornControlCurrent(),ThornPinsReady(),ThornContentReady(mission),ThornDeathFocusReady(),
+        g_thornDefeat.Matches(ThornKey()),g_missionReady,ack.epoch,g_host.epoch);
+    Check(StartThornDefeat(scope,false,true)==0&&StartThornDefeat(scope,true,false)==0&&thornNativeEnds==0,"unsafe/unconverged native adapter cannot consume16");
+    Check(StartThornDefeat(scope,true,true)==1&&thornNativeEnds==1,"real adapter starts and verifies native prelude once");
+    Check(StartThornDefeat(scope,true,true)==0&&thornNativeEnds==1,"repeated collector cannot start16 twice");
+    const auto& row=eventscenes::TwilightThornVictory;EventStart start{};
+    start.worldId=2;start.roomId=34;start.id=row.id;start.flags=row.flags;start.params=row.params;
+    Check(ThornOwns315(start,157)&&ThornPermit315(start,157)&&!ThornPermit315(start,157),"actual owner joins host315 and permits exactly one native315");
+    Put(image+0x2A0F828,scene);Put(scene,std::uint32_t{0x01524142});Put(scene+4,std::uint32_t{1});
+    Put(scene+16,std::uint16_t{0x16});Put(scene+20,start.id);
+    Put(scene+24,std::uint32_t{(1u<<25)|static_cast<std::uint32_t>(prelude&mask)});Put(scene+28,std::uint32_t{2628});
+    Put(context+8,prelude);std::memcpy(reinterpret_cast<void*>(context+0x18),start.params.data(),sizeof(start.params));
+    ThornComplete315(start,157,0,context);
+    Check(g_thornDefeat.Owns315(ThornKey())&&runtime.Reason()==eventhold::Abort::None,"verified scene resource and all descriptor words retain dedup");
+    Put(context+0x18,std::uint32_t{999});ThornComplete315(start,157,0,context);
+    Check(!g_thornDefeat.Owns315(ThornKey())&&runtime.Reason()==eventhold::Abort::Unsupported,"wrong native context descriptor aborts rather than claims success");
+    g_role=Role::Host;g_bridge.slot=0;g_missionHostBase=mission;g_missionHostLoad=load;
+    g_missionHostEndTrap=16;g_missionHostEndArg=UINT32_MAX;
+    g_eventHoldProducerEnabled=true;g_hostEventPublication={};
+    Check(CaptureWorldContext(g_hostEventPublication.admittedRoom),"host death camera has an admitted publication lifetime");
+    Put(image+offsets::CUTSCENE_STATE,std::int32_t{2});Put(image+offsets::EVENT_CONTEXT,image+0x97000);
+    Check(HostThornDefeatCameraCurrent(image+0x97000)&&TickHostEventHold(700,true)&&!g_hostEventPublication.activePublished,
+          "exact native Thorn death camera never opens the generic friend PAUSE");
+    Put(context+8,image+0x99000);Put(image+offsets::EVENT_CONTEXT,context);
+    Check(!HostThornDefeatCameraCurrent(context)&&TickHostEventHold(701,true)&&g_hostEventPublication.activePublished,
+          "unrelated replacement context still publishes the ordinary hold");
+    ehn::Disable();VirtualProtect(reinterpret_cast<void*>(image+0x433000),0x1000,old,&old);
+}
 void TestBossSitOutNative() {
     namespace p = kh2coop::inject::progresssync;
     namespace w = kh2coop::inject::recoverywarp;
@@ -3873,11 +4021,15 @@ void TestScriptChildOwnerTransitions() {
     Reset();
 }
 
-int main() try {
+int main(int argc,char** argv) try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr, 0x3000000,
                                                     MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
     if (!image) return 2;
+    if(argc==3 && std::string_view(argv[1])=="--thorn-native-contract") {
+        TestThornNativeAdapter(argv[2]);VirtualFree(reinterpret_cast<void*>(image),0,MEM_RELEASE);
+        return errors?1:0;
+    }
     EmissionWarmup warmup{100,130};
     Check(warmup.Current(131,true),"pending native initialization accepts last bounded consecutive frame");
     warmup.seenFrame=131;
@@ -4199,6 +4351,7 @@ int main() try {
     TestScriptChildOwnerTransitions();
     TestStruggleOrbRows();
     TestFieldCatalogTrace();
+    TestThornRetainedEnd();
     TestBossSitOutNative(); // last: enables event control and leaves this process's mapping expired
     ht::Shutdown();
     VirtualFree(reinterpret_cast<void*>(image), 0, MEM_RELEASE);

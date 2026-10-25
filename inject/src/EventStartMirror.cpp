@@ -1,4 +1,5 @@
 #include "EventStartMirror.hpp"
+#include "ThornDefeatNative.hpp"
 #include "kh2coop/Protocol.hpp"
 #include "kh2coop/EventScenes.hpp"
 #include "kh2coop/KH2Offsets.hpp"
@@ -73,11 +74,20 @@ void __fastcall HookedStart(std::uint32_t id, std::uint8_t flags, std::uint32_t*
     EventStart s {};
     // Every start taken in open field is recorded with its arguments (the trace each checked row
     // comes from, VUH-2487); only a checked one is ever published.
-    const bool open = !g_replaying && ReadField(before) && Open(before) && params && CopyParams(params, s.params);
+    const bool sampled = !g_replaying && ReadField(before) && params && CopyParams(params, s.params);
+    const bool open = sampled && Open(before);
     const auto* row = open ? eventscenes::QualifiedStart(before.now[0], before.now[1], EventProgram(before), id, flags, s.params)
                            : nullptr;
     const bool checked = row != nullptr;
+    if (sampled) {
+        s.worldId = before.now[0]; s.roomId = before.now[1]; s.id = id; s.flags = flags;
+        if (!enemysync::PermitThorn315(s,EventProgram(before))) return;
+    }
     g_original(id, flags, params);
+    if (sampled) enemysync::CompleteThorn315(s,EventProgram(before),before.context,ReadContext());
+    if (sampled && s.worldId==2 && s.roomId==34 && EventProgram(before)==157 && id==0x353133 &&
+        eventscenes::QualifiedStart(s.worldId,s.roomId,157,id,flags,s.params) && g_log)
+        g_log("[thorn-defeat] 315 entry path=native context=%llX",static_cast<unsigned long long>(ReadContext()));
     if (!open) return;
     if (g_client && eventscenes::QualifiedStageEnd(before.now[0], before.now[1], EventProgram(before), id, flags, s.params)) {
         g_stage = {};
@@ -207,6 +217,8 @@ bool Replay(const EventStart& start, std::uint16_t eventProgram) noexcept {
     g_original(start.id, start.flags, params.data());
     g_replaying = false;
     const auto context = ReadContext();
+    if (start.worldId==2 && start.roomId==34 && eventProgram==157 && start.id==0x353133 && g_log)
+        g_log("[thorn-defeat] 315 entry path=replay context=%llX",static_cast<unsigned long long>(context));
     if (g_log) g_log("[event-mirror] client started the host's event %.*s context=%llX",
                      static_cast<int>(row->name.size()), row->name.data(), static_cast<unsigned long long>(context));
     return context != 0;

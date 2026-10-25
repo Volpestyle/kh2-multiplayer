@@ -47,6 +47,8 @@
 #include <cstring>
 #include <cwchar>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <iterator>
 #include <mutex>
 #include <string>
@@ -142,6 +144,9 @@ struct FrameContext {
     UINT64 fenceValue = 0;
     bool hasCapture = false;
     std::uint32_t frameIndex = 0;
+    // QPC bounds on the Present callback that supplied these pixels, not
+    // readback/encoding time (which can be several presents later).
+    std::uint64_t captureQpcBegin = 0, captureQpcEnd = 0, capturePresent = 0;
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint {};
 };
 FrameContext g_ring[kRing];
@@ -273,6 +278,9 @@ struct EncodeItem {
     UINT height = 0;
     DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
     bool png = false;
+    std::uint32_t frameIndex = 0;
+    std::uint64_t qpcBegin = 0, qpcEnd = 0, present = 0;
+    long requestSeq = 0;
 };
 
 std::mutex g_queueMutex;
@@ -400,6 +408,10 @@ void WorkerMain() {
     IWICImagingFactory* factory = nullptr;
     CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                      IID_PPV_ARGS(&factory));
+    std::filesystem::path timingPath;
+    long timingSeq = 0;
+    LARGE_INTEGER frequency {};
+    QueryPerformanceFrequency(&frequency);
 
     for (;;) {
         EncodeItem item;
@@ -411,9 +423,29 @@ void WorkerMain() {
             g_encodeQueue.pop_front();
         }
         ConvertToBgra(item.pixels, item.format);
-        const bool ok = item.png
+        bool ok = item.png
             ? WritePng(factory, item.path, item.pixels, item.width, item.height)
             : WriteBmp(item.path, item.pixels, item.width, item.height);
+        if (ok && !item.png) {
+            const auto path = std::filesystem::path(item.path).parent_path() / "capture-time.jsonl";
+            const bool first = path != timingPath || item.requestSeq != timingSeq;
+            if (first) {
+                timingPath = path;
+                timingSeq = item.requestSeq;
+            }
+            std::ofstream timing(path,std::ios::out | (first?std::ios::trunc:std::ios::app));
+            timing << "{\"schema\":1,\"frame\":" << item.frameIndex
+                   << ",\"qpcBegin\":" << item.qpcBegin << ",\"qpcEnd\":" << item.qpcEnd
+                   << ",\"qpcFrequency\":" << frequency.QuadPart
+                   << ",\"present\":" << item.present << "}\n";
+            // Publish the receipt before pendingEncodes reaches zero and the
+            // caller can collect it. Failed timing makes the capture fail.
+            timing.flush();
+            // Release the Windows handle before pendingEncodes reaches zero:
+            // the clip helper may immediately collect/delete the raw directory.
+            timing.close();
+            ok = timing.good() && frequency.QuadPart > 0 && item.qpcBegin > 0 && item.qpcEnd >= item.qpcBegin;
+        }
         if (ok) {
             g_written.fetch_add(1);
         } else {
@@ -667,6 +699,10 @@ void DrainReadback(FrameContext& ctx) {
     item.format = fp.Format;
     item.png = g_job.frameCount == 1;
     item.path = FramePath(ctx.frameIndex);
+    item.frameIndex = ctx.frameIndex;
+    item.requestSeq = g_job.seq;
+    item.qpcBegin = ctx.captureQpcBegin; item.qpcEnd = ctx.captureQpcEnd;
+    item.present = ctx.capturePresent;
     item.pixels.resize(static_cast<size_t>(rowBytes) * fp.Height);
     const auto* src = static_cast<const std::uint8_t*>(data) + ctx.footprint.Offset;
     for (UINT y = 0; y < fp.Height; ++y) {
@@ -1443,6 +1479,8 @@ void SubmitFrameWork(bool drawOverlay, bool drawCrown, bool captureFrame) {
     if (captureFrame) {
         ctx.hasCapture = true;
         ctx.frameIndex = g_job.issued++;
+        ctx.capturePresent = g_presentIndex;
+        ctx.captureQpcBegin = ctx.captureQpcEnd = 0;
         g_job.width = static_cast<UINT>(bbDesc.Width);
         g_job.height = bbDesc.Height;
     }
@@ -1569,8 +1607,17 @@ void OnPresentEntry(int hook, IDXGISwapChain* swapChain, UINT flags) {
             g_hooks[hook].seen = true;
             if (g_log) g_log("  Render: game presents via %s", g_hooks[hook].label);
         }
+        LARGE_INTEGER captureBegin {}, captureEnd {};
+        QueryPerformanceCounter(&captureBegin);
         InterlockedIncrement(&g_channel->presentCount);
         OnPresentGuarded(swapChain);
+        QueryPerformanceCounter(&captureEnd);
+        // The ring cannot be drained until a later Present; attach the bounds
+        // only to this callback's newly issued capture, while still serialized.
+        for (auto& ctx : g_ring) if (ctx.hasCapture && ctx.capturePresent == g_presentIndex) {
+            ctx.captureQpcBegin = static_cast<std::uint64_t>(captureBegin.QuadPart);
+            ctx.captureQpcEnd = static_cast<std::uint64_t>(captureEnd.QuadPart);
+        }
         if (g_disabled && g_log) g_log("  Render: exception in the Present hook; capture disabled");
         ++g_presentIndex;
     } __finally {

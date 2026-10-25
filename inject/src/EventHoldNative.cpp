@@ -2,6 +2,7 @@
 #include "EventHoldInputState.hpp"
 #include "NativeSpawnController.hpp"
 #include "EventStartMirror.hpp"
+#include "ThornDefeatNative.hpp"
 #include "kh2coop/EventScenes.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include <atomic>
@@ -278,6 +279,21 @@ bool ApplyInput(void* inputStruct) {
     native.value.healthy = Enabled() && channel.Healthy(native.value.now);
     native.value.safeToPause = native.inField && native.value.menu == 255 && native.eventState == 0 &&
         native.context == 0 && native.frozen == 0 && native.blockers == 0;
+    eventhold::Ack preludeAck {};
+    const bool preludeConverged = channel.ReadAck(preludeAck) && preludeAck.scope == inputScope &&
+        preludeAck.flags == (eventhold::SafeConverged | eventhold::LiveEligible);
+    if (sampleValid && native.value.healthy && !input.Holding() && !ConsumeInputRejection()) {
+        const int started = enemysync::ServiceThornDefeat(inputScope,native.value.safeToPause,preludeConverged);
+        if (started < 0) { channel.Invalidate(eventhold::Abort::Unsupported); input.Fail(); }
+        if (started != 0) {
+            // Native calls invalidate this callback's pre-call sample.
+            if (!ReadInput(inputStruct,native)) { channel.Invalidate(eventhold::Abort::Unsupported); input.Fail(); }
+            native.value.now = GetTickCount64();
+            native.value.healthy = Enabled() && channel.Healthy(native.value.now);
+            native.value.safeToPause = native.inField && native.value.menu == 255 && native.eventState == 0 &&
+                native.context == 0 && native.frozen == 0 && native.blockers == 0;
+        }
+    }
     eventhold::Command command {};
     // VUH-2807: release and the next checked start (Thorn's 315) can be one host frame apart.
     // Leave successors in the validated FIFO while our pause closes. Consuming an Acquire here
@@ -308,10 +324,16 @@ bool ApplyInput(void* inputStruct) {
             EventStart start {};
             start.worldId = command.startWorld; start.roomId = command.startRoom; start.id = command.startId;
             start.flags = static_cast<std::uint8_t>(command.startFlags); start.params = command.startParams;
-            const bool mirrored = hostRoom && command.startId && command.startFlags <= 0xFF && !input.Holding() &&
+            const bool nativeThorn = hostRoom && command.startId && command.startFlags <= 0xFF &&
+                !input.Holding() && native.value.healthy && !ConsumeInputRejection() &&
+                channel.Healthy(GetTickCount64()) && enemysync::OwnsThorn315(start,command.eventProgram);
+            const bool mirrored = !nativeThorn && hostRoom && command.startId && command.startFlags <= 0xFF && !input.Holding() &&
                 native.value.healthy && native.value.safeToPause && !ConsumeInputRejection() &&
                 channel.Healthy(GetTickCount64()) && eventstartmirror::Replay(start, command.eventProgram);
-            if (mirrored) {
+            if (nativeThorn) {
+                if (log) log("[thorn-defeat] host315 joins native owner epoch=%u source=%llu",command.epoch,
+                    static_cast<unsigned long long>(command.hostSourceSerial));
+            } else if (mirrored) {
                 if (log) log("[event-mirror] client plays the host's in-field event epoch=%u id=%X", command.epoch, command.startId);
             } else if ((!hostRoom || !input.Acquire(native.value)) && log)
                 log("[event-control] hold skipped epoch=%u hostRoom=%u ackEpoch=%u ackFlags=%u menu=%u safe=%u holding=%u",

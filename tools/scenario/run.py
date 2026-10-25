@@ -797,7 +797,7 @@ def step_fight(ctx: Context, step: dict) -> dict:
     for out, clip_result in films:
         if out.exists():
             ctx.artifacts.append(out.name)
-        receipts.append({"path": out.name, "ok": clip_result.get("ok"), "error": clip_result.get("error")})
+        receipts.append(clip_receipt(ctx, out, clip_result))
     if step.get("clip") and not step.get("clips"):
         ctx.saved[name]["clip"] = receipts[0]
     elif receipts:
@@ -947,6 +947,15 @@ def step_capture(ctx: Context, step: dict) -> dict:
     return {"path": out.name, "receipt": receipt}
 
 
+def clip_receipt(ctx: Context, out: Path, result: dict) -> dict:
+    """Retain native frame timing and present rates, including background clips."""
+    for suffix in (".capture-time.jsonl", ".receipt.json"):
+        sidecar = Path(str(out) + suffix)
+        if sidecar.exists():
+            ctx.artifacts.append(sidecar.name)
+    return {**result, "path": out.name, "ok": result.get("ok"), "error": result.get("error")}
+
+
 def step_clip(ctx: Context, step: dict) -> dict:
     inst = ctx.inst(step.get("instance", 0))
     out = ctx.run_dir / f"{step.get('name', 'clip')}_{inst.index}.mp4"
@@ -959,9 +968,9 @@ def step_clip(ctx: Context, step: dict) -> dict:
         thread.start()
         ctx.saved.setdefault("_background_clips", []).append((thread, out, result))
         return {"path": out.name, "background": True}
-    kh2ctl(*args, pid=inst.pid, timeout=120)
+    result = kh2ctl(*args, pid=inst.pid, timeout=120)
     ctx.artifacts.append(out.name)
-    return {"path": out.name}
+    return clip_receipt(ctx, out, result)
 
 
 def step_clip_wait(ctx: Context, step: dict) -> dict:
@@ -972,7 +981,7 @@ def step_clip_wait(ctx: Context, step: dict) -> dict:
             ctx.sleep(0.5)
         if out.exists():
             ctx.artifacts.append(out.name)
-        receipts.append({"path": out.name, "ok": result.get("ok"), "error": result.get("error")})
+        receipts.append(clip_receipt(ctx, out, result))
     return {"clips": receipts}
 
 
