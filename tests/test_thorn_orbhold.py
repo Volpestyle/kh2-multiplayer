@@ -426,6 +426,53 @@ c.step(p, own(pos=[0.0, 0.0, 399.9]))                         # 300.1: still hel
 check(not c.orbhold_finished and p.kinds().count("coop_orb_hold") == 1 and "coop_orb_hold_end" not in p.kinds(),
       "r4: 300.1 from the partner neither latches nor releases")
 
+# r4b (1): the latch and the cap belong to the core's window, whatever tick ends it (Sage, on r4).
+p, c = setup()
+c.step(p, own(pos=OWN_OUT))
+clock.now += 0.3
+c.step(p, own(pos=[0.0, 0.0, 527.0]))                         # latched at 173
+c.peer_log.downed = False
+clock.now += 0.3
+c.step(p, own(pos=OWN_OUT), event_reaction=True)              # the partner recovers on an event-reaction tick
+check(not c.orbhold_finished and c.since is None, "r4b: a recovery on an event-reaction tick clears the latch")
+c.peer_log.downed, c.peer_log.actor = True, PARTNER
+clock.now += 0.3
+c.step(p, own(pos=OWN_OUT))                                   # the next window, volley, partner far
+check(p.kinds().count("coop_orb_hold") == 2, "r4b: the next window holds off again after an event-tick recovery")
+
+p, c = setup(cfg=dict(CFG, maxWaitSec=1.0))
+for _ in range(6):
+    c.step(p, own(pos=OWN_OUT))
+    clock.now += 0.25
+check(p.row("coop_orb_hold_end")["reason"] == "cap", "r4b: a 1 s cap is reached in the first window")
+c.peer_log.downed = False
+clock.now += 0.3
+c.step(p, own(pos=OWN_OUT), event_reaction=True)
+c.peer_log.downed, c.peer_log.actor = True, PARTNER
+clock.now += 0.3
+n = p.kinds().count("coop_orb_hold")
+c.step(p, own(pos=OWN_OUT))
+check(c.orbhold_waited == 0.0 and p.kinds().count("coop_orb_hold") == n + 1,
+      "r4b: the cap is fresh in the next window after an event-tick recovery")
+
+# r4b (2): arrivals within 80 never steer, yet the core's own validated gap latches them.
+for label, arrive in (("50", [0.0, 0.0, 650.0]), ("0", [0.0, 0.0, 700.0])):
+    p, c = setup()
+    c.step(p, own(pos=OWN_OUT))                               # held off
+    clock.now += 0.3
+    c.step(p, own(pos=arrive))                                # arrives at 50 / 0: the core never steers
+    check(c.orbhold_finished, f"r4b: an arrival at {label} (no steer) latches the window")
+    clock.now += 0.3
+    c.step(p, own(pos=[0.0, 0.0, 350.0]))                     # thrown back to 350, still in the volley
+    check(p.kinds().count("coop_orb_hold") == 1 and last_move(p) == toward(own(pos=[0.0, 0.0, 350.0]), FAR_PARTNER),
+          f"r4b: after arriving at {label}, a throwback to 350 doesn't re-arm the hold-off")
+
+p, c = setup(free=False)
+c.step(p, own(pos=[0.0, 0.0, 650.0]))                         # 50 away, but the core refuses (partner not free)
+check(not c.orbhold_finished, "r4b: a refused tick records no gap and doesn't latch (validated)")
+check(thorn.math is __import__("math"), "r4b: thorn's math is restored after the tick")
+
+
 # Controls: r3 behaviour is unchanged when the rescuer never reaches finish, and outside revive windows.
 p, c = setup()
 c.step(p, own())
