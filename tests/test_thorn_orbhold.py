@@ -476,6 +476,44 @@ check(after[0] == before[1] and after[1:] == (2, 1, True),
 check(p.kinds().count("coop_orb_hold") == 1 and not c.orbhold_finished,
       "r4c: the new episode holds off on that very tick; the old latch doesn't leak into it")
 
+# r4d: an open hold-off across a coalesced new episode (Sage, on r4c). The old record closes as 'episode-changed'
+# with all of its timing; the new episode opens its own record with a fresh 30 s cap.
+with tempfile.TemporaryDirectory() as d:
+    log = base.DownedLog(Peer.pid)
+    log.path = Path(d) / "peer.log"
+    log.path.write_text("[downed] gate intercept actor=2000 x=1\n", encoding="utf-8")
+    p = FakePilot()
+    c = Core(Peer(), Log(), log)
+    for _ in range(5):                                        # held off for ~20 s in episode 1
+        c.step(p, own(pos=OWN_OUT))
+        clock.now += 5.0
+    waited_before = c.orbhold_waited
+    with log.path.open("a", encoding="utf-8") as fh:
+        fh.write("[downed] revive returned state=1 hp=20/20 fault=0\n[downed] gate intercept actor=2000 x=1\n")
+    clock.now += 10.0                                         # 15 s after the last held tick
+    c.step(p, own(pos=OWN_OUT))
+    ends = [f["reason"] for k, f in p.rows if k == "coop_orb_hold_end"]
+    opens = [f["episode"] for k, f in p.rows if k == "coop_orb_hold"]
+    first_new_waited = c.orbhold_waited
+    clock.now += 1.0
+    c.step(p, own(pos=OWN_OUT))
+check(abs(waited_before - 20.0) < 1e-9, "r4d: episode 1 held off for 20 s")
+check(ends == ["episode-changed"] and opens == [1, 2],
+      "r4d: the coalesced change closes episode 1's record ('episode-changed') and opens a fresh one")
+check(first_new_waited == 0.0 and abs(c.orbhold_waited - 1.0) < 1e-9,
+      "r4d: the old interval isn't charged to the new episode (0 s, then 1 s), so its cap is fresh")
+check(p.kinds()[-1] != "coop_orb_hold_end" and c.orbhold_since is not None, "r4d: the new episode is still holding off")
+
+# A plain recovery still closes its record as 'peer-recovered'.
+p, c = setup()
+c.step(p, own())
+c.peer_log.downed = False
+clock.now += 0.3
+c.step(p, own())
+check([f["reason"] for k, f in p.rows if k == "coop_orb_hold_end"] == ["peer-recovered"],
+      "r4d: a plain recovery still ends the record 'peer-recovered'")
+
+
 # A plain re-poll with no new rows keeps the episode (and its latch).
 with tempfile.TemporaryDirectory() as d:
     log = base.DownedLog(Peer.pid)
