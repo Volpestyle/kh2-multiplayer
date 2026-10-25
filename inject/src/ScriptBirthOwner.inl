@@ -21,10 +21,15 @@ struct ScriptChild {
     bool held{};                                   // brain hook refused: its native update never runs
 };
 std::vector<ScriptChild> g_scriptChildren;
-// Held bodies follow their native lifetime, not the session (Sage 0ca5bf98): no reset, role or generation change
-// releases one. Only its native disposal does: its own handle no longer at its +0, or it left the native list.
-struct HeldScriptChild { uintptr_t actor{}; std::uint32_t handle{}; };
-std::vector<HeldScriptChild> g_heldScriptChildren;
+// Held addresses (Sage 18ccfc67, lead #270): quarantined until native room teardown, fail-closed by construction.
+// Keyed by address only, nothing read: a same-class body later at a held address stays held. No reset, role or
+// generation change releases them; only a native room change (transition or load serial) does. Fixed capacity,
+// no allocation. Once any hold happens, no further script child is built in that room.
+constexpr std::size_t kScriptChildHoldCap = 16;
+std::array<uintptr_t, kScriptChildHoldCap> g_heldScriptChildren{};
+std::size_t g_heldScriptChildCount = 0;
+bool g_scriptChildRoomBlocked = false;             // a hold (or a full hold array) stops building for the room
+std::uint32_t g_holdLoad = 0, g_holdTransition = 0; // the native room the holds belong to
 std::uint64_t g_scriptReturnSerial = 0;           // never rewinds
 EnemyFactoryFn g_scriptChildFactory = nullptr;    // 0x3DF930, prologue byte-checked at install; scoped to this path
 unsigned g_scriptChildLogs = 0;
@@ -53,8 +58,8 @@ void ScriptChildLog(const char* fmt, ...) {
 }
 
 void ResetScriptChildren() {
-    // The room teardown owns every native body; only our records go. Held bodies are not records: they stay held
-    // until their own native disposal (g_heldScriptChildren).
+    // The room teardown owns every native body; only our records go. Held addresses are not records: they stay
+    // quarantined until the native room changes (SyncScriptChildHoldRoom).
     g_scriptChildren.clear();
     g_scriptChildNullRetries = 0;
     g_scriptChildLogs = 0;
@@ -122,19 +127,20 @@ bool ReceiveScriptActorBirthImpl(std::uint16_t netId, std::uint32_t objectId, st
     }
 }
 
-// Still that held native body: its own handle at its +0. A disposed body (unreadable, or a new entity at the
-// address with a new handle) releases its entry.
+// The native room changed since the holds began: its teardown disposed every body in it. The only release.
+void SyncScriptChildHoldRoom() noexcept {
+    if (!g_heldScriptChildCount && !g_scriptChildRoomBlocked) return;
+    if (warp::LoadSerial() == g_holdLoad && warp::TransitionSerial() == g_holdTransition) return;
+    if (g_log) g_log("[script-birth] client HOLD released count=%zu blocked=%d reason=room-teardown frame=%u",
+                     g_heldScriptChildCount, g_scriptChildRoomBlocked ? 1 : 0, g_hitTraceFrame);
+    g_heldScriptChildren = {};
+    g_heldScriptChildCount = 0;
+    g_scriptChildRoomBlocked = false;
+}
 bool ScriptChildHeldImpl(uintptr_t actor) noexcept {
     if (!actor) return false;
-    for (auto it = g_heldScriptChildren.begin(); it != g_heldScriptChildren.end(); ++it) {
-        if (it->actor != actor) continue;
-        std::uint32_t handle = 0;
-        if (ReadNative(actor, handle) && handle == it->handle) return true;
-        if (g_log) g_log("[script-birth] client HOLD released actor=%llX reason=disposed frame=%u",
-                         static_cast<unsigned long long>(actor), g_hitTraceFrame);
-        g_heldScriptChildren.erase(it);
-        return false;
-    }
+    SyncScriptChildHoldRoom();
+    for (std::size_t i = 0; i < g_heldScriptChildCount; ++i) if (g_heldScriptChildren[i] == actor) return true;
     return false;
 }
 bool ScriptChildOwnedImpl(uintptr_t actor) noexcept {
@@ -144,32 +150,23 @@ bool ScriptChildOwnedImpl(uintptr_t actor) noexcept {
     for (const auto& c : g_scriptChildren) if (c.actor == actor) return true;
     return false;
 }
-// A held body that left the native active list was disposed natively (room teardown or its own removal).
-void PruneHeldScriptChildren() {
-    std::erase_if(g_heldScriptChildren, [](const HeldScriptChild& h) {
-        const auto census = CaptureNativeCensus(h.actor);
-        if (census.state != CensusState::Complete || census.watchedActorPresent) return false;
-        if (g_log) g_log("[script-birth] client HOLD released actor=%llX reason=left-native-list frame=%u",
-                         static_cast<unsigned long long>(h.actor), g_hitTraceFrame);
-        return true;
-    });
-}
 // Last resort (lead #268): never updated, so it has no VM, status or census row (never a mirror, claim or hit
 // target); hidden with the game's own obj_hide (type-4 mob +0x80: actor+0x124 |= 0x300, flags only); the room
 // teardown disposes it natively, which skips the null +0x5B0 thread. Logged every time, outside the log budget.
 void HoldScriptChildImpl(uintptr_t actor) noexcept {
-    for (auto& c : g_scriptChildren)
-        if (c.actor == actor && !c.held) {
-            c.held = true;
-            c.retired = true; // never adopted, streamed or driven
-            std::uint32_t handle = 0;
-            (void)ReadNative(actor, handle);
-            try { g_heldScriptChildren.push_back({actor, handle}); } catch (...) {}
-            const bool hidden = g_scriptChildHide && g_scriptChildHide(actor);
-            if (g_log)
-                g_log("[script-birth] client HOLD child=%u actor=%llX reason=brain-hook hidden=%d frame=%u (native update skipped until room teardown)",
-                      c.birth.effect, static_cast<unsigned long long>(actor), hidden ? 1 : 0, g_hitTraceFrame);
-        }
+    if (!actor) return;
+    SyncScriptChildHoldRoom();
+    if (!g_heldScriptChildCount && !g_scriptChildRoomBlocked) { g_holdLoad = warp::LoadSerial(); g_holdTransition = warp::TransitionSerial(); }
+    g_scriptChildRoomBlocked = true; // no further script child is built in this room
+    for (auto& c : g_scriptChildren) if (c.actor == actor) { c.held = true; c.retired = true; } // never adopted, streamed or driven
+    bool already = false;
+    for (std::size_t i = 0; i < g_heldScriptChildCount; ++i) already = already || g_heldScriptChildren[i] == actor;
+    const bool stored = already || g_heldScriptChildCount < g_heldScriptChildren.size();
+    if (!already && stored) g_heldScriptChildren[g_heldScriptChildCount++] = actor;
+    const bool hidden = !already && g_scriptChildHide && g_scriptChildHide(actor);
+    if (g_log && !already)
+        g_log("[script-birth] client HOLD actor=%llX reason=brain-hook stored=%d hidden=%d held=%zu frame=%u (quarantined until room teardown; no more children this room)",
+              static_cast<unsigned long long>(actor), stored ? 1 : 0, hidden ? 1 : 0, g_heldScriptChildCount, g_hitTraceFrame);
 }
 
 
@@ -199,7 +196,7 @@ bool ScriptChildRowCurrent(const ScriptChild& c) noexcept { return c.row >= 0 &&
 void TickScriptChildBirths() {
     namespace ob = ordinarybinding;
     using Out = spawncontroller::ScriptChildNativeOutcome;
-    if (!g_heldScriptChildren.empty()) PruneHeldScriptChildren();
+    SyncScriptChildHoldRoom();
     if (g_role != Role::Client || !g_scriptChildFactory || !spawncontroller::ScriptChildNativeReady()) return;
     // Constructed children the binder never took stop being candidates (their brain stays suppressed).
     for (auto& c : g_scriptChildren)
@@ -223,10 +220,9 @@ void TickScriptChildBirths() {
     }
     // A record whose body this frame's census does not list is gone (native death/dispose or teardown). A new
     // child enters the census only after its first update gives it a status, so an unadopted one gets a grace
-    // period. A held child never updates, so never gets listed: it stays owned until the room resets.
+    // period. A held child's quarantine is its address in the hold array, not this record.
     std::erase_if(g_scriptChildren, [](const ScriptChild& c) {
         if (!c.actor) return true;
-        if (c.held) return false;
         return ScriptChildRow(c.actor) < 0 && (c.adopted || g_hitTraceFrame - c.returnFrame > kScriptChildCensusFrames);
     });
     ob::Scope scope;
@@ -247,6 +243,15 @@ void TickScriptChildBirths() {
     if (g_scriptChildren.size() >= SPAWN_EMISSION_CAP) return;
     for (const auto& s : g_inst.spawns)
         if (s.present && s.netId == static_cast<int>(pending.effect)) return; // already bound to a local body
+    // After any hold in this room nothing more is built. Otherwise every owned, unheld child must still have a
+    // free hold slot, so a later refusal can always be held (the array never allocates and never releases early).
+    std::size_t unheld = 0;
+    for (const auto& c : g_scriptChildren) unheld += c.held ? 0 : 1;
+    if (g_scriptChildRoomBlocked || unheld + g_heldScriptChildCount + 1 > kScriptChildHoldCap) {
+        ScriptChildLog("[script-birth] client wait child=%u reason=%s frame=%u", pending.effect,
+            g_scriptChildRoomBlocked ? "room-held" : "hold-capacity", g_hitTraceFrame);
+        return;
+    }
     // Option C needs the class brain hooked before any child exists: without it, build nothing (retried later).
     if (!g_scriptChildBrainGate || !g_scriptChildBrainGate(0)) {
         ScriptChildLog("[script-birth] client wait child=%u reason=brain-hook frame=%u", pending.effect, g_hitTraceFrame);

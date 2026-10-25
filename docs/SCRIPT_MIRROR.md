@@ -249,10 +249,13 @@ host-only). Ownership rules:
   neither the old witness nor ownership.
 - A body whose own handler cannot be hooked is held as a last resort. The entity hook skips its whole native
   update (it has no VM before its first update), it is hidden with the native obj_hide, and every hold is
-  logged ("client HOLD"). The hold follows the native body, not the session or role: no reset, generation or
-  role change releases it, only the body's own native disposal (its handle gone from its +0, or it left the
-  native list), which the room teardown performs. Whether a held, never-updated body keeps any collision is
-  not proven; the class-hook gate is meant to make holds unreachable.
+  logged ("client HOLD"). A held address is quarantined until native room teardown, fail-closed: it is keyed
+  by address only and nothing about the body is read, so a same-class body later at that address in the same
+  room stays held too. No session, generation or role change releases it; only a native room change
+  (transition or load) does. Holds use a fixed array of 16 that never allocates. After any hold, no further
+  script child is built in that room, and no child is ever built unless every owned, unheld child could still
+  take a hold slot. Whether a held, never-updated body keeps any collision is not proven; the class-hook gate is
+  meant to make holds unreachable.
 
 Actor role resources use the high bit, distinct from attack/effect IDs. Source
 and selected actor handles, status roots and object-entry roots stay local and

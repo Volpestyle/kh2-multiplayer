@@ -3698,7 +3698,8 @@ uintptr_t scriptHidden = 0; unsigned scriptHides = 0;
 bool TestScriptChildHide(uintptr_t actor) noexcept { ++scriptHides; scriptHidden = actor; return true; }
 std::uint64_t BirthInt(std::uint32_t v) { return (static_cast<std::uint64_t>(SCRIPT_TAG_INT) << 32) | v; }
 ScriptCallEntry SeedScriptChild(kh2coop::inject::spawncontroller::ScriptChildNativeOutcome release) {
-    Reset(true); ResetSpawnEmissions(); g_heldScriptChildren.clear(); g_mirrorRequested = true; g_hitTraceFrame = 100;
+    Reset(true); ResetSpawnEmissions(); g_mirrorRequested = true; g_hitTraceFrame = 100;
+    g_heldScriptChildren = {}; g_heldScriptChildCount = 0; g_scriptChildRoomBlocked = false;
     g_recordBindingRequested = g_recordAuthorityRequested = false;
     g_bridge.Open(0);
     // The body the factory returns is the fixture's listed actor, now a 317 with no bound ID.
@@ -3805,37 +3806,66 @@ void TestScriptChildOwnerTransitions() {
         kh2coop::inject::ordinarybinding::ScriptActorWitness witness;
         Check(!QueryScriptActorWitness({ScriptActorUse::Stream, scope, 0, 6, SCRIPT_ACTOR_BIRTH_CHILD_OBJECT, {}}, witness),
               "a held child is never streamed or adopted");
-        // Sage 0ca5bf98: the hold follows the native body, never the logical session or role.
+        // Sage 18ccfc67 / lead #270: a held address is quarantined until native room teardown.
+        ScriptCallEntry second{};
+        second.netId = 5; second.objectId = SCRIPT_ACTOR_BIRTH_PARENT_OBJECT; second.table = 255; second.index = SCRIPT_ACTOR_BIRTH_BEGIN;
+        second.effect = 7; second.args = {BirthInt(42), BirthInt(0), BirthInt(7), BirthInt(SCRIPT_ACTOR_BIRTH_CHILD_OBJECT)};
+        HostEnemy other; other.objectId = SCRIPT_ACTOR_BIRTH_CHILD_OBJECT; other.hp = 100; other.battleProgram = 6;
+        g_host.enemies[7] = other; scriptBrainBody = true;
+        Check(g_emissionLedger.AddScriptActor(second) == SpawnEmissionLedger::ScriptActorAdd::Added, "a second birth arrives in the held room");
+        g_hitTraceFrame = 400 + kScriptChildAdoptFrames; TickScriptChildBirths();
+        Check(scriptFactoryCalls == 1 && g_emissionLedger.ScriptActorState(second) == State::Pending && g_scriptChildRoomBlocked,
+              "after a hold no further script child is built in that room");
         RetireWorldSession();
         Check(ScriptChildHeld(enemy) && ScriptChildOwned(enemy) && g_scriptChildren.empty(),
-              "a session retirement drops the records but the native body stays held");
+              "a session retirement drops the records but the held address stays quarantined");
         g_role = Role::Off;
-        Check(ScriptChildHeld(enemy) && ScriptChildOwned(enemy), "role Off keeps a still-native held body held");
+        Check(ScriptChildHeld(enemy) && ScriptChildOwned(enemy), "role Off keeps the held address held");
         g_role = Role::Host;
         Check(ScriptChildHeld(enemy), "a role change to host keeps it held");
-        g_role = Role::Client; g_hitTraceFrame = 300 + kScriptChildAdoptFrames; TickScriptChildBirths();
-        Check(ScriptChildHeld(enemy), "a listed held body is not pruned by the owner tick");
+        g_role = Role::Client;
         const auto handle = Read<std::uint32_t>(enemy);
-        Put(enemy, handle + 1); // the address now carries another entity's handle: the held body was disposed
-        Check(!ScriptChildHeld(enemy) && !ScriptChildOwned(enemy) && g_heldScriptChildren.empty(),
-              "a new handle at the address releases the hold: only native disposal ends it");
-        Put(enemy, handle);
-        Check(!ScriptChildHeld(enemy), "a released hold never returns");
+        Put(enemy, handle + 1); Put(enemy + offsets::actor::OBJENTRY_PTR, uintptr_t{0});
+        Check(ScriptChildHeld(enemy), "a same-class replacement or unreadable roots at a held address stay held (address only)");
+        Put(enemy, handle); Put(enemy + offsets::actor::OBJENTRY_PTR, object);
+        ++transition; // the native room changed: its teardown disposed every body in it
+        Check(!ScriptChildHeld(enemy) && !ScriptChildOwned(enemy) && !g_heldScriptChildCount && !g_scriptChildRoomBlocked,
+              "only a native room change releases the quarantine and the room block");
+        --transition;
+        Check(!ScriptChildHeld(enemy), "a released quarantine never returns");
     }
     {
         (void)SeedScriptChild(Out::Completed); scriptBrainBody = false;
         g_hitTraceFrame = 101; TickScriptChildBirths();
         ResetSpawnEmissions();
-        Check(ScriptChildHeld(enemy), "a spawn-emission reset keeps the native body held");
-        // The body leaves the native active list (its native disposal at room teardown).
-        Put(image + offsets::active_entity_list::TAIL, player);
-        Put(player + offsets::actor::LINKED_NEXT_HANDLE, std::uint32_t{0});
-        const auto census = CaptureNativeCensus(enemy);
-        Check(census.state == CensusState::Complete && !census.watchedActorPresent, "fixture: the body left the native list");
-        g_hitTraceFrame = 102; TickScriptChildBirths();
-        Check(!ScriptChildHeld(enemy) && g_heldScriptChildren.empty(), "a held body that left the native list is released");
+        Check(ScriptChildHeld(enemy), "a spawn-emission reset keeps the held address quarantined");
+        ++load; // a native load also tears the room down
+        Check(!ScriptChildHeld(enemy), "a native load releases the quarantine");
     }
-    SetScriptChildBrainGate(nullptr); SetScriptChildHide(nullptr); g_scriptChildFactory = nullptr; g_heldScriptChildren.clear();
+    {
+        // A full hold array never releases: the room stops building before any owned child could lack a slot.
+        const auto birth = SeedScriptChild(Out::Completed);
+        g_holdLoad = load; g_holdTransition = transition;
+        for (std::size_t i = 0; i < kScriptChildHoldCap; ++i) g_heldScriptChildren[i] = image + 0x60000 + i * 0x10;
+        g_heldScriptChildCount = kScriptChildHoldCap - 1;
+        g_hitTraceFrame = 101; TickScriptChildBirths();
+        Check(scriptFactoryCalls == 1 && ScriptChildOwned(enemy), "the last free hold slot still admits one owned child");
+        g_hitTraceFrame = 102; TickScriptChildBirths();
+        ScriptCallEntry next = birth; next.effect = 7; next.args = {BirthInt(43), BirthInt(0), BirthInt(7), BirthInt(SCRIPT_ACTOR_BIRTH_CHILD_OBJECT)};
+        HostEnemy other; other.objectId = SCRIPT_ACTOR_BIRTH_CHILD_OBJECT; other.hp = 100; other.battleProgram = 6;
+        g_host.enemies[7] = other; (void)g_emissionLedger.AddScriptActor(next);
+        g_hitTraceFrame = 103; TickScriptChildBirths();
+        Check(scriptFactoryCalls == 1 && g_emissionLedger.ScriptActorState(next) == State::Pending,
+              "no child is built that could not be held: owned unheld children never exceed the free slots");
+        HoldScriptChild(enemy);
+        Check(ScriptChildHeld(enemy) && g_heldScriptChildCount == kScriptChildHoldCap && g_scriptChildRoomBlocked,
+              "the owned child takes the last slot and the room stops building");
+        HoldScriptChild(image + 0x70000);
+        Check(g_heldScriptChildCount == kScriptChildHoldCap && ScriptChildHeld(enemy) && ScriptChildHeld(image + 0x60000) && g_scriptChildRoomBlocked,
+              "a hold on a full array releases nothing and keeps the room blocked");
+    }
+    SetScriptChildBrainGate(nullptr); SetScriptChildHide(nullptr); g_scriptChildFactory = nullptr;
+    g_heldScriptChildren = {}; g_heldScriptChildCount = 0; g_scriptChildRoomBlocked = false;
     Reset();
 }
 
