@@ -95,6 +95,28 @@ function Get-ProcessDetail([int]$ProcessId) {
   [ordered]@{ pid = $ProcessId; name = $(if ($p) { $p.ProcessName } else { $null }); path = $path }
 }
 
+# The owned games' pids only when every rig root's owned.txt is readable and each row is a process proven live with its
+# recorded creation time; otherwise $null. Get-Owned serves cleanup and fails open (an unreadable process counts as
+# alive); this fails closed, so an exemption never rests on an inventory it can't prove (Sage, owned-busy r1).
+function Get-OwnedProof {
+  $pids = @()
+  foreach ($rig in Get-RigRoots) {
+    $file = Join-Path $rig 'build\rig\owned.txt'
+    if (-not [IO.File]::Exists($file)) { continue }
+    try { $lines = @(Get-Content -LiteralPath $file -ErrorAction Stop) } catch { return $null }
+    foreach ($line in $lines) {
+      if (-not $line.Trim()) { continue }
+      $f = $line -split ' '
+      $procId = 0; $created = 0L
+      if ($f.Count -lt 2 -or -not [int]::TryParse($f[0], [ref]$procId) -or -not [long]::TryParse($f[1], [ref]$created)) { return $null }
+      if (-not [Kh2Desk.Gate]::ProvenAlive($procId, $created)) { return $null }
+      $pids += $procId
+    }
+  }
+  if ($pids.Count) { return ,$pids }
+  $null
+}
+
 # A game or fullscreen app that is neither the rig's (owned.txt) nor this job's (its job object). What it saw is
 # left in $script:foreignDetail for the reclaim receipt: on bld, fullscreen reclaims came during KH2's boot with
 # nobody at the desk and the game attributed, and the receipt didn't say what was in front (VUH-2617 bld03b).
@@ -116,13 +138,22 @@ function Get-ForeignActivity($Job) {
     $detail = [ordered]@{ activity = 'fullscreen'; notificationState = $state
       foreground = Get-ProcessDetail $front; ownedPids = @($owned | ForEach-Object pid) }
     # The rig's own fullscreen KH2 runs without taking focus (pad input), and Windows then reports busy (2) or D3D
-    # fullscreen (3) whatever window is in front: on bld that was the owner's Discord (bld03c). While an owned game
-    # is live those two states alone don't show a foreign fullscreen app; a foreign game window was caught above,
-    # and presentation (4) and quiet time (7) still count. What was ignored is kept as $script:ignoredBusy.
-    if ($state -in 2, 3 -and @($owned | Where-Object { $_.pid -and -not $_.unreadable }).Count) {
-      $detail.activity = 'ignored-busy'
-      $script:ignoredBusy = $detail
-      return $null
+    # fullscreen (3) whatever window is in front: on bld that was the owner's Discord (bld03c). Those two states are
+    # ignored only on positive evidence that the fullscreen window is ours: every owned.txt row proven live, at least
+    # one monitor-covering window owned (or in the job), and no covering window that isn't. A foreign fullscreen video
+    # or app covers its monitor and still reclaims; a foreign game window was caught above; presentation (4) and quiet
+    # time (7) always count. What was ignored is kept as $script:ignoredBusy.
+    if ($state -in 2, 3) {
+      $proof = Get-OwnedProof
+      $covers = @([Kh2Desk.Gate]::Covering() | ForEach-Object {
+          [ordered]@{ pid = $_.Pid; class = $_.Class; ours = ($proof -and $_.Pid -in $proof) -or ($Job -and [Kh2Desk.Gate]::InJob($Job.jobObject, $_.Pid)) } })
+      $detail.provenOwned = $proof
+      $detail.covering = $covers
+      if ($proof -and @($covers | Where-Object { $_.ours }).Count -and -not @($covers | Where-Object { -not $_.ours }).Count) {
+        $detail.activity = 'ignored-busy'
+        $script:ignoredBusy = $detail
+        return $null
+      }
     }
     $script:foreignDetail = $detail
     return 'fullscreen'

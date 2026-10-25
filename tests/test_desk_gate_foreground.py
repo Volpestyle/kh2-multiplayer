@@ -1,8 +1,11 @@
 """VUH-2617 desk gate: fullscreen and foreign-game reclaim receipts name what was in front, and busy/fullscreen states
 caused by the rig's own focus-less KH2 are ignored but recorded (bld03c: Discord in front, our game owned). Runs
 agent.ps1's real Get-ProcessDetail, Get-ForeignActivity, Add-ForeignDetail, Add-IgnoredBusy and Finish-Job in Windows
-PowerShell 5.1, with Kh2Desk.Gate stubbed. An owned or in-job foreground never counts; a foreign game window always
-counts; states 2/3 count only when no owned game is live; presentation (4) and quiet time (7) always count.
+PowerShell 5.1, with Kh2Desk.Gate stubbed, and Gate.cs's own Covers/ProvenAlive/Covering compiled for real. An owned
+or in-job foreground never counts; a foreign game window always counts; states 2/3 are ignored only when every
+owned.txt row is proven live, an owned (or in-job) window covers its monitor and no other window does (r2, Sage:
+a foreign fullscreen video still reclaims, and an unreadable or unmatched inventory never exempts); presentation (4)
+and quiet time (7) always count.
 
     python -B -m unittest discover -s tests -p test_desk_gate_foreground.py -v
 """
@@ -32,11 +35,16 @@ namespace Kh2Desk {
     public static int NotificationState() { return State; }
     public static bool InJob(IntPtr job, int pid) { return pid == JobPid; }
     public static void CloseJob(IntPtr job) { }
+    public class Cover { public int Pid; public string Class; public long Monitor; }
+    public static List<Cover> Covers = new List<Cover>();
+    public static List<Cover> Covering() { return Covers; }
+    public static HashSet<string> AliveSet = new HashSet<string>();
+    public static bool ProvenAlive(int pid, long created) { return AliveSet.Contains(pid + " " + created); }
   }
 }
 '@
 $ast = [Management.Automation.Language.Parser]::ParseFile($Agent, [ref]$null, [ref]$null)
-foreach ($name in 'Get-ProcessDetail', 'Get-ForeignActivity', 'Add-ForeignDetail', 'Add-IgnoredBusy', 'Finish-Job') {
+foreach ($name in 'Get-ProcessDetail', 'Get-OwnedProof', 'Get-ForeignActivity', 'Add-ForeignDetail', 'Add-IgnoredBusy', 'Finish-Job') {
   $fn = $ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
   if (@($fn).Count -ne 1) { throw "agent.ps1 has $(@($fn).Count) $name" }
   . ([scriptblock]::Create($fn[0].Extent.Text))
@@ -46,6 +54,12 @@ function Get-Owned { $script:owned }
 $script:logs = @()
 function Log([string]$Text) { $script:logs += $Text }
 $root = Join-Path $env:TEMP ('gatefg-' + [guid]::NewGuid()); New-Item -ItemType Directory -Force "$root\done" | Out-Null
+# Two rig roots, each with its own build\rig\owned.txt (absent unless a case writes it).
+$rigA = Join-Path $root 'rigA'; $rigB = Join-Path $root 'rigB'
+foreach ($r in $rigA, $rigB) { New-Item -ItemType Directory -Force "$r\build\rig" | Out-Null }
+function Get-RigRoots { @($rigA, $rigB) }
+function Set-OwnedTxt($rig, $lines) { $f = "$rig\build\rig\owned.txt"; if ($null -eq $lines) { Remove-Item $f -ErrorAction SilentlyContinue } else { Set-Content -LiteralPath $f -Value $lines -Encoding ascii } }
+function Cov($procId, $class) { $c = New-Object Kh2Desk.Gate+Cover; $c.Pid = $procId; $c.Class = $class; $c.Monitor = 1; $c }
 $config = [pscustomobject]@{ foreignGameNames = 'Marvel-Win64-Shipping|KINGDOM HEARTS|r5apex'; foreignGamePaths = '\\steamapps\\common\\'
                              foreignGameExempt = '^RiotClient' }
 $job = [pscustomobject]@{ name = 'j'; base = 'j'; file = "$root\j.ps1"; jobObject = [IntPtr]1; foreignSeconds = 0; foreignDetail = $null; ignoredBusy = $null; stdout = $null; stderr = $null; warnings = $null }
@@ -88,21 +102,45 @@ $receipts.physical = Add-ForeignDetail ([ordered]@{ job = 'j'; reason = 'physica
 $orphan = [pscustomobject]@{ name = 'old'; jobObject = [IntPtr]::Zero }
 $receipts.orphan = Add-ForeignDetail ([ordered]@{ job = 'old'; reason = 'fullscreen' }) $orphan 'fullscreen'
 $receipts.nojob = Add-ForeignDetail ([ordered]@{ job = 'x'; reason = 'fullscreen' }) $null 'fullscreen'
-# Owned-game busy states (bld03c): our KH2 owned and live, someone else's window in front.
+# Owned-game busy states (bld03c): our KH2 (5840) owned, proven live and covering its monitor; Discord ($me) in front.
 [Kh2Desk.Gate]::Windows.Clear(); [Kh2Desk.Gate]::Front = $me
 $kh2 = [pscustomobject]@{ pid = 5840; unreadable = $false }
+[void][Kh2Desk.Gate]::AliveSet.Add('5840 111'); [void][Kh2Desk.Gate]::AliveSet.Add('5841 222')
 $busy = @()
-function BusyCase($label, $state, $owned) { [Kh2Desk.Gate]::State = $state; $script:owned = $owned
-  $a = Get-ForeignActivity $job; [pscustomobject]@{ label = $label; activity = $a; detail = $script:foreignDetail; ignored = $script:ignoredBusy } }
-$busy += BusyCase 'owned-busy-2' 2 @($kh2)
-$busy += BusyCase 'owned-d3d-3' 3 @($kh2)
-$busy += BusyCase 'owned-presentation-4' 4 @($kh2)
-$busy += BusyCase 'owned-quiet-7' 7 @($kh2)
-$busy += BusyCase 'unowned-busy-2' 2 @()
-$busy += BusyCase 'unreadable-only-busy-2' 2 @([pscustomobject]@{ pid = 0; unreadable = $true })
+function BusyCase($label, $state, $txtA, $txtB, $covers) {
+  [Kh2Desk.Gate]::State = $state; $script:owned = @($kh2)
+  Set-OwnedTxt $rigA $txtA; if ($txtB -ne 'keep') { Set-OwnedTxt $rigB $txtB }   # 'keep': leave rigB as the case set it
+  [Kh2Desk.Gate]::Covers.Clear(); foreach ($c in $covers) { [Kh2Desk.Gate]::Covers.Add($c) }
+  $a = Get-ForeignActivity $job
+  [pscustomobject]@{ label = $label; activity = $a; detail = $script:foreignDetail; ignored = $script:ignoredBusy } }
+$ours = @(Cov 5840 'UnityWndClass')
+$busy += BusyCase 'owned-busy-2' 2 @('5840 111') $null $ours
+$busy += BusyCase 'owned-d3d-3' 3 @('5840 111') $null $ours
+$busy += BusyCase 'two-roots-both-proven-2' 2 @('5840 111') @('5841 222') $ours
+$job2 = [Kh2Desk.Gate]::JobPid; [Kh2Desk.Gate]::JobPid = 7777
+$busy += BusyCase 'in-job-cover-counts-as-ours-2' 2 @('5840 111') $null @((Cov 5840 'K'), (Cov 7777 'helper'))
+$busy += BusyCase 'in-job-cover-no-proof-2' 2 $null $null @((Cov 7777 'helper'))
+[Kh2Desk.Gate]::JobPid = $job2
+$busy += BusyCase 'owned-presentation-4' 4 @('5840 111') $null $ours
+$busy += BusyCase 'owned-quiet-7' 7 @('5840 111') $null $ours
+$busy += BusyCase 'foreign-video-covering-3' 3 @('5840 111') $null @((Cov 5840 'K'), (Cov 31337 'Qt5QWindowIcon'))
+$busy += BusyCase 'foreign-video-covering-2' 2 @('5840 111') $null @((Cov 5840 'K'), (Cov $me 'Chrome_WidgetWin_1'))
+$busy += BusyCase 'owned-but-not-covering-2' 2 @('5840 111') $null @()
+$busy += BusyCase 'unowned-busy-2' 2 $null $null $ours
+$busy += BusyCase 'unmatched-row-2' 2 @('5840 111', '6000 999') $null $ours
+$busy += BusyCase 'unparseable-row-2' 2 @('5840 111', 'garbage') $null $ours
+$busy += BusyCase 'stale-creation-2' 2 @('5840 112') $null $ours
+# An unreadable inventory: valid rigA plus a rigB owned.txt held open exclusively.
+Set-OwnedTxt $rigB @('5841 222')
+$lock = [IO.File]::Open("$rigB\build\rig\owned.txt", 'Open', 'ReadWrite', 'None')
+$busy += BusyCase 'unreadable-inventory-2' 2 @('5840 111') 'keep' $ours
+$lock.Close()
+Set-OwnedTxt $rigB $null
 [Kh2Desk.Gate]::Windows.Add((Win 4242 'r5apex' 'C:\Games\Apex\r5apex.exe'))
-$busy += BusyCase 'owned-busy-with-foreign-game' 2 @($kh2)
+$busy += BusyCase 'owned-busy-with-foreign-game' 2 @('5840 111') $null $ours
 [Kh2Desk.Gate]::Windows.Clear()
+# The ignored-record cases below run on a proven, covering inventory.
+Set-OwnedTxt $rigA @('5840 111'); [Kh2Desk.Gate]::Covers.Clear(); [Kh2Desk.Gate]::Covers.Add((Cov 5840 'K'))
 # The job's ignored record, its log lines (first, on a foreground change, capped), receipts and the done file.
 $script:logs = @(); $job.ignoredBusy = $null
 [Kh2Desk.Gate]::State = 2; $script:owned = @($kh2)
@@ -177,7 +215,8 @@ class ForegroundDetail(unittest.TestCase):
         return next(c for c in self.out["busy"] if c["label"] == label)
 
     def test_owned_game_busy_states_are_ignored_and_recorded(self):
-        for label, state in (("owned-busy-2", 2), ("owned-d3d-3", 3)):
+        for label, state in (("owned-busy-2", 2), ("owned-d3d-3", 3), ("two-roots-both-proven-2", 2),
+                             ("in-job-cover-counts-as-ours-2", 2)):
             with self.subTest(label=label):
                 c = self.busy(label)
                 self.assertIsNone(c["activity"])
@@ -185,17 +224,31 @@ class ForegroundDetail(unittest.TestCase):
                 self.assertEqual(c["ignored"]["activity"], "ignored-busy")
                 self.assertEqual(c["ignored"]["notificationState"], state)
                 self.assertEqual(c["ignored"]["foreground"]["pid"], self.out["me"])
-                self.assertEqual(c["ignored"]["ownedPids"], [5840])
+                self.assertTrue(all(x["ours"] for x in c["ignored"]["covering"]))
+        self.assertEqual(self.busy("owned-busy-2")["ignored"]["provenOwned"], [5840])
+        self.assertEqual(self.busy("two-roots-both-proven-2")["ignored"]["provenOwned"], [5840, 5841])
 
     def test_still_reclaims(self):
-        expect = {"owned-presentation-4": "fullscreen", "owned-quiet-7": "fullscreen", "unowned-busy-2": "fullscreen",
-                  "unreadable-only-busy-2": "fullscreen", "owned-busy-with-foreign-game": "foreign-game"}
+        expect = {"owned-presentation-4": "fullscreen", "owned-quiet-7": "fullscreen",
+                  "foreign-video-covering-3": "fullscreen", "foreign-video-covering-2": "fullscreen",
+                  "owned-but-not-covering-2": "fullscreen", "unowned-busy-2": "fullscreen",
+                  "unmatched-row-2": "fullscreen", "unparseable-row-2": "fullscreen", "stale-creation-2": "fullscreen",
+                  "unreadable-inventory-2": "fullscreen", "owned-busy-with-foreign-game": "foreign-game",
+                  "in-job-cover-no-proof-2": "fullscreen"}
         for label, activity in expect.items():
             with self.subTest(label=label):
                 c = self.busy(label)
                 self.assertEqual(c["activity"], activity)
                 self.assertIsNone(c["ignored"])
                 self.assertEqual(c["detail"]["activity"], activity)
+
+    def test_reclaim_detail_shows_the_evidence(self):
+        d = self.busy("foreign-video-covering-3")["detail"]       # Sage's case: foreign VLC-like window covering, state 3
+        self.assertEqual(d["provenOwned"], [5840])
+        self.assertEqual([(x["pid"], x["ours"]) for x in d["covering"]], [(5840, True), (31337, False)])
+        for label in ("unmatched-row-2", "unparseable-row-2", "stale-creation-2", "unreadable-inventory-2", "unowned-busy-2"):
+            with self.subTest(label=label):
+                self.assertIsNone(self.busy(label)["detail"]["provenOwned"])   # no proof: no exemption
 
     def test_ignored_record_logs_and_done_file(self):
         self.assertEqual(self.out["afterSame"], {"checks": 3, "logs": 1})        # one line for a steady foreground
@@ -208,6 +261,45 @@ class ForegroundDetail(unittest.TestCase):
         self.assertNotIn("foreign", r)
         self.assertTrue(self.out["done"].startswith("IGNORED-BUSY gate: 64 busy/fullscreen checks ignored"))
         self.assertIn("RECLAIMED gate: physical-input", self.out["done"])
+
+
+NATIVE = r"""
+param([string]$GateCs)
+$ErrorActionPreference = 'Stop'
+Add-Type -Path $GateCs
+$p = Get-Process -Id $PID
+$created = $p.StartTime.ToFileTimeUtc()
+$cases = [ordered]@{
+  exact = [Kh2Desk.Gate]::Covers(0, 0, 1920, 1080, 0, 0, 1920, 1080)
+  larger = [Kh2Desk.Gate]::Covers(-8, -8, 1928, 1088, 0, 0, 1920, 1080)
+  shortRight = [Kh2Desk.Gate]::Covers(0, 0, 1919, 1080, 0, 0, 1920, 1080)
+  offsetLeft = [Kh2Desk.Gate]::Covers(1, 0, 1920, 1080, 0, 0, 1920, 1080)
+  secondMonitor = [Kh2Desk.Gate]::Covers(1920, 0, 3840, 1080, 1920, 0, 3840, 1080)
+  emptyMonitor = [Kh2Desk.Gate]::Covers(0, 0, 10, 10, 0, 0, 0, 0)
+  aliveSelf = [Kh2Desk.Gate]::ProvenAlive($PID, $created)
+  aliveWrongCreation = [Kh2Desk.Gate]::ProvenAlive($PID, $created + 1)
+  aliveZero = [Kh2Desk.Gate]::ProvenAlive(0, 0)
+  aliveMissing = [Kh2Desk.Gate]::ProvenAlive(999999, $created)
+  coveringRuns = (@([Kh2Desk.Gate]::Covering()).Count -ge 0)
+}
+$cases | ConvertTo-Json -Compress
+"""
+
+
+class NativeGate(unittest.TestCase):
+    """Gate.cs compiled for real: the coverage geometry, strict liveness, and Covering() enumerating without error."""
+
+    def test_native_helpers(self):
+        with tempfile.TemporaryDirectory() as d:
+            h = Path(d) / "native.ps1"
+            h.write_text(NATIVE, encoding="utf-8-sig")
+            r = subprocess.run(PS + [str(h), str(AGENT.with_name("Gate.cs"))], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = json.loads(r.stdout)
+        self.assertEqual(got, {"exact": True, "larger": True, "shortRight": False, "offsetLeft": False,
+                               "secondMonitor": True, "emptyMonitor": False, "aliveSelf": True,
+                               "aliveWrongCreation": False, "aliveZero": False, "aliveMissing": False,
+                               "coveringRuns": True})
 
 
 if __name__ == "__main__":

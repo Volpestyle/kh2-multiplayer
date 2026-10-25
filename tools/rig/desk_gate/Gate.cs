@@ -297,6 +297,58 @@ public static class Gate {
         } finally { CloseHandle(h); }
     }
 
+    // Only a process opened and matched by creation time, and not yet exited, counts: unlike Alive, an
+    // unreadable process proves nothing. Used where ownership must be proven (the busy-state exemption).
+    public static bool ProvenAlive(int pid, long created) {
+        if (pid <= 0) return false;
+        IntPtr h = OpenProcess(0x1000 | 0x00100000, false, (uint)pid);
+        if (h == IntPtr.Zero) return false;
+        try {
+            long c, e, k, u;
+            return GetProcessTimes(h, out c, out e, out k, out u) && c == created && WaitForSingleObject(h, 0) != 0;
+        } finally { CloseHandle(h); }
+    }
+
+    // True when the window rectangle covers the whole monitor rectangle (fullscreen or borderless fullscreen).
+    public static bool Covers(int left, int top, int right, int bottom, int monLeft, int monTop, int monRight, int monBottom) {
+        return monRight > monLeft && monBottom > monTop && left <= monLeft && top <= monTop && right >= monRight && bottom >= monBottom;
+    }
+
+    // A visible, uncloaked, unminimized top-level window that covers its monitor. The shell's desktop windows
+    // (Progman, WorkerW) cover every monitor and are left out.
+    public class Cover { public int Pid; public string Class; public long Monitor; }
+
+    public static List<Cover> Covering() {
+        List<Cover> rows = new List<Cover>();
+        EnumWindowsProc each = delegate(IntPtr w, IntPtr l) {
+            if (!IsWindowVisible(w) || IsIconic(w) || GetWindow(w, 4) != IntPtr.Zero) return true;  // GW_OWNER
+            int cloaked;
+            if (DwmGetWindowAttribute(w, 14, out cloaked, 4) == 0 && cloaked != 0) return true;   // DWMWA_CLOAKED
+            StringBuilder cls = new StringBuilder(256);
+            GetClassName(w, cls, cls.Capacity);
+            string name = cls.ToString();
+            if (name == "Progman" || name == "WorkerW") return true;
+            RECT r;
+            if (!GetWindowRect(w, out r)) return true;
+            IntPtr monitor = MonitorFromWindow(w, 0);  // MONITOR_DEFAULTTONULL
+            if (monitor == IntPtr.Zero) return true;
+            MONITORINFO mi = new MONITORINFO();
+            mi.cbSize = (uint)Marshal.SizeOf(typeof(MONITORINFO));
+            if (!GetMonitorInfo(monitor, ref mi)) return true;
+            if (!Covers(r.Left, r.Top, r.Right, r.Bottom, mi.Monitor.Left, mi.Monitor.Top, mi.Monitor.Right, mi.Monitor.Bottom)) return true;
+            uint pid;
+            GetWindowThreadProcessId(w, out pid);
+            Cover c = new Cover();
+            c.Pid = (int)pid; c.Class = name; c.Monitor = monitor.ToInt64();
+            rows.Add(c);
+            return true;
+        };
+        if (!EnumWindows(each, IntPtr.Zero)) throw new InvalidOperationException("EnumWindows failed");
+        return rows;
+    }
+
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public uint cbSize; public RECT Monitor; public RECT Work; public uint Flags; }
     [StructLayout(LayoutKind.Sequential)] struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
     [StructLayout(LayoutKind.Sequential)] struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam; public IntPtr lParam; public uint time; public int x; public int y; }
     [StructLayout(LayoutKind.Sequential)] struct XINPUT_STATE { public uint dwPacketNumber; public ushort wButtons; public byte bLeftTrigger; public byte bRightTrigger; public short sThumbLX; public short sThumbLY; public short sThumbRX; public short sThumbRY; }
@@ -327,6 +379,12 @@ public static class Gate {
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc proc, IntPtr param);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr window);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out RECT rect);
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMonitorInfoW")] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")] static extern int GetClassName(IntPtr window, StringBuilder name, int capacity);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
     [DllImport("kernel32.dll")] static extern ulong GetTickCount64();
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowsHookEx(int id, HookProc proc, IntPtr module, uint thread);
