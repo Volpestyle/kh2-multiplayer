@@ -152,10 +152,35 @@ gate, the engagement bound and the cooldown are described in the review packet's
   `rescue_potion_reserve_summary` per fight (refusals, rescue uses).
 - **Not measured.** What a skipped grace heal costs the just-revived seat.
 
+## A partner tether during the volley (lead #344)
+
+`thorn_tether.py` sits over `thorn_potion.py` and is run with `run_tether.py` and the `_creeper_tether` scenario.
+
+- **Why.** In zr98–123, revive windows that started more than 1300 from the downed partner lost 54% (13 of 24);
+  0–1300 lost 17–24%. In 22 of the 23 far starts the seats were already more than 900 apart 3 s before the downing
+  (`vuh2617-tether-estimate.zip` on VUH-2617).
+- **What.** It's opt-in per fight step: `"partnerTether": {"radius": 1300}`, on both seats' `_tether` routes. While
+  Thorn is in its volley (motion 202) and no revive window is open, with both seats up, the seat farther from Thorn's
+  root steers toward its partner whenever they are more than `radius` apart. A tie goes to the lower pid.
+- **Priority.** `TetherCore` subclasses `OrbHoldCore` and is listed last, so C3 puts it below `thorn_head`'s head turn
+  and above the hold-off, protect and revive cores.
+  - It acts only after the revive core has declined the tick, and pre-empts the head turn.
+  - Every higher layer takes the tick first: Creeper-first, survival's opening/grace heals and reserve motion, the RC
+    gate, the approach revision.
+  - It never acts:
+    - with an RC offered, or in an event-reaction tick;
+    - outside ordinary field play;
+    - with either seat down, a full-party wipe, or a revive window open;
+    - on an unknown head or partner read;
+    - during an active Creeper engagement.
+  - Its steer is pilot.py's own, taken at import.
+- **Logs.** `coop_tether` / `coop_tether_end` per episode, with end reasons `released`, `yield`, `creeper`, `core` and
+  `off`; `partner_tether_summary` per fight.
+
 ## Checks and analysis
 
 - `tests/test_thorn_creeper.py`, `tests/test_thorn_rescue.py`, `tests/test_thorn_orbhold.py`,
-  `tests/test_thorn_protect.py` and `tests/test_thorn_potion.py`: offline controls (ctest
+  `tests/test_thorn_protect.py`, `tests/test_thorn_potion.py` and `tests/test_thorn_tether.py`: offline controls (ctest
   `kh2coop_py_test_thorn_*`).
 - `creeper_report.py RUN_DIR...`: per run, the kill, Thorn's end HP, Creeper kills, atk-400 host downs, revive
   exposures and Creeper turns.
