@@ -533,6 +533,9 @@ void PreUpdateEntered(uintptr_t actor) {
     if (g_ownerThread == 0) g_ownerThread = GetCurrentThreadId();
     if (!OwnerThread()) return;
     PrepareFieldActor(actor);
+    // VUH-2605: a script-born child's class brain must be hooked before its first brain call, which follows
+    // this pre-update in the same native update (its initializer runs natively first).
+    if (enemysync::ScriptChildOwned(actor) && !EnsureBrainHook(actor)) NoteLog("script-child-brain-refused", actor, 0, 0);
     // Certified unbound stale copies are consumed at the owner-frame boundary, independently of native bit28.
     Pose pose {};
     const Gate gate = enemysync::MirrorPose(actor, pose);

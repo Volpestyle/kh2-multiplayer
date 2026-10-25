@@ -567,6 +567,15 @@ static bool SmSwapAll() {
     return true;
 }
 
+// VUH-2605: the host's motion permit for a 317: still the published child at that address and netId.
+static bool SmHostBirthQuery(uintptr_t actor, std::uint16_t netId, std::uint64_t& occurrence, std::uint16_t& parent) {
+    occurrence = 0; parent = 0;
+    if (!g_sm.hostActive || !SmGameThread()) return false;
+    const auto* row = g_sm.births.Published(actor, netId);
+    if (!row) return false;
+    occurrence = row->occurrence; parent = row->parentNetId;
+    return true;
+}
 // VUH-2605: publish each recorded child once its census netId exists, repeat on a heartbeat while its
 // parent lives, end it once.
 static void SmTickBirths(std::uint32_t generation) {
@@ -933,12 +942,7 @@ static int SmApplyRecord(const enemysync::ScriptCallRecord& r) {
     if (R::IsActorBirthKind(R::kTraps[i].kind)) {
         // VUH-2605: a birth has no native replay. Until the client owner consumes it, only count it.
         if (!R::ValidCall(c)) { ++g_sm.second.refused; return 0; }
-        if (g_sm.birthLogs < 16) {
-            ++g_sm.birthLogs;
-            Log("[script-birth] client received op=%u parent=%u child=%u occurrence=%08X%08X (no consumer yet)", r.index,
-                c.netId, c.effect, static_cast<std::uint32_t>(c.values[1]), static_cast<std::uint32_t>(c.values[0]));
-        }
-        return 0;
+        return enemysync::ReceiveScriptActorBirth(c.netId, c.objectId, r.index, c.effect, c.values) ? 1 : 0;
     }
     if (r.table==2 && r.index==13) {
         // Ending an existing resource needs its still-live allocation, not a
@@ -1729,6 +1733,7 @@ static void Install() {
         enemysync::MirrorRequested() ? 1u : 0u, R::kTrapCount);
     if (g_sm.requested) enemysync::SetScriptCallApply(&SmApplyRecord);
     if (g_sm.requested) enemysync::SetScriptReactionCompletion(&SmCompleteReaction);
+    if (g_sm.requested) enemysync::SetScriptBirthHostQuery(&SmHostBirthQuery);
 }
 
 static void Shutdown() {

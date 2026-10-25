@@ -121,6 +121,9 @@ inline bool ScriptActorCurrent(const Local& l, Scope now) noexcept {
         s.generation == now.generation && s.epoch == now.epoch && s == now.scriptActor &&
         s.location[0] < 256 && s.location[1] < 256 && s.location[2] < 256;
 }
+// VUH-2605 (adds-owner24): current-frame authority after the whole-census adoption. The provider must
+// supply a fresh copied child receipt; retained history or a stream is not proof.
+inline bool ScriptActorBoundCurrent(const State& state, const Local& current, Scope now, bool terminal, bool hostDead) noexcept;
 inline bool Continuous(const Local& l, Scope now) noexcept {
     const auto& p = l.prior;
     if (!(p.bound > 0 && (p.living || (p.terminal && !l.living)) && p.identity == l.identity &&
@@ -132,6 +135,15 @@ inline bool Continuous(const Local& l, Scope now) noexcept {
     // Existing indexed roots are still required; sampled equal roots do not
     // manufacture an incarnation counter for a body with no typed receipt.
     return l.identity.controller && l.identity.record;
+}
+
+inline bool ScriptActorBoundCurrent(const State& state, const Local& current, Scope now, bool terminal, bool hostDead) noexcept {
+    return state.bound > 0 && state.bound == state.highWater && state.bound == current.scriptActor.childId &&
+        !state.removed && (!state.terminal || !current.living) && hostDead == terminal &&
+        (terminal || current.living) && state.identity == current.identity &&
+        state.scriptActor == current.scriptActor && state.scope.generation == now.generation &&
+        state.scope.epoch == now.epoch && state.scope.frame == now.frame &&
+        state.scope.scriptActor == now.scriptActor && ScriptActorCurrent(current, now);
 }
 
 // VUH-2584: a held census (the gameplay gate closed for an event, such as a mission's closing event)

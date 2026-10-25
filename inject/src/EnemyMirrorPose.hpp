@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <span>
 
 namespace kh2coop::inject::enemymirror {
 
@@ -80,6 +81,26 @@ inline const char* DeniedReason(std::uint32_t objectId) noexcept {
     return nullptr;
 }
 inline bool FamilyAllowed(std::uint32_t objectId) noexcept { return objectId != 0 && !DeniedReason(objectId); }
+
+// VUH-2605: per-entry buffering for one exact script-born child (adds-owner24). Grants no native actor or
+// write rights; the denied family stays denied for every other entry.
+struct ScriptActorStreamPermit {
+    std::uint32_t epoch{};
+    std::uint16_t netId{};
+    std::uint32_t objectId{};
+    std::uint64_t occurrence{};
+};
+inline std::uint64_t ScriptActorStreamOccurrence(std::uint32_t epoch, std::uint16_t netId, std::uint32_t objectId,
+                                                 std::span<const ScriptActorStreamPermit> permits) noexcept {
+    if (!epoch || !netId || objectId != kCreeperObjectId) return 0;
+    std::uint64_t occurrence = 0;
+    for (const auto& permit : permits) if (permit.netId == netId) {
+        if (permit.epoch != epoch || permit.objectId != objectId || !permit.occurrence ||
+            (occurrence && occurrence != permit.occurrence)) return 0;
+        occurrence = permit.occurrence;
+    }
+    return occurrence;
+}
 // "317,76,2409" into out (always NUL-terminated when cap > 0); returns the characters written. A family that
 // would not fit is dropped whole, never cut, so a short buffer cannot print a wrong id.
 inline std::size_t FormatDenied(char* out, std::size_t cap) noexcept {

@@ -96,6 +96,12 @@ public:
         return n;
     }
     std::uint64_t NextOccurrence() const noexcept { return next_; }
+    // The published, still-live child at this address under this netId (the host's motion permit).
+    const HostBirth* Published(std::uintptr_t child, std::uint16_t childNetId) const noexcept {
+        if (!child || !childNetId) return nullptr;
+        for (const auto& r : rows_) if (r.live && r.child == child && r.childNetId == childNetId) return &r;
+        return nullptr;
+    }
 
 private:
     static bool pendingEnd(const HostBirth& r) noexcept { return !r.live && r.occurrence && r.childNetId; }

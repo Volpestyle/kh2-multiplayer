@@ -94,6 +94,13 @@ bool RecordMirrorAuthorityCurrent(uintptr_t actor) noexcept;
 enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept;
 // Host-owned field and Thorn decisions stay suppressed through binding/stream holds.
 bool SuppressClientDecision(uintptr_t actor) noexcept;
+// VUH-2605: Twilight Thorn's script-born Creepers. ScriptMirror hands a validated 255/15 or 255/16 to the
+// client owner; the host answers whether an actor is still an announced child (for its motion stream).
+bool ReceiveScriptActorBirth(std::uint16_t netId, std::uint32_t objectId, std::uint16_t index, std::uint32_t effect,
+                             const std::uint64_t* args) noexcept;
+bool ScriptChildOwned(uintptr_t actor) noexcept;
+using ScriptBirthHostQuery = bool(*)(uintptr_t actor, std::uint16_t netId, std::uint64_t& occurrence, std::uint16_t& parentNetId);
+void SetScriptBirthHostQuery(ScriptBirthHostQuery query) noexcept;
 bool FieldActorCurrent(uintptr_t actor) noexcept;
 bool ConsumeFieldLeave(uintptr_t actor) noexcept;
 

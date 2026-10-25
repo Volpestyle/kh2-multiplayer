@@ -591,7 +591,42 @@ void testRelay() {
 }
 }  // namespace
 
+// VUH-2605: an exact script-born child streams only under its own permit; the family stays denied.
+void testScriptChildPermits() {
+    using P = em::ScriptActorStreamPermit;
+    auto creeper = [](std::uint16_t id, float x) { auto e = row(id, x); e.objectId = em::kCreeperObjectId; return e; };
+    const std::array<P, 1> permit{{{7, 2, em::kCreeperObjectId, 41}}};
+    check(em::ScriptActorStreamOccurrence(7, 2, em::kCreeperObjectId, permit) == 41, "an exact permit names its child's occurrence");
+    check(!em::ScriptActorStreamOccurrence(7, 3, em::kCreeperObjectId, permit), "another 317 netId has no permit");
+    check(!em::ScriptActorStreamOccurrence(8, 2, em::kCreeperObjectId, permit), "a permit never crosses an epoch");
+    check(!em::ScriptActorStreamOccurrence(7, 2, em::kShadowObjectId, permit), "a permit covers only the Creeper family");
+    const std::array<P, 2> conflict{{{7, 2, em::kCreeperObjectId, 41}, {7, 2, em::kCreeperObjectId, 42}}};
+    check(!em::ScriptActorStreamOccurrence(7, 2, em::kCreeperObjectId, conflict), "two occurrences for one netId refuse");
+    const std::array<P, 1> zero{{{7, 2, em::kCreeperObjectId, 0}}};
+    check(!em::ScriptActorStreamOccurrence(7, 2, em::kCreeperObjectId, zero), "a zero occurrence is no permit");
+
+    em::Stream s;
+    s.Ingest(motion(7, 1, 100, {creeper(2, 10.0f), creeper(3, 20.0f)}), 1, false, permit);
+    s.Ingest(motion(7, 2, 103, {creeper(2, 13.0f), creeper(3, 23.0f)}), 2, false, permit);
+    s.Tick(2);
+    check(s.Drivable(2, 2) && !s.Drivable(3, 2), "only the permitted child buffers; the other 317 stays denied");
+    s.Ingest(motion(7, 3, 106, {creeper(2, 16.0f)}), 3, false, {});
+    s.Tick(3);
+    check(!s.Drivable(2, 3), "a revoked permit drops the child's buffered pose");
+    // A netId whose permit moves straight to a new occurrence (no revocation between) starts a fresh track.
+    em::Stream swap;
+    swap.Ingest(motion(7, 1, 100, {creeper(2, 10.0f)}), 1, false, permit);
+    swap.Ingest(motion(7, 2, 103, {creeper(2, 13.0f)}), 2, false, permit);
+    swap.Tick(2);
+    check(swap.Drivable(2, 2), "fixture: the first occurrence buffers");
+    const std::array<P, 1> next{{{7, 2, em::kCreeperObjectId, 43}}};
+    swap.Ingest(motion(7, 3, 106, {creeper(2, 16.0f)}), 3, false, next);
+    swap.Tick(3);
+    check(!swap.Drivable(2, 3), "a new occurrence starts a fresh track rather than inheriting the old samples");
+}
+
 int main() {
+    testScriptChildPermits();
     // D14: HB route families mirror and target all players; only denied Lance Warrior stays native.
     {
         em::Stream stream;

@@ -72,6 +72,7 @@ static uintptr_t g_packActors[3] {};
 // supplied by their separate native controls.
 static bool FieldActorCurrent(uintptr_t) noexcept { return false; }
 static bool SuppressClientDecision(uintptr_t) noexcept { return false; }
+static bool ScriptChildOwned(uintptr_t) noexcept { return false; } // VUH-2605
 static bool ConsumeFieldLeave(uintptr_t) noexcept { return false; }
 static bool PopulationLeftCleanupRequested(uintptr_t) noexcept { return false; }
 static bool MirrorRequested() noexcept { return g_requested; }

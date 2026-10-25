@@ -273,6 +273,7 @@ void AdoptEmissionBirth(uintptr_t actor,int id) {
 }
 
 void ResetSpawnEmissions() {
+    ResetScriptChildren(); // VUH-2605
     g_emissionOutbox.clear(); g_emissionLedger.Clear();g_localEmissionBirths.clear();g_moraleBirthCapacityFault=false;
     g_emissionSequence = 0; g_emissionDeniedLogs = 0;
     g_orbBook.Reset(); g_orbDisplay.Reset(); g_orbLogs = 0;

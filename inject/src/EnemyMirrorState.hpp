@@ -51,7 +51,8 @@ public:
 
     // One decoded packet. A new epoch resets the stream first. Returns false
     // (and changes nothing) for a zero/old sequence or zero epoch.
-    bool Ingest(const EnemyMotion& m, std::uint32_t localFrame, bool baileyCreepers = false) {
+    bool Ingest(const EnemyMotion& m, std::uint32_t localFrame, bool baileyCreepers = false,
+                std::span<const ScriptActorStreamPermit> scriptActors = {}) {
         if (!m.epoch || !m.sequence) { ++stats_.rejected; return false; }
         if (m.epoch != epoch_) Reset(m.epoch);
         if (m.sequence <= sequence_) { ++stats_.rejected; return false; }
@@ -63,12 +64,19 @@ public:
         haveNewest_ = true;
         for (const auto& e : m.entries) {
             // Buffering a scoped stream grants no native actor or write rights.
-            if (!e.netId || (!FamilyAllowed(e.objectId) && !(baileyCreepers && e.objectId==kCreeperObjectId))) continue;
+            const auto scriptOccurrence = ScriptActorStreamOccurrence(m.epoch, e.netId, e.objectId, scriptActors);
+            if (!e.netId || (!FamilyAllowed(e.objectId) && !(baileyCreepers && e.objectId==kCreeperObjectId) && !scriptOccurrence)) {
+                // A named, revoked or ended permit cannot keep its old buffered pose.
+                if (e.netId && e.objectId == kCreeperObjectId && !baileyCreepers) tracks_.erase(e.netId);
+                continue;
+            }
             if (tracks_.size() >= kMaxTracks && tracks_.find(e.netId) == tracks_.end()) {  // rev-2 N-c
                 ++stats_.trackCap;
                 continue;
             }
             Track& t = tracks_[e.netId];
+            if (t.scriptOccurrence != scriptOccurrence) t = Track{}; // a new child occurrence starts a fresh track
+            t.scriptOccurrence = scriptOccurrence;
             if (t.count && static_cast<std::int32_t>(m.hostFrame - t.ring[(t.head + kRing - 1) % kRing].hostFrame) <= 0) {
                 ++stats_.staleSamples;
                 continue;
@@ -186,6 +194,7 @@ public:
 
 private:
     struct Track {
+        std::uint64_t scriptOccurrence{};
         std::array<Sample, kRing> ring {};
         std::size_t head = 0, count = 0;
         std::uint32_t lastArrival = 0, sinceRelease = 0;

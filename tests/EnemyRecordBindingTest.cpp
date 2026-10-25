@@ -238,6 +238,32 @@ void OrdinaryBirthControls() {
     check("whole census duplicate claimant blocks ticket and positional claimant",!conflict[0].id && !conflict[1].id && conflict[0].conflict && conflict[1].conflict);
 }
 
+// VUH-2605: per-frame authority for an adopted script child (adds-owner24 ScriptActorBoundCurrent).
+void ScriptActorBoundCurrentControls() {
+    namespace ob=kh2coop::inject::ordinarybinding;
+    const ob::ScriptActorScope full{2,3,4,5,6,7,8,{2,34,0,157,157,157}};
+    const ob::Scope now{2,3,101,4,full};
+    ob::Local current;current.identity={101,102,103,0,0,317};current.living=true;
+    current.scriptActor={41,51,17,9,current.identity,full};current.scriptActorCurrent=true;
+    ob::State state;state.bound=17;state.highWater=17;state.identity=current.identity;state.scope=now;state.living=true;
+    state.scriptActor=current.scriptActor;
+    check("adopted current child holds live authority",ob::ScriptActorBoundCurrent(state,current,now,false,false));
+    auto changed=[&](auto edit){auto s=state;auto c=current;auto n=now;edit(s,c,n);return ob::ScriptActorBoundCurrent(s,c,n,false,false);};
+    check("authority is for this owner frame only",!changed([](auto&,auto&,auto& n){++n.frame;}));
+    check("a changed full scope refuses",!changed([](auto&,auto&,auto& n){n.scriptActor.writerDelivery=9;}));
+    check("changed native roots refuse",!changed([](auto&,auto& c,auto&){c.identity.status=999;}));
+    check("a stale witness is not current",!changed([](auto&,auto& c,auto&){c.scriptActorCurrent=false;}));
+    check("a different witness refuses",!changed([](auto&,auto& c,auto&){c.scriptActor.nativeReturnSerial=52;}));
+    check("a removed binding refuses",!changed([](auto& s,auto&,auto&){s.removed=true;}));
+    check("binding must be its own highest ID",!changed([](auto& s,auto&,auto&){s.highWater=18;}));
+    check("the bound ID must be the witnessed child",!changed([](auto& s,auto&,auto&){s.bound=16;s.highWater=16;}));
+    check("live authority needs a living body",!changed([](auto&,auto& c,auto&){c.living=false;}));
+    check("live authority refuses a dead host",!ob::ScriptActorBoundCurrent(state,current,now,false,true));
+    auto dead=current;dead.living=false;
+    check("terminal authority follows a dead host and a dead body",ob::ScriptActorBoundCurrent(state,dead,now,true,true));
+    check("terminal authority refuses a living host",!ob::ScriptActorBoundCurrent(state,dead,now,true,false));
+}
+
 void OrdinaryScriptActorControls() {
     namespace ob=kh2coop::inject::ordinarybinding;
     const ob::ScriptActorScope full{2,3,4,5,6,7,8,{2,34,0,157,157,157}};
@@ -538,6 +564,7 @@ int main(int argc,char** argv) {
     OrdinaryRefillControls();
     OrdinaryBirthControls();
     OrdinaryScriptActorControls();
+    ScriptActorBoundCurrentControls();
 #ifndef RECORD_PURE_ONLY
     SplitRefillDeliveryControls();
 #endif

@@ -91,6 +91,25 @@ bool BaileyMissionCurrent(bool terminal=false,uintptr_t* mission=nullptr,const c
 bool MoraleMissionCurrent(bool terminal=false,uintptr_t* mission=nullptr);
 bool BaileyCreeperAuthority(uintptr_t actor,bool terminal=false);
 bool BaileyCreeperHostMotion(uintptr_t actor);
+// VUH-2605 (adds-owner24 API): the ScriptBirthOwner.inl provider supplies copied witnesses. No provider may
+// refresh session state or mutate census/spawn containers.
+enum class ScriptActorUse : std::uint8_t { Binding, Living, Terminal, HostMotion, Stream };
+struct ScriptActorQuery {
+    ScriptActorUse use{};
+    ordinarybinding::Scope scope{};
+    uintptr_t actor{};
+    int childId{};
+    std::uint32_t objectId{};
+    ordinarybinding::ScriptActorWitness adopted{};
+};
+bool ScriptActorConsumerScope(ordinarybinding::Scope& out);
+bool ScriptActorProof(const ScriptActorQuery& query, ordinarybinding::ScriptActorWitness& out);
+bool ScriptActorStreamPermit(std::uint16_t id, enemymirror::ScriptActorStreamPermit& out);
+bool ScriptActorHostMotion(uintptr_t actor, int id);
+bool ScriptActorAuthority(uintptr_t actor, bool terminal);
+bool AdoptScriptActorWitness(const ordinarybinding::ScriptActorWitness&, ordinarybinding::Scope) noexcept;
+void ResetScriptChildren();
+void TickScriptChildBirths();
 
 constexpr std::uint32_t HP_INTERVAL_FRAMES = 6;  // ~10 Hz
 constexpr std::uint64_t HASH_INTERVAL_MS = 1000;
@@ -1676,6 +1695,7 @@ bool ActivationContext(Role role, RoomTransition& location) {
 }
 
 #include "SpawnEmission.inl"
+#include "ScriptBirthOwner.inl" // VUH-2605: script-born Creepers
 
 bool SameClientClaimScope(const ClientClaimScope& a, const ClientClaimScope& b) {
     return a.generation == b.generation && a.ordered == b.ordered && a.delivery == b.delivery &&
@@ -2322,7 +2342,8 @@ void PublishHostMotion(std::uint32_t frame, const NativeCensus& census) {
         if (!s.present || !s.announced || s.deathSent || s.lifecycleRetired) continue;
         const auto* native = FindNativeEnemy(census, s);
         if (!native || native->hp <= 0) continue;
-        if(!enemymirror::FamilyAllowed(s.objectId) && !(s.objectId==317 && BaileyCreeperHostMotion(s.actor)))continue;
+        if(!enemymirror::FamilyAllowed(s.objectId) && !(s.objectId==317 &&
+            (BaileyCreeperHostMotion(s.actor) || ScriptActorHostMotion(s.actor,static_cast<int>(s.spawnIndex+1)))))continue;
         std::uint32_t parent = 0;
         EnemyMotionEntry e;
         const auto transform = native->actor + offsets::actor::ENTITY_TRANSFORM;
@@ -4672,7 +4693,14 @@ bool ReceiveWorldPackets() {
                 EnemyMotion m;
                 read(r, m);
                 if (packet.size() != size + 3 || r.remaining() != 0 || !m.epoch || m.epoch != g_host.epoch) continue;
-                if (g_mirror.Ingest(m, g_hitTraceFrame,BaileyMissionCurrent()) && !g_mirrorFirstPacketLogged) {
+                std::array<enemymirror::ScriptActorStreamPermit,ENEMY_MOTION_MAX_ENTRIES> scriptPermits{};
+                std::size_t scriptCount=0;
+                for(const auto& entry:m.entries)if(entry.objectId==enemymirror::kCreeperObjectId && scriptCount<scriptPermits.size()) {
+                    enemymirror::ScriptActorStreamPermit permit;
+                    if(ScriptActorStreamPermit(entry.netId,permit))scriptPermits[scriptCount++]=permit;
+                }
+                if (g_mirror.Ingest(m, g_hitTraceFrame,BaileyMissionCurrent(),
+                        std::span<const enemymirror::ScriptActorStreamPermit>(scriptPermits.data(),scriptCount)) && !g_mirrorFirstPacketLogged) {
                     g_mirrorFirstPacketLogged = true;
                     if (g_log) g_log("[enemy-mirror] client first-stream frame=%u epoch=%u hostFrame=%u entries=%zu",
                                      g_hitTraceFrame, m.epoch, m.hostFrame, m.entries.size());
@@ -4725,7 +4753,13 @@ bool ResyncNativeSampleCurrent(const NativeEnemy& expected) {
 // native pointer is dereferenced before finding its checked proof.
 bool RecordAuthorityCurrent(uintptr_t actor,std::uint32_t id,bool death=false) noexcept {
     if (!RecordFamily(id)) return true;
-    if(id==317 && BaileyMissionCurrent(death))return BaileyCreeperAuthority(actor,death);
+    if(id==317) {
+        const auto tracked=g_inst.byActor.find(actor);
+        if(tracked!=g_inst.byActor.end() && tracked->second<g_inst.spawns.size() &&
+           ordinarybinding::HasScriptActor(g_inst.spawns[tracked->second].ordinaryBinding.scriptActor))
+            return ScriptActorAuthority(actor,death);
+        if(BaileyMissionCurrent(death))return BaileyCreeperAuthority(actor,death);
+    }
     const auto found=g_recordAuthority.find(actor);
     if (!recordbinding::ScopedAuthorityAllowed(g_recordBindingRequested,g_recordAuthorityRequested,id,
                                                found!=g_recordAuthority.end())) return false;
@@ -5198,6 +5232,11 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         return false;
     };
     if (!CensusMatchesInstance(census) || !SafeNativeGameplay()) return holdAll();
+    ob::Scope scriptScope;
+    const bool scriptScopeCurrent=ScriptActorConsumerScope(scriptScope) && scriptScope.generation==generation &&
+        scriptScope.epoch==g_host.epoch;
+    const ob::Scope bindingScope{generation,g_host.epoch,g_hitTraceFrame,warp::LoadSerial(),
+        scriptScopeCurrent?scriptScope.scriptActor:ob::ScriptActorScope{}};
     ObserveBaileyCreeperBirths(census);
     ObserveMoraleBirths(census);
     for (const auto& native : census.enemies) {
@@ -5206,14 +5245,22 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         const auto& s = g_inst.spawns[found->second];
         if (!s.present || FindNativeEnemy(census, s) != &native) return holdAll();
         const int baileyBirth=s.objectId==317?BaileyCreeperTicketId(native,true):0;
-        if (RecordFamily(s.objectId) && !baileyBirth) continue;
+        ob::ScriptActorWitness scriptWitness;
+        const bool scriptHistory=ob::HasScriptActor(s.ordinaryBinding.scriptActor);
+        const bool scriptCurrent=scriptScopeCurrent && !certified && s.objectId==enemymirror::kCreeperObjectId &&
+            ScriptActorProof({ScriptActorUse::Binding,bindingScope,native.actor,
+                scriptHistory?s.ordinaryBinding.scriptActor.childId:0,native.objectId,s.ordinaryBinding.scriptActor},scriptWitness);
+        if (RecordFamily(s.objectId) && !baileyBirth && !scriptCurrent && !scriptHistory) continue;
         ob::Local local;
         if (!ReadOrdinaryIdentity(native, local.identity)) return holdAll();
         local.point = {s.spawnPos.x, s.spawnPos.y, s.spawnPos.z};
         local.prior = s.ordinaryBinding;
         local.certificateRequired=certified;
+        local.scriptActor=scriptCurrent?scriptWitness:s.ordinaryBinding.scriptActor;
+        local.scriptActorCurrent=scriptCurrent;
         if(!certified && g_resyncWriteFence==ResyncWriteFence::None)
-            local.birthId=baileyBirth?baileyBirth:MoraleBirthActor(native.actor)?MoraleBirthTicketId(native):LocalEmissionBirthId(native);
+            local.birthId=scriptCurrent?(scriptHistory?0:scriptWitness.childId):
+                (scriptHistory?0:baileyBirth?baileyBirth:MoraleBirthActor(native.actor)?MoraleBirthTicketId(native):LocalEmissionBirthId(native));
         if(certified)local.certifiedId=OrdinaryCertifiedId(census,native,ordinaryBefore);
         local.available = !(s.killed && native.hp > 0) && (!MoraleBirthActor(native.actor) || local.birthId>0);
         local.living = native.hp > 0;
@@ -5222,14 +5269,17 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         indices.push_back(found->second);
     }
     for (const auto& [id, h] : g_host.enemies) {
-        if (h.battleProgram == g_inst.btl && (!RecordFamily(h.objectId) || (h.objectId==317 && BaileyMissionCurrent(true))))
+        if (h.battleProgram == g_inst.btl && (!RecordFamily(h.objectId) || (h.objectId==317 &&
+            (BaileyMissionCurrent(true) || std::any_of(locals.begin(),locals.end(),[id](const auto& local) {
+                return ordinarybinding::HasScriptActor(local.scriptActor) && local.scriptActor.childId==id;
+            })))))
             hosts.push_back({id, h.objectId, {h.spawnPos.x, h.spawnPos.y, h.spawnPos.z}, h.dead,h.removed,h.left,
                              std::any_of(g_inst.spawns.begin(),g_inst.spawns.end(),
                                          [id](const Spawn& s){return s.ordinaryBinding.highWater==int(id);})});
     }
     if(certified && (!FreshRecordCatalog(census,ordinaryAfter) || !SameRecordCatalogSample(ordinaryBefore,ordinaryAfter)))return holdAll();
     if(!certified && g_resyncWriteFence==ResyncWriteFence::None)RetireAbsentEmissionBirths(census);
-    const auto decisions = ob::Resolve(locals, hosts, {generation, g_host.epoch, g_hitTraceFrame, warp::LoadSerial()});
+    const auto decisions = ob::Resolve(locals, hosts, bindingScope);
     if (WorldSessionGeneration() != generation || !CensusMatchesInstance(census) || !SafeNativeGameplay()) return holdAll();
     // The entire fresh population is resolved before any native HP/death write.
     // Historical rows outside this census cannot retain write/hash authority.
@@ -5252,7 +5302,12 @@ bool ResolveOrdinaryBindings(const NativeCensus& census, std::uint32_t generatio
         }
         s.ordinaryLogReason = static_cast<int>(d.reason);
         s.ordinaryLogCandidate = d.candidate;
-        if(d.id>0)AdoptEmissionBirth(identity.actor,d.id);
+        if(d.id>0 && ob::HasScriptActor(locals[i].scriptActor)) {
+            if(!AdoptScriptActorWitness(locals[i].scriptActor,bindingScope)) {
+                s.ordinaryBinding=d.next;s.ordinaryBinding.bound=0;s.netId=-1;
+                g_mirror.Erase(static_cast<std::uint16_t>(d.id));continue;
+            }
+        } else if(d.id>0)AdoptEmissionBirth(identity.actor,d.id);
         s.ordinaryBinding = d.next;
         s.netId = d.id > 0 ? d.id : -1;
     }
@@ -5443,7 +5498,8 @@ bool ClientFrame(const NativeCensus& initialCensus) {
                 }
             }
             s.killed = native.hp <= 0;
-            if (RecordFamily(s.objectId) && !(s.objectId==317 && BaileyMissionCurrent(true))) {
+            if (RecordFamily(s.objectId) && !(s.objectId==317 && (BaileyMissionCurrent(true) ||
+                ordinarybinding::HasScriptActor(s.ordinaryBinding.scriptActor)))) {
                 if (g_log) g_log("[record-authority] death epoch=%u frame=%u netId=%d objectId=%u actor=%llX hp=%d attempted=%u",
                     g_host.epoch,g_hitTraceFrame,s.netId,s.objectId,static_cast<unsigned long long>(s.actor),native.hp,static_cast<unsigned>(s.deathAttempted));
                 WithdrawRecordBindings("terminal-population-retired");
@@ -5918,6 +5974,13 @@ void Install(uintptr_t exeBase, LogFn log, StatDeltaFn applyStatDelta, TakeDamag
     g_populationSpawnRequested = g_populationRequested &&
         GetEnvironmentVariableA("KH2COOP_ENEMY_POPULATION_SPAWN", populationSpawn, sizeof(populationSpawn)) == 1 &&
         populationSpawn[0] == '1';
+    if (g_mirrorRequested) { // VUH-2605: the script-child path's own factory pointer; population stays off
+        const auto* entry = reinterpret_cast<const std::uint8_t*>(exeBase + RVA_ENEMY_FACTORY);
+        std::uint8_t bytes[sizeof(kEnemyFactoryBytes)] {};
+        g_scriptChildFactory = CopyCodeBytes(entry, bytes, sizeof(bytes)) &&
+            std::memcmp(bytes, kEnemyFactoryBytes, sizeof(bytes)) == 0 ? reinterpret_cast<EnemyFactoryFn>(exeBase + RVA_ENEMY_FACTORY) : nullptr;
+        if (g_log) g_log("[script-birth] configured factory=%d", g_scriptChildFactory ? 1 : 0);
+    }
     if (g_populationSpawnRequested) {
         const auto* entry = reinterpret_cast<const std::uint8_t*>(exeBase + RVA_ENEMY_FACTORY);
         std::uint8_t bytes[sizeof(kEnemyFactoryBytes)] {};
@@ -6239,6 +6302,7 @@ void OnFrameStart(std::uint32_t frame) {
         }
         TickStrayCopies(frame, census);  // VUH-2272
         PopulationTick(frame, census);  // VUH-1788 (default off)
+        TickScriptChildBirths();        // VUH-2605: last; builds from receipts, holds no census across the call
     }
     PublishAppliedHash(frame, census);
     TickNativeResync(frame, true);
@@ -6340,6 +6404,13 @@ bool RecordMirrorAuthorityCurrent(uintptr_t actor) noexcept {
     WithdrawRecordBindings("native-mirror-boundary-held");return false;
 }
 
+// VUH-2605: the public script-child entry points (ScriptBirthOwner.inl owns the state).
+bool ReceiveScriptActorBirth(std::uint16_t netId, std::uint32_t objectId, std::uint16_t index, std::uint32_t effect,
+                             const std::uint64_t* args) noexcept {
+    return ReceiveScriptActorBirthImpl(netId, objectId, index, effect, args);
+}
+bool ScriptChildOwned(uintptr_t actor) noexcept { return ScriptChildOwnedImpl(actor); }
+void SetScriptBirthHostQuery(ScriptBirthHostQuery query) noexcept { g_scriptBirthHostQuery = query; }
 bool SuppressClientDecision(uintptr_t actor) noexcept {
     enemymirror::FieldCallbackReader reader;if(!reader)return false;
     // Suppress decisions while connected even before binding or during a stream
@@ -6350,6 +6421,8 @@ bool SuppressClientDecision(uintptr_t actor) noexcept {
        !RuntimeWriterLive())return false;
     NativeField f;bool field=false;
     if(ReadNativeField(actor,f,field) && field)return true;
+    // VUH-2605: a script-born child is host-brain-only from its first update, bound or not.
+    if(ScriptChildOwnedImpl(actor))return true;
     // Thorn's script owns captured players and RC phases. Stream warmup or
     // missing point binding cannot authorize a second client BDX decision.
     NativeEnemy enemy;bool combat=false;
@@ -6384,7 +6457,8 @@ enemymirror::Gate MirrorPose(uintptr_t actor, enemymirror::Pose& out) noexcept {
     const Spawn& s = g_inst.spawns[found->second];
     if (s.actor != actor || !s.present || s.killed || s.netId <= 0 || s.netId > 0xFFFF ||
         !RecordAuthorityCurrent(s.actor,s.objectId) ||
-        (!enemymirror::FamilyAllowed(s.objectId) && !(s.objectId==317 && BaileyMissionCurrent()))) return Gate::None;
+        (!enemymirror::FamilyAllowed(s.objectId) && !(s.objectId==317 && (BaileyMissionCurrent() ||
+            ordinarybinding::HasScriptActor(s.ordinaryBinding.scriptActor))))) return Gate::None;
     const auto host = g_host.enemies.find(static_cast<std::uint16_t>(s.netId));
     if (host == g_host.enemies.end() || host->second.dead || host->second.removed || host->second.objectId != s.objectId) return Gate::None;
     // N5: the live status pointer must still be this binding's (closes a mid-frame reuse window).

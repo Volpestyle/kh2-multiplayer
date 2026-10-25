@@ -4297,6 +4297,9 @@ bool Initialize(uintptr_t exeBase) {
     prologueparty::Install(exeBase, &Log); // VUH-2464: seats/hold; the clone rides the missing-party ingress
     nativehud::Install(exeBase, &Log);
     (void)partyNativeOk; // readiness is confirmed below after neutral input installs
+    // VUH-2605: full original-image pins for the script-child resource adapter, before private-status
+    // hooks change the factory/status-reset bodies (adds-native16 contract).
+    if (!spawncontroller::InitializeScriptChildNative(exeBase)) Log("[script-birth] native adapter pins refused; script children off");
     if (!privatestatus::Initialize(exeBase))
         Log(playerkit::BlocksNativeSoraPuppets()
                 ? "[privatestatus] initialization refused: KH2COOP_PLAYER_KIT is set (VUH-1513; per-puppet member slots are VUH-1519)"
