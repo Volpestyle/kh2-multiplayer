@@ -43,6 +43,24 @@ wire, native ABI, retries, leases or pilots. The limited landing evidence above
 does not qualify the terminal bundle. The later failure chronology below is
 historical; it does not override the current status above.
 
+## Victory handoff (VUH-2807)
+
+The retained zr100 kill delivered native315 to the friend with a healthy control
+channel, but the input consumer read it while the previous death-camera hold's
+pause was still Closing. It skipped the start and cleared the old release receipt;
+the friend never played315 and followed the host only at the next room's316.
+The PAUSE overlay came from that earlier hold. This differs from VUH-2628's
+heartbeat expiry.
+
+The native consumer now leaves successor records in the existing FIFO during its
+owned pause close. The close still ticks every callback. Once a fresh sample
+observes the menu closed, the next callback can supersede OwnerWait and replay
+the checked start through the existing safety gates. Scope, health, descriptor
+qualification and native gameplay safety remain required. See the
+[retained diagnosis and offline checks](testing/vuh2807-315-handoff/README.md).
+Live cinematic timing and the overlay acceptance remain unqualified until a
+scheduled paired-screen kill run.
+
 ## Installed evidence
 
 Read from PC1's installed packages without launching the game or changing saves.
