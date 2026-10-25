@@ -131,15 +131,18 @@ int main() {
         std::array<R::ClientReactionRegistration,3> offered{};
         offered[0]={0x11111111,0,true,true,{7,0x5555,epoch,opened,180,1,297,0,false}};
         offered[1]={target[0],1,true,true,{9,seat1,epoch,opened,180,1,299,1,false}};
-        struct Call { std::uint16_t command=299;std::uint8_t local=1;std::uint64_t connection=0;std::uint32_t epoch=0,frame=0;bool downed=false; };
-        const Call admit{299,1,seat1,epoch,opened+4,false};
+        struct Call { std::uint16_t command=299;std::uint8_t local=1;std::uint64_t connection=0;std::uint32_t epoch=0,frame=0;bool downed=false;
+            R::OwnerCommandEntry entry=R::OwnerCommandEntry::Captured; };
+        const Call admit{299,1,seat1,epoch,opened+4,false,R::OwnerCommandEntry::Captured};
         const auto select=[&](const std::array<R::ClientReactionRegistration,3>& roles,Call c) {
-            return R::SelectClientReactionRegistration(target[0],c.command,c.local,c.connection,c.epoch,c.frame,c.downed,roles);
+            return R::SelectClientReactionRegistration(c.entry,target[0],c.command,c.local,c.connection,c.epoch,c.frame,c.downed,roles);
         };
         const auto with=[&](auto change){Call c=admit;change(c);return c;};
         check(select(offered,admit)==1 && select(offered,with([](Call& c){c.frame=opened;}))==1 &&
               select(offered,with([](Call& c){c.frame=opened+179;}))==1,
               "client's own live host-offered window passes its native registration on every frame of the window");
+        check(select(offered,with([](Call& c){c.entry=R::OwnerCommandEntry::General;}))<0,
+              "another actor's motion on the general entry never registers a client's window");
         check(select(offered,with([](Call& c){c.local=0;}))<0,"the host's native registration keeps the existing owner route");
         check(select(offered,with([](Call& c){c.local=3;}))<0,"an out-of-range local seat never registers");
         check(select(offered,with([](Call& c){c.downed=true;}))<0,"a logically downed client seat never registers");
@@ -149,8 +152,8 @@ int main() {
         check(select(offered,with([](Call& c){c.frame=opened+180;}))<0 && select(offered,with([](Call& c){c.frame=opened-1;}))<0,
               "outside the host's 180-frame window the registration is refused");
         check(select(offered,with([](Call& c){c.command=298;}))<0 && select(offered,with([](Call& c){c.command=0;}))<0,"a different or empty command cannot ride the window");
-        check(R::SelectClientReactionRegistration(0,299,1,seat1,epoch,opened+4,false,offered)<0 &&
-              R::SelectClientReactionRegistration(0x22222222,299,1,seat1,epoch,opened+4,false,offered)<0,
+        check(R::SelectClientReactionRegistration(R::OwnerCommandEntry::Captured,0,299,1,seat1,epoch,opened+4,false,offered)<0 &&
+              R::SelectClientReactionRegistration(R::OwnerCommandEntry::Captured,0x22222222,299,1,seat1,epoch,opened+4,false,offered)<0,
               "absent and unregistered native handles are not registrations");
         for(unsigned revoked=0;revoked<7;++revoked) {
             auto changed=offered;

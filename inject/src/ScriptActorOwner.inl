@@ -1822,7 +1822,7 @@ static uintptr_t SmOwnerRouteCommand(OwnerCommandFn original,R::OwnerCommandEntr
                     role.actor==canonical && SmOwnerCurrent(role,scope) && GetTickCount64()<role.deadline,
                     SmOwnerCaptureCurrent(role),role.reaction};
             }
-            if(R::SelectClientReactionRegistration(sourceHandle,static_cast<std::uint16_t>(command),scope.localSlot,
+            if(R::SelectClientReactionRegistration(entry,sourceHandle,static_cast<std::uint16_t>(command),scope.localSlot,
                 scope.connections[scope.localSlot],scope.epoch,g_frameCounter,downedspike::LogicallyDowned(),offered)>=0)
                 return original(controller,kind,command,target,flags,priority);
         }

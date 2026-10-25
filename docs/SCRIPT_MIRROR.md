@@ -239,7 +239,8 @@ source bone 5; owner callback/data arguments are zero. The host alone retains
 its BDX attachment callback. Native update `3B2340` clears the script command
 slots after every reaction refresh, so a prompt lives only on updates that
 re-registered it. A client's own per-frame native captured-motion registration
-therefore passes for exactly one case: the host-offered window of that seat, on
+therefore passes for exactly one case, and only on the captured entry (its own
+player's captured motion): the host-offered window of that seat, on
 its current connection, live in this epoch, unconsumed, for the same command,
 with the role and capture current and the seat not logically down. Every other
 client registration is still refused; only the host mints, extends or re-owns a
