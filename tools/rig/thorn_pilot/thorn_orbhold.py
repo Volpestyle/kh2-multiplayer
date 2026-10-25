@@ -16,7 +16,9 @@ motion 202, the partner lies `far` or more from Thorn's root and this seat is mo
 rescuer then steers toward Thorn until within `hold` of the root and stands. RCs keep their press (with that
 direction). The approach resumes when Thorn leaves 202, when the partner is no longer far, or after `maxWaitSec` held
 off in one revive window. Once the rescuer has come within `finish` of the partner, that window never holds off
-again (r4: in zr116 432 throwbacks re-armed it and walked a nearly-arrived rescuer away). Thorn is read through the existing head observation (no new reads); an unknown head never
+again (r4: in zr116 432 throwbacks re-armed it and walked a nearly-arrived rescuer away); the latch and the cap
+belong to the core's window and reset when it ends, and the gap comes from the core on every tick (r4b). Thorn is
+read through the existing head observation (no new reads); an unknown head never
 holds back. While held off, thorn_approach's plateau monitor must not read the deliberate stand-off as a stall: the
 hook resets its anchor and detour, and the outermost OrbHoldApproachMixin makes its `facts()` empty for the rest of
 a held tick, so the candidate it cached before the core can't start a detour or escape after it (Sage, on r2).
@@ -34,6 +36,23 @@ import thorn_creeper as child  # noqa: E402
 base, previous = child.base, child.previous
 VOLLEY = 202
 HEAD_TTL = 0.25  # s: one head observation serves this many seconds of cooperative ticks
+
+
+class CoreMath:
+    """thorn's `math` for one core tick. thorn.CooperativeFight.step's only math.hypot is its horizontal gap to the
+    partner, computed past all of its refusals on every tick, arrivals within 80 that never steer included; this
+    records it (Sage, on r4) and otherwise is the math module."""
+
+    def __init__(self):
+        self.gaps = []
+
+    def __getattr__(self, name):
+        return getattr(math, name)
+
+    def hypot(self, *args):
+        value = math.hypot(*args)
+        self.gaps.append(value)
+        return value
 
 
 def flat(a, b):
@@ -99,6 +118,7 @@ class OrbHoldCore(thorn.CooperativeFight):
     orbhold_last = None        # monotonic of the last held-off tick
     orbhold_waited = 0.0       # seconds held off in this revive window
     orbhold_finished = False   # this revive window's rescuer has come within `finish` of its partner (r4 latch)
+    orbhold_window = None      # the core's `since` the cap and latch belong to (r4b)
     orbhold_head = (None, -1.0)
 
     def orbhold_end(self, pilot, reason):
@@ -111,6 +131,14 @@ class OrbHoldCore(thorn.CooperativeFight):
         pilot.write('coop_orb_hold_end', reason=reason, seconds=round(seconds, 2),
                     waited=round(self.orbhold_waited, 2), peerPid=self.peer.pid)
         self.orbhold_since = self.orbhold_last = None
+
+    def orbhold_sync(self):
+        """The cap and the latch belong to the core's revive window: a new window start, or the end (since cleared),
+        resets both, on whatever kind of tick it happens (an event reaction included; Sage, on r4)."""
+        if self.since != self.orbhold_window:
+            self.orbhold_window = self.since
+            self.orbhold_waited = 0.0
+            self.orbhold_finished = False
 
     def orbhold_observe(self, pilot, own):
         head, at = self.orbhold_head
@@ -125,36 +153,37 @@ class OrbHoldCore(thorn.CooperativeFight):
         if cfg is None or event_reaction or (own.get('world'), own.get('room')) != (2, 34):
             if cfg is not None:
                 self.orbhold_end(pilot, 'core')
-            return super().step(pilot, own, event_reaction)
-        original, held, reached = base.steer, [], []
+            result = super().step(pilot, own, event_reaction)
+            self.orbhold_sync()
+            return result
+        original, held, reached, core_math = base.steer, [], [], CoreMath()
 
         def steer(s, target, *args, **kwargs):
             # The core's one steer toward the partner, reached only past all of its refusals.
             reached.append(True)
-            peer_pos = (target[0], 0.0, target[1])
             # Once the rescuer has come within `finish` of the partner in this window it never holds off again: in
             # zr116 a 432 throwback from 173 out to 350 re-armed the hold-off and walked it away from the partner.
-            pos = s.get('pos')
-            if pos and flat(pos, peer_pos) <= cfg['finish']:
-                self.orbhold_finished = True
+            # The latch is set from the core's own gap after each tick (below).
             if self.orbhold_finished:
                 return original(s, target, *args, **kwargs)
-            hold = orb_hold(cfg, self.orbhold_observe(pilot, own), pos, peer_pos, self.orbhold_waited)
+            peer_pos = (target[0], 0.0, target[1])
+            hold = orb_hold(cfg, self.orbhold_observe(pilot, own), s.get('pos'), peer_pos, self.orbhold_waited)
             if hold is None:
                 return original(s, target, *args, **kwargs)
             held.append(hold)
             return set() if hold['inside'] else original(s, (hold['root'][0], hold['root'][2]), *args, **kwargs)
 
-        base.steer = steer
+        base.steer, thorn.math = steer, core_math
         try:
             result = super().step(pilot, own, event_reaction)
         finally:
-            base.steer = original
+            base.steer, thorn.math = original, math
+        self.orbhold_sync()
+        if self.since is not None and any(g <= cfg['finish'] for g in core_math.gaps):
+            self.orbhold_finished = True  # an arrival within 80 never steers; the core's own gap still latches
         now = time.monotonic()
         if not held:
             if not self.peer_log.downed:
-                self.orbhold_waited = 0.0  # a new revive window gets a fresh cap
-                self.orbhold_finished = False  # and a fresh finish latch
                 reason = 'peer-recovered'
             elif not reached:
                 reason = 'core'

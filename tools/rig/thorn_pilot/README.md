@@ -92,6 +92,9 @@ gate, the engagement bound and the cooldown are described in the review packet's
 - **Finish latch (r4, lead #317).** Once the rescuer has come within `finish` of the partner, that revive window
   never holds off again. The latch clears when the partner recovers. In zr116 a 432 throwback from 173 back out to
   350 re-armed the hold-off and walked the rescuer away five times. The episode end reason is `finish-latched`.
+  The latch and the cap belong to the core's revive window: they reset whenever the core's `since` changes, on any kind
+  of tick, an event reaction included. The gap comes from the core's own horizontal distance on every validated tick, so
+  arrivals within 80, which never steer, latch too (r4b).
 - **Logs.**
   - `coop_orb_hold` / `coop_orb_hold_end`, per episode, with the end reason: `released`, `cap`, `timeout`,
     `peer-recovered` or `core`;
