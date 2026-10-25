@@ -118,7 +118,7 @@ class OrbHoldCore(thorn.CooperativeFight):
     orbhold_last = None        # monotonic of the last held-off tick
     orbhold_waited = 0.0       # seconds held off in this revive window
     orbhold_finished = False   # this revive window's rescuer has come within `finish` of its partner (r4 latch)
-    orbhold_window = None      # the core's `since` the cap and latch belong to (r4b)
+    orbhold_window = None      # the revive episode the cap and latch belong to: (since, peer downs) (r4c)
     orbhold_head = (None, -1.0)
 
     def orbhold_end(self, pilot, reason):
@@ -133,10 +133,14 @@ class OrbHoldCore(thorn.CooperativeFight):
         self.orbhold_since = self.orbhold_last = None
 
     def orbhold_sync(self):
-        """The cap and the latch belong to the core's revive window: a new window start, or the end (since cleared),
-        resets both, on whatever kind of tick it happens (an event reaction included; Sage, on r4)."""
-        if self.since != self.orbhold_window:
-            self.orbhold_window = self.since
+        """The cap and the latch belong to one revive episode: a new window start, its end (since cleared), or a new
+        downing counted by the partner's log resets both, on whatever kind of tick it happens (an event reaction
+        included; Sage, on r4). The partner's downs count matters because one poll can coalesce a recovery and a fresh
+        interception: downs advances while `since` and `downed` stay as they were (Sage, on r4b). A recovery without a
+        new interception ends the window (since cleared), so revives adds nothing."""
+        episode = (self.since, getattr(self.peer_log, 'downs', None))
+        if episode != self.orbhold_window:
+            self.orbhold_window = episode
             self.orbhold_waited = 0.0
             self.orbhold_finished = False
 
@@ -161,6 +165,8 @@ class OrbHoldCore(thorn.CooperativeFight):
         def steer(s, target, *args, **kwargs):
             # The core's one steer toward the partner, reached only past all of its refusals.
             reached.append(True)
+            # The core has just polled the logs: a coalesced recovery + new downing shows here first (Sage, on r4b).
+            self.orbhold_sync()
             # Once the rescuer has come within `finish` of the partner in this window it never holds off again: in
             # zr116 a 432 throwback from 173 out to 350 re-armed the hold-off and walked it away from the partner.
             # The latch is set from the core's own gap after each tick (below).

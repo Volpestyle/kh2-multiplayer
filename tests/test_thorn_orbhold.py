@@ -455,6 +455,41 @@ c.step(p, own(pos=OWN_OUT))
 check(c.orbhold_waited == 0.0 and p.kinds().count("coop_orb_hold") == n + 1,
       "r4b: the cap is fresh in the next window after an event-tick recovery")
 
+# r4c: one DownedLog poll can coalesce a recovery and a fresh interception (Sage, on r4b). The production DownedLog
+# reads a real file: downs and revives advance while `downed` stays true and the core's `since` never changes.
+with tempfile.TemporaryDirectory() as d:
+    log = base.DownedLog(Peer.pid)
+    log.path = Path(d) / "peer.log"
+    log.path.write_text("[downed] gate intercept actor=2000 x=1\n", encoding="utf-8")
+    p = FakePilot()
+    c = Core(Peer(), Log(), log)
+    c.step(p, own(pos=[0.0, 0.0, 527.0]))                     # window 1, latched at 173
+    before = (c.orbhold_finished, c.since, log.downs, log.revives)
+    with log.path.open("a", encoding="utf-8") as fh:
+        fh.write("[downed] revive returned state=1 hp=20/20 fault=0\n[downed] gate intercept actor=2000 x=1\n")
+    clock.now += 0.3
+    c.step(p, own(pos=OWN_OUT))                               # one poll: recovered and downed again
+    after = (c.since, log.downs, log.revives, log.downed)
+check(before[0] is True and before[2:] == (1, 0), "r4c: window 1 latched on the real DownedLog (downs 1, revives 0)")
+check(after[0] == before[1] and after[1:] == (2, 1, True),
+      "r4c: the coalesced poll advanced downs/revives while downed and the core's since stayed the same")
+check(p.kinds().count("coop_orb_hold") == 1 and not c.orbhold_finished,
+      "r4c: the new episode holds off on that very tick; the old latch doesn't leak into it")
+
+# A plain re-poll with no new rows keeps the episode (and its latch).
+with tempfile.TemporaryDirectory() as d:
+    log = base.DownedLog(Peer.pid)
+    log.path = Path(d) / "peer.log"
+    log.path.write_text("[downed] gate intercept actor=2000 x=1\n", encoding="utf-8")
+    p = FakePilot()
+    c = Core(Peer(), Log(), log)
+    c.step(p, own(pos=[0.0, 0.0, 527.0]))
+    clock.now += 0.3
+    c.step(p, own(pos=OWN_OUT))
+check(c.orbhold_finished and p.kinds().count("coop_orb_hold") == 0,
+      "r4c control: with no new log rows the same episode stays latched")
+
+
 # r4b (2): arrivals within 80 never steer, yet the core's own validated gap latches them.
 for label, arrive in (("50", [0.0, 0.0, 650.0]), ("0", [0.0, 0.0, 700.0])):
     p, c = setup()
