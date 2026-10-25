@@ -1,0 +1,56 @@
+{
+  "name": "twilight_thorn_host_fight_creeper_orbhold",
+  "retries": 0,
+  "description": "VUH-2617 lead #302: twilight_thorn_host_fight_creeper plus rescueOrbHold (thorn_orbhold.py): while Thorn is in its orb volley (motion 202) and the downed partner lies 1250+ from Thorn, the rescuer waits within 1000 of Thorn instead of walking to the partner, then approaches when the volley ends (capped at 30 s per revive window). VUH-2617 lead #282: twilight_thorn_host_fight plus Creeper-first targeting on the host seat (thorn_creeper.py, creeper_policy.py). Kills a Creeper (317) within the engage radius before returning to Thorn; revive, logical downs, RC/Reversal, events, the existing low-HP heal/evasion and Thorn's dazed opening keep priority. Everything else is unchanged.",
+  "steps": [
+    {
+      "do": "fight",
+      "reach": 300,
+      "clearSec": 8,
+      "timeoutSec": 600,
+      "retries": 0,
+      "dismissComboTutorial": true,
+      "downedSec": 60,
+      "note": "Native pad combat begins immediately. Only297/298/299 may use Triangle during the owned camera event, with exact initial room scope and living/logical-down checks. The known first-hit menu0/event0 box still receives bounded Cross; unknown event RCs receive no Triangle.",
+      "eventReactions": [
+        297,
+        298,
+        299
+      ],
+      "lowHp": 0,
+      "heal": {
+        "below": 0.4,
+        "keys": [
+          "DOWN",
+          "DOWN",
+          "confirm",
+          "confirm",
+          "confirm",
+          "UP",
+          "UP"
+        ],
+        "max": 3,
+        "missMax": 2
+      },
+      "blockedThornProbe": true,
+      "nextSeries": {
+        "head": true,
+        "healBeforeRevive": true
+      },
+      "creeperFirst": {
+        "engage": 800,
+        "reach": 170,
+        "chaseSec": 5,
+        "engageSec": 20,
+        "coolSec": 6,
+        "pollSec": 0.3
+      },
+      "rescueOrbHold": {
+        "far": 1250,
+        "hold": 1000,
+        "finish": 300,
+        "maxWaitSec": 30
+      }
+    }
+  ]
+}
