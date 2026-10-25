@@ -87,7 +87,8 @@ gate, the engagement bound and the cooldown are described in the review packet's
   Creeper-first and approach revision. The core still makes every refusal of its own: logs, 60 s bound, event/menu,
   partner state, identity and scope, HP. Only the core's one steer toward the partner is swapped, for that tick. RCs
   are pressed with the hold-off direction. While held off, `thorn_approach`'s plateau anchor and any detour are reset,
-  so the stand-off isn't treated as a stall.
+  so the stand-off isn't treated as a stall. The outermost `OrbHoldApproachMixin` empties that layer's `facts()` for
+  the rest of a held tick (r3), so a plateau candidate cached before the core can't fire a detour or escape after it.
 - **Logs.**
   - `coop_orb_hold` / `coop_orb_hold_end`, per episode, with the end reason: `released`, `cap`, `timeout`,
     `peer-recovered` or `core`;
