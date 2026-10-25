@@ -106,10 +106,7 @@ class ProtectCore(thorn.CooperativeFight):
             return None
         return int(react), horizontal, reviving
 
-    def step(self, pilot, own, event_reaction=False):
-        mask = self.protect_check(pilot, own, event_reaction)
-        if mask is None:
-            return super().step(pilot, own, event_reaction)
+    def protect_note(self, pilot, own, mask):
         now = time.monotonic()
         stats = pilot.protect_stats
         stats['ticks'] += 1
@@ -120,11 +117,19 @@ class ProtectCore(thorn.CooperativeFight):
             pilot.write('coop_rc_protected', command=mask[0], horizontal=mask[1], reviving=mask[2],
                         hp=own.get('hp'), peerPid=self.peer.pid, episode=stats['episodes'])
         self.protect_last = (mask[0], now)
+
+    def step(self, pilot, own, event_reaction=False):
+        mask = self.protect_check(pilot, own, event_reaction)
+        if mask is None:
+            return super().step(pilot, own, event_reaction)
         pilot.kb.protect_mask = True
         try:
             return super().step(pilot, {**own, 'react': 0}, event_reaction)
         finally:
             pilot.kb.protect_mask = False
+            # After the core's tick: on a window's first tick the core writes its `coop_revive peer-logical-downed`
+            # marker first, so the row lands inside that window (Sage, on r5).
+            self.protect_note(pilot, own, mask)
 
 
 class Pad(ProtectPadMixin, previous.Pad):
