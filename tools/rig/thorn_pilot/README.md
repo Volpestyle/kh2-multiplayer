@@ -21,6 +21,9 @@ python -B tools/rig/thorn_pilot/run_creeper.py tools/rig/thorn_pilot/scenarios/n
 - The friend's fight route is `routes/twilight_thorn_fight.json`.
 - The walk-in routes are main's `tools/rig/route_pilot/routes/` (identical content to the lane copies).
 - Live runs follow `docs/THORN_BOTS.md` and the kh2-rig skill (desk bridge, PC1 gate).
+- On bld, run the `_noclip` twin. Two KH2s recording clips drop bld to 17–40 fps (`tools/rig/bld/README.md`).
+  `make_noclip.py SCENARIO [--check]` writes the twin; it drops only the clip steps and the fight clips. Rerun
+  it after any change to the source scenario: `tests/test_make_noclip.py` fails on a stale twin.
 
 ## Layers (outermost first)
 
