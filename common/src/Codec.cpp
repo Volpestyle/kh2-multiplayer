@@ -1219,6 +1219,8 @@ bool validScriptCallEntry(const ScriptCallEntry& e) {
             if (!std::isfinite(f) || std::fabs(f) > SCRIPT_CALL_MAX_FLOAT) return false;
         } else if (tag != SCRIPT_TAG_INT || shape.kind == ScriptCallKind::Vector4) return false;
     }
+    if(scriptActorBirthOperation(e.table,e.index) &&
+       !validScriptActorBirthIdentity(e.netId,e.objectId,e.effect,e.args))return false;
     if(e.table==255 && e.index==1) {
         if(!(static_cast<std::uint32_t>(e.args[0]) || static_cast<std::uint32_t>(e.args[1])) ||
            static_cast<std::uint32_t>(e.args[2])==0 || static_cast<std::uint32_t>(e.args[2])>UINT16_MAX ||

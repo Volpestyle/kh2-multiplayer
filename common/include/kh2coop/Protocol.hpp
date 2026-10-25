@@ -3,6 +3,7 @@
 #include "kh2coop/EnemyRecordKey.hpp"
 #include "kh2coop/CoopDifficulty.hpp"
 #include "kh2coop/SeatVitals.hpp"
+#include "kh2coop/ScriptActorBirth.hpp"
 #include <optional>
 #include <array>
 #include <cstddef>
@@ -511,16 +512,16 @@ inline constexpr std::uint8_t TARGET_AUTHORITY_MAX_MODE = 1;
 // bits '@INT' or '@FLT', low 32 bits the value. A vector argument travels as
 // its four floats. Only the traps scriptCallShape names are accepted, and
 // unused args must be zero. effect is the host-minted id of an effect a
-// mirrored enemy's script started: nonzero for exactly the effect calls, zero
-// for every other call. Wire order is field order: 37 + 45 * n bytes.
-inline constexpr std::uint32_t SCRIPT_TAG_INT = 0x544E4940;   // '@INT'
+// mirrored enemy's script started. The effect field also names normalized
+// resource keys (attacks/roles/actor births), never a native pointer or handle.
+// Wire order is field order: 37 + 45 * n bytes.
 inline constexpr std::uint32_t SCRIPT_TAG_FLOAT = 0x544C4640; // '@FLT'
 inline constexpr float SCRIPT_CALL_MAX_FLOAT = 100000.0f;
 enum class ScriptCallKind : std::uint8_t { None, Scalars, Vector4, Integers };
 struct ScriptCallShape {
     ScriptCallKind kind{ScriptCallKind::None};
     std::uint8_t argc{0};
-    bool effect{false};            // the entry names an effect id
+    bool effect{false};            // the entry names a resource key, including an actor child netId
 };
 // bdscript trap table/index (OpenKH BdxTraps.cs names; tables at exe+0x753490).
 // obj_effect_start_pos (1/22) travels as a start (1/21) and a set_pos (0/38);
@@ -546,6 +547,7 @@ inline constexpr ScriptCallShape scriptCallShape(std::uint8_t table, std::uint16
          : table == 255 && index == 11 ? ScriptCallShape{K::Integers, 1, true} // role lease heartbeat
          : table == 255 && index == 13 ? ScriptCallShape{K::Integers, 2, true} // owner attach: qualified flags/bone, no callback/data
          : table == 255 && index == 14 ? ScriptCallShape{K::Scalars, 0, true} // owner detach
+         : scriptActorBirthOperation(table,index) ? ScriptCallShape{K::Integers, 4, true} // occurrence low/high, child netId/objectId
          : table == 1 && (index == 133 || index == 134) ? ScriptCallShape{K::Scalars, 0} // actor hide/show
          : table == 2 && index == 17 ? ScriptCallShape{K::Scalars, 2, true} // strike paired source copy on actual actor owner
          : table == 1 && index == 1 ? ScriptCallShape{K::Scalars, 1}     // trap_obj_set_rot (float)
@@ -566,7 +568,7 @@ struct ScriptCallEntry {
     std::uint32_t objectId{0};     // its objentry id, checked by clients
     std::uint8_t table{0};
     std::uint16_t index{0};
-    std::uint32_t effect{0};       // host effect id for the effect calls; 0 otherwise
+    std::uint32_t effect{0};       // resource key; actor_birth/end use exact child netId, never a native handle
     std::array<std::uint64_t, 4> args{};
 };
 struct ScriptCall {

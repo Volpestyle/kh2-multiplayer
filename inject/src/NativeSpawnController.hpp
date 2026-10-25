@@ -524,4 +524,37 @@ bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyF
                bool trace = false, EmissionFn emission = nullptr, ReplayFn replay = nullptr);
 void Shutdown();
 
+// VUH-2569: exact resident M_EX880 native adapter. This is readiness only;
+// EnemySync owns authenticated source/manifest authority, reservations, child
+// receipts, one-shot initializer state, quarantine and the sole factory call.
+enum class ScriptChildNativeOutcome : std::uint8_t { Refused, Ready, Completed, Fault, Ambiguous };
+struct ScriptChildResourceLease {
+    TraceStamp stamp{};
+    uintptr_t exeBase{}, objentry{}, modelObject{}, heap{}, resourceHead{};
+    std::array<uintptr_t,3> records{}, payloads{};
+    std::array<std::array<char,68>,3> names{};
+    std::array<std::uint16_t,3> observedRefs{};
+    std::array<std::int32_t,3> resourceClasses{};
+    std::uint32_t ownerThread{};
+    std::uint8_t acquiredMask{}, attemptedMask{}, releaseAttemptedMask{}, uncertainMask{};
+    bool prepared{}, ambiguous{};
+};
+// Full original-code verification BEFORE privatestatus::Initialize installs its
+// existing factory/status-reset hooks. No new hook, allocation or native call.
+bool InitializeScriptChildNative(uintptr_t exeBase) noexcept;
+bool ScriptChildNativeReady() noexcept;
+// Caller supplies its admitted native stamp, rechecks authenticated authority
+// before the existing factory call, and permits no game tick/reentrant native
+// update until explicit release. Lease is a unique caller-owned POD transaction:
+// copying it does not create another right to release the same references.
+ScriptChildNativeOutcome AcquireScriptChildResources(const TraceStamp& admittedStamp,
+    ScriptChildResourceLease& lease) noexcept;
+bool ScriptChildResourcesCurrent(const ScriptChildResourceLease& lease) noexcept;
+ScriptChildNativeOutcome ReleaseScriptChildResources(ScriptChildResourceLease& lease) noexcept;
+// Exact PendingChild key0 ONLY, once, before any BDX executes. Caller must spend
+// its one-shot reservation before entry. Fault/Ambiguous both spend it forever.
+// Output is an observation even on failure; only Completed qualifies the status.
+ScriptChildNativeOutcome InitializeScriptChildStatus52(uintptr_t actor,std::uint32_t actorHandle,
+    uintptr_t objentry,const TraceStamp& admittedStamp,uintptr_t& status) noexcept;
+
 } // namespace kh2coop::inject::spawncontroller

@@ -238,6 +238,155 @@ void OrdinaryBirthControls() {
     check("whole census duplicate claimant blocks ticket and positional claimant",!conflict[0].id && !conflict[1].id && conflict[0].conflict && conflict[1].conflict);
 }
 
+void OrdinaryScriptActorControls() {
+    namespace ob=kh2coop::inject::ordinarybinding;
+    const ob::ScriptActorScope full{2,3,4,5,6,7,8,{2,34,0,157,157,157}};
+    const ob::Scope firstScope{2,3,101,0,full};
+    ob::Local fresh;fresh.identity={101,102,103,0,0,317};fresh.available=fresh.living=true;fresh.birthId=17;
+    fresh.scriptActor={41,51,17,9,fresh.identity,full};fresh.scriptActorCurrent=true;
+    const ob::Host live{17,317,{900,800,700},false};
+    auto resolve=[&](const ob::Local& l,std::vector<ob::Host> hs,ob::Scope now) {
+        return ob::Resolve(std::array{l},hs,now)[0];
+    };
+    auto admitted=resolve(fresh,{live},firstScope);
+    check("typed native zero/zero script return admits exact child",admitted.id==17);
+    check("adopted script witness retained",admitted.next.scriptActor==fresh.scriptActor && admitted.next.highWater==17);
+    auto samePoint=live;samePoint.point=fresh.point;
+    for(int mode=0;mode<10;++mode) {
+        auto l=fresh;
+        switch(mode) {
+        case 0:l.scriptActor={};break; // bare birthId/object317 is not provenance
+        case 1:l.scriptActor={};l.birthId=0;break; // not even a point match
+        case 2:l.scriptActorCurrent=false;break;
+        case 3:l.identity.controller=104;l.scriptActor.child=l.identity;break;
+        case 4:l.identity.record=105;l.scriptActor.child=l.identity;break;
+        case 5:l.identity.controller=104;l.identity.record=105;l.scriptActor.child=l.identity;break;
+        case 6:l.certificateRequired=true;l.certifiedId=17;break;
+        case 7:l.birthId=0;break; // first birth requires its exact one-use selection
+        case 8:l.living=false;break; // ConstructorPending/unknown dead first bodies never bind
+        case 9:l.identity.status=0;l.scriptActor.child=l.identity;break;
+        }
+        check("untyped/mixed/uncurrent script roots refuse "+std::to_string(mode),resolve(l,{samePoint},firstScope).id==0);
+    }
+    for(int mode=0;mode<10;++mode) {
+        auto l=fresh;
+        switch(mode) {
+        case 0:l.scriptActor.occurrence=0;break;
+        case 1:l.scriptActor.nativeReturnSerial=0;break;
+        case 2:l.scriptActor.childId=18;break;
+        case 3:l.scriptActor.parentId=17;break;
+        case 4:l.scriptActor.parentId=0;break;
+        case 5:l.scriptActor.parentId=65536;break;
+        case 6:++l.scriptActor.child.status;break;
+        case 7:l.scriptActor.scope.hostConnection=0;break;
+        case 8:l.scriptActor.scope.hostDelivery=0;break;
+        case 9:l.scriptActor.scope.writerDelivery=0;break;
+        }
+        check("malformed exact script witness refuses "+std::to_string(mode),resolve(l,{samePoint},firstScope).id==0);
+    }
+    auto partial=fresh;partial.identity.controller=104;partial.identity.record=105;
+    partial.scriptActor={};partial.scriptActor.occurrence=1;
+    check("partial typed stamp never falls back to indexed birth",resolve(partial,{live},firstScope).id==0);
+    partial.birthId=0;
+    check("partial typed stamp never falls back to points",resolve(partial,{samePoint},firstScope).id==0);
+    auto missingScope=firstScope;missingScope.scriptActor={};
+    check("legacy three-field scope cannot authorize script roots",resolve(fresh,{live},missingScope).id==0);
+    auto wrongClass=live;wrongClass.objectId=318;
+    check("script exact child cannot name another object class",resolve(fresh,{wrongClass},firstScope).id==0);
+    auto removed=live;removed.removed=true;
+    check("removed child manifest cannot authorize script birth",resolve(fresh,{removed},firstScope).id==0);
+    auto dead=live;dead.dead=true;
+    check("exact already-reserved live script return admits its dead host ID",resolve(fresh,{dead},firstScope).id==17);
+    auto claimed=live;claimed.claimed=true;
+    check("fresh script witness cannot reuse another body's historical live ID",resolve(fresh,{claimed},firstScope).id==0);
+    claimed.dead=true;
+    check("fresh script witness cannot recreate another body's terminal ID",resolve(fresh,{claimed},firstScope).id==0);
+    check("missing child manifest waits",resolve(fresh,{},firstScope).id==0);
+    auto newer=samePoint;newer.id=18;
+    check("script child selection never chooses newer same-point ID",resolve(fresh,{live,newer},firstScope).id==17);
+    auto generic=fresh;generic.identity.objectId=2405;generic.scriptActor.child=generic.identity;
+    auto genericHost=live;genericHost.objectId=2405;
+    check("typed script resolver contains no Thorn family rule",resolve(generic,{genericHost},firstScope).id==17);
+
+    auto bound=fresh;bound.prior=admitted.next;bound.birthId=0;bound.point={-900,-800,-700};
+    auto nextScope=firstScope;++nextScope.frame;
+    auto following=resolve(bound,{live,newer},nextScope);
+    check("spent birth retains exact child without point matching",following.id==17 && following.next.scriptActor==fresh.scriptActor);
+    claimed.dead=false;
+    check("continuing adopted script keeps its naturally claimed ID",resolve(bound,{claimed},nextScope).id==17);
+    auto handed=resolve(bound,{dead},nextScope);
+    check("zero-root script identity has continuous death handoff",handed.id==17 && handed.reason==ob::Reason::BoundDeath);
+    auto terminal=bound;terminal.prior=handed.next;terminal.living=false;
+    auto terminalScope=nextScope;++terminalScope.frame;
+    auto settled=resolve(terminal,{dead},terminalScope);
+    check("native script death retains terminal witness",settled.id==17 && settled.next.terminal && settled.next.scriptActor==fresh.scriptActor);
+    terminal.prior=settled.next;++terminalScope.frame;
+    check("terminal script identity continues while native dead",resolve(terminal,{dead},terminalScope).id==17);
+    auto resurrected=terminal;resurrected.living=true;
+    check("terminal script body cannot resurrect against host death",resolve(resurrected,{dead},terminalScope).id==0);
+    check("terminal script body cannot resurrect against live host",resolve(resurrected,{live},terminalScope).id==0);
+
+    for(int mode=0;mode<19;++mode) {
+        auto l=bound;auto now=nextScope;
+        switch(mode) {
+        case 0:now.frame=firstScope.frame;break; // repeated same owner frame is not continuity
+        case 1:++now.frame;break;
+        case 2:++l.scriptActor.nativeReturnSerial;break; // same sampled roots, different actual native return
+        case 3:++l.scriptActor.occurrence;break;
+        case 4:++l.scriptActor.parentId;break; // historical parent identity is immutable
+        case 5:++l.identity.status;l.scriptActor.child=l.identity;break;
+        case 6:++l.identity.actor;l.scriptActor.child=l.identity;break;
+        case 7:++l.identity.objentry;l.scriptActor.child=l.identity;break;
+        case 8:++now.scriptActor.hostConnection;l.scriptActor.scope=now.scriptActor;break;
+        case 9:++now.scriptActor.hostDelivery;l.scriptActor.scope=now.scriptActor;break;
+        case 10:++now.scriptActor.writerDelivery;l.scriptActor.scope=now.scriptActor;break;
+        case 11:++now.scriptActor.load;l.scriptActor.scope=now.scriptActor;break;
+        case 12:++now.scriptActor.transition;l.scriptActor.scope=now.scriptActor;break;
+        case 13:++now.epoch;++now.scriptActor.epoch;l.scriptActor.scope=now.scriptActor;break;
+        case 14:++now.generation;++now.scriptActor.generation;l.scriptActor.scope=now.scriptActor;break;
+        case 15:++now.scriptActor.location[0];l.scriptActor.scope=now.scriptActor;break;
+        case 16:++now.scriptActor.location[3];l.scriptActor.scope=now.scriptActor;break;
+        case 17:l.scriptActorCurrent=false;break;
+        case 18:l.scriptActor={};break;
+        }
+        auto held=resolve(l,{live},now);
+        check("adopted script discontinuity holds "+std::to_string(mode),held.id==0 && held.next.highWater==17 && held.next.scriptActor==fresh.scriptActor);
+        if(mode<17)check("script discontinuity has exact reason "+std::to_string(mode),held.reason==ob::Reason::ScriptDiscontinuity);
+        l.prior=held.next;++now.frame;l.scriptActorCurrent=true;
+        check("held adopted script cannot reestablish from a fresh current bool "+std::to_string(mode),resolve(l,{live},now).id==0);
+    }
+    auto relabel=bound;relabel.scriptActor.childId=18;relabel.birthId=18;
+    auto held=resolve(relabel,{newer},nextScope);
+    check("script highWater refuses a new child ID on the same body",held.id==0 && held.reason==ob::Reason::Relabel && held.next.highWater==17);
+    auto retired=bound;retired.prior.removed=true;
+    check("removed local script body cannot reuse its witness",resolve(retired,{live},nextScope).id==0);
+    auto stripped=bound;stripped.scriptActor={};stripped.identity.controller=104;stripped.identity.record=105;
+    check("retained script stamp cannot be stripped to recover indexed authority",resolve(stripped,{samePoint},nextScope).id==0);
+    for(std::size_t field=0;field<full.location.size();++field) {
+        auto l=bound;auto now=nextScope;++now.scriptActor.location[field];l.scriptActor.scope=now.scriptActor;
+        check("every NOW scope field remains immutable after script adoption "+std::to_string(field),resolve(l,{live},now).id==0);
+    }
+
+    auto duplicate=fresh;duplicate.identity.actor=201;duplicate.identity.status=203;
+    duplicate.scriptActor.child=duplicate.identity;duplicate.scriptActor.nativeReturnSerial=52;
+    for(bool available:{true,false}) {
+        duplicate.available=available;
+        const auto result=ob::Resolve(std::array{bound,duplicate},std::array{live},nextScope);
+        check("duplicate living script bodies conflict even when one unavailable "+std::to_string(available),
+              !result[0].id && !result[1].id && result[0].conflict && result[1].conflict && result[0].next.scriptActor==fresh.scriptActor);
+        const auto reversed=ob::Resolve(std::array{duplicate,bound},std::array{live},nextScope);
+        check("typed script conflict is whole-census order independent "+std::to_string(available),
+              !reversed[0].id && !reversed[1].id && reversed[0].conflict && reversed[1].conflict);
+    }
+    ob::Local indexed;indexed.identity={301,302,303,304,305,2405};indexed.available=indexed.living=true;indexed.birthId=17;
+    const ob::Host indexedDead{17,2405,{9,8,7},true};
+    check("indexed birth still accepts nonzero native roots",resolve(indexed,{indexedDead},{2,3,101}).id==17);
+    indexed.identity.record=0;
+    check("indexed receipt still refuses a missing native record",resolve(indexed,{indexedDead},{2,3,101}).id==0);
+    indexed.identity.record=305;indexed.identity.controller=0;
+    check("indexed receipt still refuses a missing native controller",resolve(indexed,{indexedDead},{2,3,101}).id==0);
+}
+
 void OrdinaryLifecycleControls() {
     namespace ob=kh2coop::inject::ordinarybinding;
     ob::Local l{{100,200,300,400,500,302},{1,2,3},{},true,true};
@@ -388,6 +537,7 @@ int main(int argc,char** argv) {
     OrdinaryUnseenDeathControls();
     OrdinaryRefillControls();
     OrdinaryBirthControls();
+    OrdinaryScriptActorControls();
 #ifndef RECORD_PURE_ONLY
     SplitRefillDeliveryControls();
 #endif

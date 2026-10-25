@@ -303,11 +303,76 @@ bool HasFreeRecord() {
     std::int32_t again=0;return Read(g_base+CountRva,again) && count==again;
 }
 
+// Same existing native factory hook, no new hook/factory/actor ledger.
+detail::FactoryReturnCounters g_factoryReturns;
+std::atomic<FactoryReturnObserver> g_factoryReturnObserver{};
+std::atomic<std::uint32_t> g_factoryReturnOwner{};
+std::atomic<bool> g_factoryReturnRegistrationAttempted{};
+// No task/fiber identity is inferred. The observer is a no-yield leaf; this
+// trivial TLS byte detects same-thread callback recursion only.
+thread_local bool g_factoryReturnNotifying{};
+struct FactoryNoticeInput {
+    std::uint32_t id{},thread{};
+    uintptr_t caller{};
+    bool owner{};
+};
+static_assert(std::is_trivially_copyable_v<FactoryReturnNotice>);
+static_assert(std::is_trivially_copyable_v<FactoryNoticeInput>);
+bool BeginFactoryNative(const FactoryNoticeInput& input) noexcept {
+    const auto owner=g_factoryReturnOwner.load();
+    // Poison a foreign/reentrant native entry BEFORE it can expose/reuse a body.
+    return g_factoryReturns.Begin(input.owner && owner && input.thread==owner,g_factoryReturnNotifying);
+}
+bool InvokeFactoryObserver(FactoryReturnObserver observer,const FactoryReturnNotice& notice) noexcept {
+    // A callback fault disarms birth observations, not the game's native result
+    // or the existing private-party profile. No C++ object unwinding in this leaf.
+    __try {observer(notice);return true;}
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+void NotifyFactoryReturn(const FactoryNoticeInput& input,uintptr_t actor,bool returned,bool invoked,
+    FactoryRoute route,bool scopePushed,bool counted) noexcept {
+    const DWORD error=GetLastError();
+    const auto owner=g_factoryReturnOwner.load();
+    const auto thread=GetCurrentThreadId();
+    const bool ownerExit=owner && thread==owner && spawncontroller::IsDiagnosticGameThread();
+    if(invoked && (!returned || (owner && (!ownerExit || thread!=input.thread))))
+        g_factoryReturns.PoisonIfArmed();
+    const auto serial=g_factoryReturns.Next();
+    const auto coverage=g_factoryReturns.Snapshot();
+    const auto observer=g_factoryReturnObserver.load(std::memory_order_acquire);
+    if(coverage.registered) {
+        if(!observer || g_factoryReturnNotifying) {
+            g_factoryReturns.Poison();g_factoryReturnObserver.store(nullptr,std::memory_order_release);
+        } else {
+            FactoryReturnNotice notice{};
+            notice.serial=serial;notice.actor=returned?actor:0;notice.caller=input.caller;
+            notice.requestedObjectId=input.id;notice.entryThread=input.thread;notice.returnThread=thread;
+            notice.registeredOwnerThread=owner;notice.ownerAtEntry=input.owner && owner && input.thread==owner;
+            notice.ownerKnown=owner!=0;notice.ownerAtExit=ownerExit;
+            notice.outcome=!invoked?FactoryNativeOutcome::NotInvoked:
+                returned?FactoryNativeOutcome::Returned:FactoryNativeOutcome::Unwound;
+            notice.route=route;notice.nativeInvoked=invoked;notice.scopePushed=scopePushed;
+            // This records intact publication metadata BEFORE observer entry;
+            // it cannot certify observer/wrapper completion. Recheck coverage.
+            notice.notificationComplete=serial && !coverage.poisoned;
+            g_factoryReturnNotifying=true;
+            const bool completed=InvokeFactoryObserver(observer,notice);
+            g_factoryReturnNotifying=false;
+            if(!completed || GetCurrentThreadId()!=thread) {
+                g_factoryReturns.Poison();g_factoryReturnObserver.store(nullptr,std::memory_order_release);
+            }
+        }
+    }
+    if(invoked)g_factoryReturns.End(counted);
+    SetLastError(error);
+}
+
 uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
     const DWORD error=GetLastError();const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
     const auto anchor=reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
     Selection s{};Stamp stamp{};
     const bool owner=spawncontroller::IsDiagnosticGameThread();
+    const FactoryNoticeInput notice{id,GetCurrentThreadId(),caller,owner};
     const bool ordinary=owner && caller==g_base+0x3FE5F0;
     // An unbound clone may not outlive its stamp or see a second raw566 construction.
     if(ordinary && g_pending.armed && (id==566 || !StampNow(stamp) || !Same(stamp,g_pending.stamp))){g_pending={};BindFault(id==566?9:10);}
@@ -323,7 +388,9 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
     if(enclosing && enclosing->missingSlot) {
         if(enclosing->factoryId!=0 || !enclosing->selected || enclosing->constructor || enclosing->used ||
            !g_ready.load() || !StampNow(stamp) || !Same(stamp,enclosing->stamp)) {
-            Fault();SetLastError(error);return 0; // fixed wrapper's proven null-return path
+            Fault();SetLastError(error);
+            NotifyFactoryReturn(notice,0,false,false,FactoryRoute::MissingPartyRefusal,false,false);
+            SetLastError(error);return 0; // fixed wrapper's proven null-return path
         }
         s=*enclosing;enclosing->used=true;s.used=false;s.factoryId=id;
     } else if(ordinary && g_ready.load() && PartyProfile(stamp)) {
@@ -336,11 +403,31 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
         } else Fault();
     }
     const auto token=PushScope(&s,anchor);
-    if(!token.context){Fault();SetLastError(error);return s.missingSlot?0:g_factory(id,point,yaw);}
-    uintptr_t result=0;bool returned=false;
+    if(!token.context) {
+        Fault();
+        if(s.missingSlot) {
+            SetLastError(error);NotifyFactoryReturn(notice,0,false,false,FactoryRoute::MissingPartyRefusal,false,false);
+            SetLastError(error);return 0;
+        }
+        // Same original fallback as before, now with a complete return/unwind
+        // boundary. It never fabricates a scope or a private-party selection.
+        uintptr_t fallback=0;bool returned=false;const bool counted=BeginFactoryNative(notice);
+        __try {SetLastError(error);fallback=g_factory(id,point,yaw);returned=true;}
+        __finally {
+            const DWORD nativeError=GetLastError();
+            NotifyFactoryReturn(notice,fallback,returned,true,FactoryRoute::ScopeFallback,false,counted);
+            SetLastError(nativeError);
+        }
+        return fallback;
+    }
+    uintptr_t result=0;bool returned=false;const bool counted=BeginFactoryNative(notice);
     __try {SetLastError(error);result=g_factory(id,point,yaw);returned=true;}
     __finally {
         const DWORD nativeError=GetLastError();
+        // Negative same-address retirement precedes private-party postchecks
+        // and every outer caller's potential new birth capture.
+        NotifyFactoryReturn(notice,result,returned,true,FactoryRoute::Scoped,true,counted);
+        SetLastError(nativeError);
         auto* top=Top(token);
         if(!returned){Fault();}
         else if(top && top->selected) {
@@ -633,6 +720,33 @@ bool VerifyImage() {
 }
 bool Enabled(const char* name){char v[2]{};return GetEnvironmentVariableA(name,v,2)==1 && v[0]=='1';}
 } // namespace
+namespace {
+bool RegisterFactoryObserver(FactoryReturnObserver observer) noexcept {
+    if(!observer || !spawncontroller::DiagnosticGameThreadKnown() || !spawncontroller::IsDiagnosticGameThread() ||
+       !(g_installed.load()&1u) || !g_retained.load() || !g_factory)return false;
+    HMODULE ownModule=nullptr,observerModule=nullptr;
+    constexpr auto flags=GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+    if(!GetModuleHandleExW(flags,reinterpret_cast<LPCWSTR>(&Initialize),&ownModule) ||
+       !GetModuleHandleExW(flags,reinterpret_cast<LPCWSTR>(observer),&observerModule) || ownModule!=observerModule)return false;
+    if(g_factoryReturnRegistrationAttempted.exchange(true))return false;
+    g_factoryReturnOwner.store(GetCurrentThreadId());
+    g_factoryReturnObserver.store(observer,std::memory_order_release);
+    // Arm only with zero native invocations. A concurrent entry fails this
+    // one-shot registration; no prior actor may inherit later coverage.
+    if(g_factoryReturns.Arm())return true;
+    g_factoryReturns.Poison();g_factoryReturnObserver.store(nullptr,std::memory_order_release);return false;
+}
+} // namespace
+bool RegisterFactoryReturnObserver(FactoryReturnObserver observer) noexcept {
+    const DWORD error=GetLastError();const bool ok=RegisterFactoryObserver(observer);SetLastError(error);return ok;
+}
+FactoryReturnCoverage ReadFactoryReturnCoverage() noexcept {
+    auto coverage=g_factoryReturns.Snapshot();
+    coverage.registered=coverage.registered && g_factoryReturnObserver.load(std::memory_order_acquire)!=nullptr;
+    coverage.installed=(g_installed.load()&1u)!=0 && g_retained.load();
+    return coverage;
+}
+
 bool Initialize(uintptr_t base) {
     const DWORD error=GetLastError();
     g_nativeExplicit = Enabled("KH2COOP_NATIVE_SORA_PRIVATE_STATUS");

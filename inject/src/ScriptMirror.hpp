@@ -24,6 +24,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "kh2coop/ScriptActorBirth.hpp"
 #include "ScriptMirrorPins.hpp"
 #include "ScriptReaction.hpp"
 
@@ -51,10 +52,11 @@ enum class Kind : std::uint8_t {
     EffectField,    // arg0 is an effect; the part field it set is read back and sent as a float4
     AttackStart, AttackField, AttackCall, AttackRc, ReactionOffer, ReactionOwner, Owner, OwnerAttackStart, AttackStrike,
     EffectCall,     // arg0 is an effect; the values are sent as passed
+    ActorBirth,    // normalized source/child occurrence metadata, never native effect replay
 };
 // How a client replays a wire record: through the native trap with its own actor's or effect's
 // handle, obj_set_xyzrot's float4 through its helper, or a field write into the paired effect.
-enum class Replay : std::uint8_t { Trap, XyzRotHelper, FieldWrite, AttackVector, AttackRc, AttackStrike, Owner, None };
+enum class Replay : std::uint8_t { Trap, XyzRotHelper, FieldWrite, AttackVector, AttackRc, AttackStrike, Owner, None, ActorBirth };
 // Calls in one group overwrite each other's effect, so only the latest value per group counts.
 // Event calls each count: they are never compared, replaced or dropped as repeats.
 enum class Group : std::uint8_t { Rotation, Texanm, Shadow, Scissoring, Event, EffectPos, EffectRot, EffectScale, EffectColor, EffectPause, AttackPos, AttackRadius, AttackOffset, OwnerPosition, OwnerMotion, Visibility };
@@ -128,6 +130,8 @@ inline constexpr Trap kTraps[] = {
     {2,17,0x4328E0,4,Kind::AttackStrike,2,false,Replay::AttackStrike,Group::Event,false,2,17,0,false,KH2_PIN(kAttackStrike),"attack_strike_source"},
     {255,13,0,0,Kind::Owner,2,false,Replay::Owner,Group::Event,false,255,13,0,false,nullptr,0,"actor_owner_attach"},
     {255,14,0,0,Kind::Owner,0,false,Replay::Owner,Group::Event,false,255,14,0,false,nullptr,0,"actor_owner_detach"},
+    {255,15,0,0,Kind::ActorBirth,4,false,Replay::ActorBirth,Group::Event,false,255,15,0,false,nullptr,0,"actor_birth"},
+    {255,16,0,0,Kind::ActorBirth,4,false,Replay::ActorBirth,Group::Event,false,255,16,0,true,nullptr,0,"actor_birth_end"},
     {1,133,0x42B640,1,Kind::Actor,0,false,Replay::Trap,Group::Visibility,false,1,133,0,false,KH2_PIN(kObjHide),"obj_hide"},
     {1,134,0x42B680,1,Kind::Actor,0,false,Replay::Trap,Group::Visibility,false,1,134,0,false,KH2_PIN(kObjShow),"obj_show"},
 
@@ -146,7 +150,9 @@ inline int FindWire(std::uint8_t table, std::uint16_t index) noexcept {
 }
 inline bool IsAttackKind(Kind k) noexcept { return k == Kind::AttackStart || k == Kind::OwnerAttackStart || k == Kind::AttackStrike || k == Kind::AttackField || k == Kind::AttackCall || k == Kind::AttackRc || k == Kind::ReactionOffer || k == Kind::ReactionOwner; }
 inline bool IsEffectKind(Kind k) noexcept { return k == Kind::EffectStart || k == Kind::EffectStartPos || k == Kind::EffectField || k == Kind::EffectCall; }
-inline bool EffectRecord(std::size_t trap) noexcept { return trap < kTrapCount && (IsEffectKind(kTraps[trap].kind) || IsAttackKind(kTraps[trap].kind) || kTraps[trap].kind==Kind::Owner); }
+inline bool IsActorBirthKind(Kind k) noexcept { return k==Kind::ActorBirth; }
+// Existing wire-field name: a resource key, not necessarily a visual effect ID.
+inline bool EffectRecord(std::size_t trap) noexcept { return trap < kTrapCount && (IsEffectKind(kTraps[trap].kind) || IsAttackKind(kTraps[trap].kind) || kTraps[trap].kind==Kind::Owner || IsActorBirthKind(kTraps[trap].kind)); }
 inline std::uintptr_t EntryRva(std::uintptr_t tableRva, std::uint16_t index) noexcept { return tableRva + 16u * index; }
 inline bool BodyMatches(std::size_t trap, const std::uint8_t* bytes) noexcept {
     return trap < kTrapCount && std::memcmp(bytes, kTraps[trap].body, kTraps[trap].bodySize) == 0;
@@ -168,7 +174,7 @@ inline bool ValidValues(std::size_t trap, const std::uint64_t* values) noexcept 
     for (unsigned k = 0; k < 4; ++k) {
         if (k >= t.values) { if (values[k] != 0) return false; continue; }
         const auto tag = TagOf(values[k]);
-        const bool integers=t.kind==Kind::ReactionOffer || t.kind==Kind::ReactionOwner || t.kind==Kind::OwnerAttackStart ||
+        const bool integers=t.kind==Kind::ReactionOffer || t.kind==Kind::ReactionOwner || t.kind==Kind::OwnerAttackStart || t.kind==Kind::ActorBirth ||
             (t.kind==Kind::Owner && (t.index==2 || t.index==5 || t.index==7 || t.index==11 || t.index==13));
         if(integers && tag!=kTagInt)return false;
         if (tag == kTagFloat) {
@@ -189,6 +195,8 @@ inline bool ValidValues(std::size_t trap, const std::uint64_t* values) noexcept 
         if(t.index==7 && ((BitsOf(values[0])!=1 && BitsOf(values[0])!=2) || !BitsOf(values[1]) || BitsOf(values[1])>UINT16_MAX || BitsOf(values[3])>255))return false;
     }
     if(t.kind==Kind::OwnerAttackStart && (!(BitsOf(values[0])&0x80000000u) || !BitsOf(values[1]) || BitsOf(values[1])>UINT16_MAX))return false;
+    if(t.kind==Kind::ActorBirth)
+        return kh2coop::validScriptActorBirthValues({values[0],values[1],values[2],values[3]});
     return true;
 }
 
@@ -224,9 +232,18 @@ struct Call {
     std::uint16_t netId = 0;
     std::uint32_t objectId = 0;
     std::uint8_t trap = 0;         // index into kTraps of the wire (table, index)
-    std::uint32_t effect = 0;      // host effect id (effect records); 0 otherwise
+    std::uint32_t effect = 0;      // resource key; ActorBirth uses exact child netId
     std::uint64_t values[4] {};
 };
+// Header/resource consistency is separate from argument-only validation.
+// The owner adapter must call this before dispatching a birth to its queue.
+inline bool ValidCall(const Call& c) noexcept {
+    if(!c.netId || c.trap>=kTrapCount || (c.effect!=0)!=EffectRecord(c.trap) || !ValidValues(c.trap,c.values))return false;
+    if(IsActorBirthKind(kTraps[c.trap].kind))
+        return kh2coop::validScriptActorBirthIdentity(c.netId,c.objectId,c.effect,
+            {c.values[0],c.values[1],c.values[2],c.values[3]});
+    return true;
+}
 inline bool SameValue(const Call& a, const Call& b) noexcept {
     return a.trap == b.trap && a.effect == b.effect && std::memcmp(a.values, b.values, sizeof(a.values)) == 0;
 }
@@ -236,7 +253,8 @@ inline std::uint64_t KeyOf(const Call& c) noexcept {
     const auto& t = kTraps[c.trap];
     if (c.effect)
         return (std::uint64_t{1} << 63) | (static_cast<std::uint64_t>(c.effect) << 16) |
-               (static_cast<std::uint64_t>(t.group) << 8) | (IsAttackKind(t.kind) ? 1u : 0u);
+               (static_cast<std::uint64_t>(t.group) << 8) |
+               (IsActorBirthKind(t.kind) ? 2u : IsAttackKind(t.kind) ? 1u : 0u);
     const std::uint32_t sub = t.keyedByValue ? BitsOf(c.values[0]) : 0;
     return (static_cast<std::uint64_t>(c.netId) << 48) | (static_cast<std::uint64_t>(t.group) << 40) | sub;
 }
@@ -475,7 +493,8 @@ public:
     void CancelResource(std::uint16_t netId,std::uint32_t resource,bool attack) {
         for(auto it=items_.begin();it!=items_.end();) {
             const auto& c=it->call;
-            const bool same=c.netId==netId && c.effect==resource && IsAttackKind(kTraps[c.trap].kind)==attack;
+            const bool same=c.netId==netId && c.effect==resource && !IsActorBirthKind(kTraps[c.trap].kind) &&
+                IsAttackKind(kTraps[c.trap].kind)==attack;
             it=same?items_.erase(it):std::next(it);
         }
     }

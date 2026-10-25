@@ -35,6 +35,8 @@ void Check(bool passed, const char* description) {
 
 // Never link to or operate the game's lifecycle/MinHook in this executable.
 namespace kh2coop::inject::warp {
+bool TransitionPending() { return false; }
+bool LoadPending() { return false; }
 std::uint32_t TransitionSerial() { ++transitionReads; return syntheticTransition; }
 std::uint32_t LoadSerial() { ++loadReads; return syntheticLoad; }
 } // namespace kh2coop::inject::warp

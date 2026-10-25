@@ -15,9 +15,25 @@ struct Identity {
     std::uint32_t objectId{};
     bool operator==(const Identity&) const = default;
 };
+// Script births have no indexed native controller/record. This full copied
+// scope is supplied only by their owner adapter, not inferred from a position.
+struct ScriptActorScope {
+    std::uint32_t generation{}, epoch{}, load{}, transition{};
+    std::uint64_t hostConnection{}, hostDelivery{}, writerDelivery{};
+    std::array<std::uint16_t, 6> location{};
+    bool operator==(const ScriptActorScope&) const = default;
+};
 struct Scope {
     std::uint32_t generation{}, epoch{}, frame{};
     std::uint32_t load{}; // VUH-2584: the load serial (0: unknown)
+    ScriptActorScope scriptActor{}; // default leaves existing indexed callers unchanged
+};
+struct ScriptActorWitness {
+    std::uint64_t occurrence{}, nativeReturnSerial{};
+    int childId{}, parentId{}; // parent is immutable history, never a current native pointer
+    Identity child{}; // ready roots of the exact actual factory return, not ConstructorPending
+    ScriptActorScope scope{};
+    bool operator==(const ScriptActorWitness&) const = default;
 };
 struct State {
     int highWater{};
@@ -33,6 +49,7 @@ struct State {
     int held{};
     // VUH-2550: the current binding came from only-unmatched-of-its-kind (no point match ever).
     bool byKind{};
+    ScriptActorWitness scriptActor{}; // retained after adoption, death and refusal
 };
 struct Local {
     Identity identity{};
@@ -44,6 +61,8 @@ struct Local {
     int certifiedId{};
     int birthId{}; // one-use receipt + fresh native birth proof supplied by owner adapter
     bool unharmed{}; // native HP at its maximum in this sample
+    ScriptActorWitness scriptActor{};
+    bool scriptActorCurrent{}; // fresh owner-frame proof, never carried forward by State
 };
 struct Host {
     int id{};
@@ -55,7 +74,7 @@ struct Host {
     bool claimed{}; // some local body of this instance has already carried this ID
 };
 enum class Reason { Unavailable, NoPoint, Older, UnestablishedDeath, Conflict, Live, BoundDeath, Retired, Relabel, UnseenDeath,
-                    UniqueKind };
+                    UniqueKind, ScriptDiscontinuity };
 inline const char* Name(Reason r) noexcept {
     switch (r) {
     case Reason::Retired: return "authenticated-membership-retired";
@@ -69,6 +88,7 @@ inline const char* Name(Reason r) noexcept {
     case Reason::BoundDeath: return "established-death";
     case Reason::UnseenDeath: return "death-before-first-sighting";
     case Reason::UniqueKind: return "only-unmatched-of-its-kind";
+    case Reason::ScriptDiscontinuity: return "script-birth-without-continuous-binding";
     }
     return "unknown";
 }
@@ -86,15 +106,32 @@ inline bool SamePoint(const std::array<float, 3>& a, const std::array<float, 3>&
     const float x = a[0]-b[0], y = a[1]-b[1], z = a[2]-b[2];
     return Finite(a) && Finite(b) && x*x+y*y+z*z <= 64.0f;
 }
+inline bool HasScriptActor(const ScriptActorWitness& w) noexcept {
+    return w != ScriptActorWitness{};
+}
+inline bool ScriptActorCurrent(const Local& l, Scope now) noexcept {
+    const auto& w = l.scriptActor;
+    const auto& s = w.scope;
+    return l.scriptActorCurrent && !l.certificateRequired && w.occurrence && w.nativeReturnSerial &&
+        w.childId > 0 && w.childId <= 65535 && w.parentId > 0 && w.parentId <= 65535 &&
+        w.childId != w.parentId && (!l.birthId || l.birthId == w.childId) &&
+        w.child == l.identity && w.child.actor && w.child.objentry && w.child.status && w.child.objectId &&
+        !w.child.controller && !w.child.record && now.frame &&
+        s.generation && s.epoch && s.load && s.transition && s.hostConnection && s.hostDelivery && s.writerDelivery &&
+        s.generation == now.generation && s.epoch == now.epoch && s == now.scriptActor &&
+        s.location[0] < 256 && s.location[1] < 256 && s.location[2] < 256;
+}
 inline bool Continuous(const Local& l, Scope now) noexcept {
     const auto& p = l.prior;
-    // Missing frames, changed sampled roots, and absent controller/record cannot
-    // authorize a tombstone. Same-address reuse between samples is unresolved.
-    return p.bound > 0 && (p.living || (p.terminal && !l.living)) &&
-           p.identity == l.identity &&
-           l.identity.controller && l.identity.record &&
-           p.scope.generation == now.generation && p.scope.epoch == now.epoch &&
-           now.frame > p.scope.frame && now.frame-p.scope.frame == 1;
+    if (!(p.bound > 0 && (p.living || (p.terminal && !l.living)) && p.identity == l.identity &&
+          p.scope.generation == now.generation && p.scope.epoch == now.epoch &&
+          now.frame > p.scope.frame && now.frame-p.scope.frame == 1)) return false;
+    if (HasScriptActor(l.scriptActor) || HasScriptActor(p.scriptActor))
+        return ScriptActorCurrent(l,now) && p.scriptActor == l.scriptActor &&
+               p.bound == l.scriptActor.childId && p.scope.scriptActor == now.scriptActor;
+    // Existing indexed roots are still required; sampled equal roots do not
+    // manufacture an incarnation counter for a body with no typed receipt.
+    return l.identity.controller && l.identity.record;
 }
 
 // VUH-2584: a held census (the gameplay gate closed for an event, such as a mission's closing event)
@@ -161,17 +198,26 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
         if (!now.generation || !now.epoch || !l.identity.actor ||
             !l.identity.objentry || !l.identity.status || !Finite(l.point)) continue;
         if(l.prior.removed){d.reason=Reason::Retired;continue;}
-        if(l.birthId>0 && (l.certificateRequired || !l.identity.controller || !l.identity.record))continue;
+        const bool script = HasScriptActor(l.scriptActor) || HasScriptActor(l.prior.scriptActor);
+        const bool establishedScript = script && (HasScriptActor(l.prior.scriptActor) || l.prior.bound ||
+                                                  l.prior.highWater || l.prior.terminal);
+        if (script) {
+            // Invalid/partial typed proof never falls back to points or indexed births.
+            if (!ScriptActorCurrent(l,now) || (!establishedScript &&
+                (l.birthId != l.scriptActor.childId || !l.living))) continue;
+        } else if (!l.identity.controller || !l.identity.record) continue;
+        if(l.birthId>0 && l.certificateRequired)continue;
         const Host* best = nullptr;
         for (const auto& h : hosts) {
             if (!h.removed && h.id > 0 && h.objectId == l.identity.objectId &&
-                (l.birthId>0 ? h.id==l.birthId : l.certificateRequired ? h.id==l.certifiedId : SamePoint(h.point,l.point)) &&
+                (script ? h.id==l.scriptActor.childId : l.birthId>0 ? h.id==l.birthId :
+                 l.certificateRequired ? h.id==l.certifiedId : SamePoint(h.point,l.point)) &&
                 (!best || h.id > best->id)) best = &h;
         }
         // VUH-2292: a reliable leave and its refill manifest can drain in one
         // owner frame. Keep the continuously established OLD identity for
         // native removal; never relabel its living body to the new occurrence.
-        if (!l.birthId && !l.certificateRequired && Continuous(l,now)) {
+        if (!script && !l.birthId && !l.certificateRequired && Continuous(l,now)) {
             for (const auto& h : hosts) {
                 if (h.id == l.prior.bound && h.dead && h.left && !h.removed &&
                     h.objectId == l.identity.objectId && SamePoint(h.point,l.point)) {
@@ -205,6 +251,10 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
         }
         d.candidate = best->id;
         if(l.prior.highWater>0 && best->id!=l.prior.highWater){d.reason=Reason::Relabel;continue;}
+        // A newly minted local return cannot steal another body's historical ID.
+        // An established child naturally marks its own ID claimed and continues.
+        if (script && !establishedScript && best->claimed) { d.reason=Reason::Relabel;continue; }
+        if (establishedScript && !Continuous(l,now)) { d.reason=Reason::ScriptDiscontinuity;continue; }
         if (!l.available) continue; // retain the candidate for whole-census conflict detection
         if (best->id < l.prior.highWater) { d.reason = Reason::Older; continue; }
         // A terminal body never becomes a new live candidate. Dead continuation
@@ -214,7 +264,8 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
             continue;
         }
         const bool exactBirth=l.birthId==best->id && !l.prior.bound && !l.prior.highWater && !l.prior.terminal &&
-            !l.certificateRequired && l.identity.controller && l.identity.record;
+            !l.certificateRequired && (script ? l.living && ScriptActorCurrent(l,now) :
+                                      l.identity.controller && l.identity.record);
         // VUH-2497: the host can kill a wave while this game's census is held (the friend is still in
         // the room's entry event). The body's first sample then already names a dead ID. It is the
         // occurrence that ID was announced for only when nothing here ever saw it before: never
@@ -252,6 +303,7 @@ inline std::vector<Decision> Resolve(std::span<const Local> locals,
             d.next.terminal = true;
         d.next.bound = d.id;
         d.next.highWater = std::max(d.next.highWater,d.id);
+        if (d.id > 0 && HasScriptActor(locals[i].scriptActor)) d.next.scriptActor=locals[i].scriptActor;
     }
     return out;
 }

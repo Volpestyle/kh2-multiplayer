@@ -6,6 +6,7 @@
 #include "ScriptMirror.hpp"
 #include "ScriptReaction.hpp"
 #include <enet/enet.h>
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstring>
@@ -39,6 +40,116 @@ bool refusedRead(const std::vector<std::uint8_t>& bytes) {
     return false;
 }
 bool refusedWrite(const ScriptCall& m) { try { encode(m); } catch (const std::exception&) { return true; } return false; }
+
+ScriptCallEntry actorBirthEntry(std::uint16_t index=SCRIPT_ACTOR_BIRTH_BEGIN,std::uint16_t child=17,
+                               std::uint16_t parent=3,std::uint64_t occurrence=0xFEDCBA9876543210ULL) {
+    ScriptCallEntry e;e.netId=parent;e.objectId=307;e.table=255;e.index=index;e.effect=child;
+    e.args={num(static_cast<std::uint32_t>(occurrence)),num(static_cast<std::uint32_t>(occurrence>>32)),num(child),num(317)};
+    return e;
+}
+R::Call actorBirthCall(const ScriptCallEntry& e) {
+    R::Call c;c.netId=e.netId;c.objectId=e.objectId;c.effect=e.effect;
+    c.trap=static_cast<std::uint8_t>(R::FindWire(e.table,e.index));
+    for(unsigned i=0;i<4;++i)c.values[i]=e.args[i];
+    return c;
+}
+
+void actorBirthCodecChecks() {
+    for(const auto index:{SCRIPT_ACTOR_BIRTH_BEGIN,SCRIPT_ACTOR_BIRTH_END}) {
+        auto packet=sample();packet.entries={actorBirthEntry(index)};
+        const auto bytes=encode(packet);const std::uint8_t* p=nullptr;std::size_t n=0;
+        decodePacketHeader(bytes.data(),bytes.size(),p,n);ByteReader reader(p,n);ScriptCall out;read(reader,out);
+        const auto& e=out.entries.front();
+        const auto occurrence=static_cast<std::uint64_t>(static_cast<std::uint32_t>(e.args[0])) |
+            (static_cast<std::uint64_t>(static_cast<std::uint32_t>(e.args[1]))<<32);
+        check(reader.atEnd() && encode(out)==bytes && occurrence==0xFEDCBA9876543210ULL &&
+              n==SCRIPT_CALL_HEADER_BYTES+SCRIPT_CALL_ENTRY_BYTES && e.netId==3 && e.objectId==307 &&
+              e.effect==17 && e.index==index && validScriptActorBirthIdentity(e.netId,e.objectId,e.effect,e.args),
+              "actor birth/end preserves unsigned occurrence and exact parent/child in existing37+45 framing");
+        check(R::ValidCall(actorBirthCall(e)),"full native-side call validator accepts the exact birth/end descriptor");
+        const auto reject=[&](const ScriptCallEntry& bad,const char* label) {
+            auto changed=packet;changed.entries={bad};check(refusedWrite(changed),label);
+            // Bypass the writer's validator to exercise the actual decoder too.
+            ByteWriter raw;raw.writeU16(bad.netId);raw.writeU32(bad.objectId);raw.writeU8(bad.table);
+            raw.writeU16(bad.index);raw.writeU32(bad.effect);for(const auto value:bad.args)raw.writeU64(value);
+            auto patched=bytes;std::copy(raw.data().begin(),raw.data().end(),patched.begin()+3+SCRIPT_CALL_HEADER_BYTES);
+            check(refusedRead(patched),label);
+            check(!R::ValidCall(actorBirthCall(bad)),"full native-side validator shares the wire identity refusal");
+        };
+        for(unsigned cell=0;cell<4;++cell) {
+            for(const auto tag:{R::kTagAddress,R::kTagWork,R::kTagFloat,0xDEADBEEFu}) {
+                auto bad=packet.entries.front();bad.args[cell]=R::Tagged(tag,static_cast<std::uint32_t>(bad.args[cell]));
+                reject(bad,"birth/end refuses non-INT native handle/work/float/unknown tags on write and read");
+            }
+        }
+        for(int mode=0;mode<11;++mode) {
+            auto bad=packet.entries.front();
+            switch(mode) {
+            case 0:bad.netId=0;break;
+            case 1:bad.objectId=308;break;
+            case 2:bad.args[0]=bad.args[1]=num(0);break;
+            case 3:bad.effect=0;bad.args[2]=num(0);break;
+            case 4:bad.effect=65536;bad.args[2]=num(65536);break;
+            case 5:bad.effect=bad.netId;bad.args[2]=num(bad.netId);break;
+            case 6:++bad.effect;break;
+            case 7:bad.args[3]=num(318);break;
+            case 8:bad.effect=0x80000011u;break;
+            case 9:bad.table=254;break;
+            case 10:bad.index=17;break;
+            }
+            reject(bad,"birth/end refuses zero/wrong source, zero occurrence, bad child/effect or unknown operation");
+        }
+        for(const auto occurrenceValue:{std::uint64_t{1},std::uint64_t{1}<<32,(std::numeric_limits<std::uint64_t>::max)()}) {
+            auto edge=packet;edge.entries={actorBirthEntry(index,UINT16_MAX,3,occurrenceValue)};
+            check(!refusedWrite(edge) && validScriptCallEntry(edge.entries.front()),
+                  "birth/end accepts unsigned low-only, high-only and all-bits occurrence with maximum child ID");
+        }
+    }
+    auto e=actorBirthEntry();e.objectId=308;const auto c=actorBirthCall(e);
+    check(R::ValidValues(c.trap,c.values) && !R::ValidCall(c),
+          "argument-only checks cannot authenticate the parent header; full call admission is required");
+    check(scriptActorBirthPolicy(307,317) && !scriptActorBirthPolicy(317,317) &&
+          !scriptActorBirthPolicy(307,318),"only the approved source307 to child317 policy is exposed");
+}
+
+void actorBirthOrderedChecks() {
+    auto begin=actorBirthCall(actorBirthEntry());auto end=actorBirthCall(actorBirthEntry(SCRIPT_ACTOR_BIRTH_END));
+    const auto& startTrap=R::kTraps[begin.trap];const auto& endTrap=R::kTraps[end.trap];
+    check(startTrap.kind==R::Kind::ActorBirth && endTrap.kind==R::Kind::ActorBirth &&
+          startTrap.replay==R::Replay::ActorBirth && endTrap.replay==R::Replay::ActorBirth &&
+          !startTrap.fnRva && !endTrap.fnRva && !startTrap.body && !endTrap.body &&
+          !startTrap.ends && endTrap.ends && R::IsEvent(begin) && R::IsEvent(end) &&
+          R::EffectRecord(begin.trap) && !R::IsAttackKind(startTrap.kind) && !R::IsEffectKind(startTrap.kind),
+          "birth/end are ordered normalized metadata with a distinct replay/resource kind, not native traps");
+    R::Sender sender;bool queued=true;
+    for(const auto& c:std::array{end,begin,begin,end})queued=queued && sender.Observe(c)==R::Sender::Outcome::Queued;
+    R::Call sent[4]{};const auto count=sender.Peek(sent,4);
+    check(queued && count==4 && sent[0].trap==end.trap && sent[1].trap==begin.trap &&
+          sent[2].trap==begin.trap && sent[3].trap==end.trap && sent[1].values[0]==sent[2].values[0],
+          "end-before-start and duplicate descriptors preserve reliable event order; owner ledger decides lifecycle");
+    sender.Commit(count);
+    check(sender.Observe(begin)==R::Sender::Outcome::Queued,
+          "birth heartbeat is an ordered event and is not hidden by a send-on-change baseline");
+    R::Call visual;visual.netId=begin.netId;visual.objectId=307;visual.effect=begin.effect;
+    visual.trap=static_cast<std::uint8_t>(R::FindTrap(0,51));
+    auto attack=visual;attack.trap=static_cast<std::uint8_t>(R::FindTrap(2,13));
+    check(R::KeyOf(begin)!=R::KeyOf(visual) && R::KeyOf(begin)!=R::KeyOf(attack),
+          "child netId resource key cannot alias attack or visual effect resource namespaces");
+    R::Hold hold;hold.Put(begin,1);hold.Put(visual,1);hold.Put(attack,1);
+    hold.CancelResource(begin.netId,begin.effect,true);hold.CancelResource(begin.netId,begin.effect,false);
+    hold.CancelOwner(begin.netId,begin.effect);std::size_t expired=0;unsigned births=0;
+    const auto drained=hold.Drain(2,[&](const R::Call& c){births+=R::IsActorBirthKind(R::kTraps[c.trap].kind)?1:0;return true;},expired);
+    check(drained==1 && births==1 && !expired,
+          "generic attack/effect/owner cleanup cannot erase a same-numbered actor birth descriptor");
+    R::Sender full;
+    for(std::size_t i=0;i<R::Sender::kPendingCap;++i)full.Observe(begin);
+    check(full.Observe(end)==R::Sender::Outcome::Full && full.Pending()==R::Sender::kPendingCap,
+          "full ordered queue refuses without evicting earlier births; owner outbox retains the pending end");
+    const std::uint64_t raw[]{R::Tagged(R::kTagWork,1),R::Tagged(R::kTagWork,2),R::Tagged(R::kTagWork,3),R::Tagged(R::kTagWork,4)};
+    std::uint64_t values[4]{};
+    check(!R::NormalizeNativeScalars(begin.trap,raw,values),
+          "birth schema does not extend native workspace scalar normalization");
+}
 
 void reactionChecks() {
     std::array<R::ReactionSeat, 3> seats{{{100, {10,0,0}, true,true,true},
@@ -227,7 +338,8 @@ void rulesAgreeWithCodec() {
              t.table==255 && ((t.index==1 && t.kind==R::Kind::ReactionOffer) ||
                              (t.index==12 && t.kind==R::Kind::ReactionOwner) ||
                              (t.kind==R::Kind::Owner && ((t.index>=2 && t.index<=8) || t.index==11 || t.index==13 || t.index==14)) ||
-                             (t.kind==R::Kind::OwnerAttackStart && t.index==9)) && !t.body && !t.bodySize);
+                             (t.kind==R::Kind::OwnerAttackStart && t.index==9) ||
+                             (t.kind==R::Kind::ActorBirth && scriptActorBirthOperation(t.table,t.index))) && !t.body && !t.bodySize);
         if (t.replay == R::Replay::None) {  // never on the wire itself: it travels as another trap
             const int wire = R::FindWire(t.wireTable, t.wireIndex);
             converted = converted && pinned && shape.kind == ScriptCallKind::None && wire >= 0 &&
@@ -243,7 +355,8 @@ void rulesAgreeWithCodec() {
         for (const auto& v : cases) {
             ScriptCallEntry e; e.netId = 1; e.table = t.table; e.index = t.index; e.effect = R::EffectRecord(i) ? 7u : 0u;
             for (int k = 0; k < 4; ++k) e.args[static_cast<std::size_t>(k)] = v[k];
-            values = values && R::ValidValues(i, v) == validScriptCallEntry(e);
+            const bool nativeValid=R::IsActorBirthKind(t.kind)?R::ValidCall(actorBirthCall(e)):R::ValidValues(i,v);
+            values = values && nativeValid == validScriptCallEntry(e);
             auto wrongEffect = e; wrongEffect.effect = e.effect ? 0u : 7u;
             values = values && !validScriptCallEntry(wrongEffect);
         }
@@ -660,6 +773,31 @@ void enetChecks() {
     refusedBy("actor-identity","terminal source cannot create another attack",[&]{clients[0]->sendScriptCall(deadStart);});
     auto wrongEnd=ends;wrongEnd.seq=++calls.seq;++wrongEnd.entries[0].objectId;
     refusedBy("actor-identity","terminal teardown still requires announced source identity",[&]{clients[0]->sendScriptCall(wrongEnd);});
+    // Existing host-only reliable ScriptCall admission also carries the typed
+    // metadata. Owner-side tombstones and parent-terminal teardown are separate integration.
+    auto parent=enemy;parent.netId=5;parent.objectId=307;manifest.entries.push_back(parent);
+    auto child=enemy;child.netId=6;child.objectId=317;manifest.entries.push_back(child);
+    clients[0]->sendEnemyManifest(manifest);pump();
+    ScriptCall birth=calls;birth.seq=++calls.seq;birth.entries={actorBirthEntry(SCRIPT_ACTOR_BIRTH_BEGIN,6,5)};
+    auto beforeBirth=received[1].size();auto beforeBirth2=received[2].size();
+    clients[0]->sendScriptCall(birth);pump();
+    check(received[1].size()==beforeBirth+1 && received[2].size()==beforeBirth2+1 && received[0].empty() &&
+          received[1].back().entries.front().index==SCRIPT_ACTOR_BIRTH_BEGIN &&
+          received[1].back().entries.front().effect==6 && received[1].back().entries.front().objectId==307,
+          "host-only reliable path forwards exact source/child birth metadata to both friends");
+    auto birthEnd=birth;birthEnd.seq=++calls.seq;birthEnd.entries.front().index=SCRIPT_ACTOR_BIRTH_END;
+    clients[0]->sendScriptCall(birthEnd);pump();
+    check(received[1].size()==beforeBirth+2 && received[2].size()==beforeBirth2+2 &&
+          received[1].back().entries.front().index==SCRIPT_ACTOR_BIRTH_END &&
+          received[1].back().entries.front().args==birth.entries.front().args,
+          "birth end preserves the immutable tuple on the same reliable path while parent is current");
+    auto forgedBirth=birth;forgedBirth.seq=++calls.seq;
+    refusedBy("sender-not-verified-host","friend cannot forge an actor birth descriptor",[&]{
+        clients[1]->sendNativeWorld(encode(forgedBirth),ProducerWorldContext{1,clients[1]->deliverySerial(),0},true);});
+    auto unknownParent=birth;unknownParent.seq=++calls.seq;unknownParent.entries.front().netId=living.netId;
+    refusedBy("actor-identity","birth source must match its announced parent class",[&]{clients[0]->sendScriptCall(unknownParent);});
+    auto staleBirth=birth;staleBirth.seq=++calls.seq;++staleBirth.location.epoch;
+    refusedBy("room-mismatch","birth cannot cross the admitted room scope",[&]{clients[0]->sendScriptCall(staleBirth);});
     for (auto& c : clients) if (c) c->disconnect();
     server.stop();
 }
@@ -671,6 +809,8 @@ int main() {
     completionCodecChecks();
     ownerCodecChecks();
     codecChecks();
+    actorBirthCodecChecks();
+    actorBirthOrderedChecks();
     rulesAgreeWithCodec();
     senderChecks();
     holdChecks();

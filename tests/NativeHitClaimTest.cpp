@@ -194,6 +194,7 @@ bool MatchesArrivedHostTransition(const RoomTransition& location) noexcept {
            enemysync::SameLocation(location, arrivalTarget);
 }
 bool TransitionPending() { return productionWorldMode ? recoverywarp::TransitionPending() : pendingTransition; }
+bool LoadPending() { return productionWorldMode && recoverywarp::LoadPending(); }
 bool WaitingAtBlockedExit() { return productionWorldMode ? recoverywarp::WaitingAtBlockedExit() : waitingAtExit; }
 bool HostTravelling() { return productionWorldMode && recoverywarp::HostTravelling(); }  // VUH-2341 World Map
 std::uint32_t TransitionSerial() { return productionWorldMode ? recoverywarp::TransitionSerial() : transition; }

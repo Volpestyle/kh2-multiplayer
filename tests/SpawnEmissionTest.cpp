@@ -102,6 +102,152 @@ void reservations() {
                     "room retirement discards in-flight reservations");
 }
 
+// The ScriptActor branch shares the existing receipt vector. These controls
+// exercise pure wire/receipt facts; no native constructor or ownership is implied.
+ScriptCallEntry scriptBirth(std::uint32_t child=7,std::uint64_t occurrence=0x80000001FFFFFFFFull,
+                           std::uint16_t parent=1,bool end=false) {
+    ScriptCallEntry entry{};entry.netId=parent;entry.objectId=SCRIPT_ACTOR_BIRTH_PARENT_OBJECT;
+    entry.table=255;entry.index=end?SCRIPT_ACTOR_BIRTH_END:SCRIPT_ACTOR_BIRTH_BEGIN;entry.effect=child;
+    const auto integer=[](std::uint32_t value){return (static_cast<std::uint64_t>(SCRIPT_TAG_INT)<<32)|value;};
+    entry.args={integer(static_cast<std::uint32_t>(occurrence)),integer(static_cast<std::uint32_t>(occurrence>>32)),
+                integer(child),integer(SCRIPT_ACTOR_BIRTH_CHILD_OBJECT)};return entry;
+}
+bool sameScriptBirth(const ScriptCallEntry& a,const ScriptCallEntry& b) {
+    return a.netId==b.netId && a.objectId==b.objectId && a.table==b.table && a.index==b.index && a.effect==b.effect && a.args==b.args;
+}
+void scriptLedgerReservations() {
+    using A=SpawnEmissionLedger::ScriptActorAdd;using S=SpawnEmissionLedger::ScriptActorReceiptState;
+    using T=SpawnEmissionLedger::ScriptActorReservation;using C=SpawnEmissionLedger::ScriptActorCancel;
+    SpawnEmissionLedger l;const auto a=scriptBirth();auto b=scriptBirth(8,42);ScriptCallEntry copied{};T outer{},nested{},retry{};
+    copied=a;check(!l.PendingScriptActor(copied) && !copied.effect && l.ScriptActorState(a)==S::Missing,
+                  "missing typed receipt returns no pointer or stale copied descriptor");
+    check(l.AddScriptActor(a)==A::Added && l.AddScriptActor(a)==A::Duplicate && l.ScriptActorState(a)==S::Pending,
+          "unsigned high-bit occurrence and exact duplicate create one pending script receipt");
+    check(l.PendingScriptActor(copied) && sameScriptBirth(copied,a),"pending ScriptActor returns complete copied canonical BEGIN");
+    check(!l.Pending(0,0) && !l.Reserve(0,0,0) && !l.Permit(0,0,0,false) && !l.Permit(0,0,0,true),
+          "indexed zero-key lookups cannot expose a ScriptActor's default emission fields");
+    check(l.ReserveScriptActor(a,outer) && outer.attempt && sameScriptBirth(outer.birth,a),"reserve copies exact descriptor plus local attempt");
+    auto refused=outer;
+    check(!l.ReserveScriptActor(a,refused) && !refused.attempt && !refused.birth.effect,"nested same receipt cannot borrow reservation or stale output");
+    check(!l.Commit(0) && !l.Cancel(0) && l.ScriptActorState(a)==S::Reserved,"indexed sequence0 cannot mutate a reserved typed row");
+    check(l.AddScriptActor(a)==A::Duplicate && l.ScriptActorState(a)==S::Reserved,"duplicate begin does not release a reservation");
+    auto wrong=outer;++wrong.attempt;
+    check(!l.CommitScriptActor(wrong) && !l.CancelScriptActor(wrong,C::QualifiedNormalNull),"wrong attempt cannot spend or release current receipt");
+    wrong=outer;wrong.birth.args[0]^=1;
+    check(!l.CommitScriptActor(wrong),"matching attempt with wrong immutable descriptor refuses");
+    check(!l.CancelScriptActor(outer,static_cast<C>(1)) && l.ScriptActorState(a)==S::Reserved,"unknown cancel reason is not normal-null proof");
+    check(l.AddScriptActor(b)==A::Added && l.ReserveScriptActor(b,nested),"different exact receipt reserves independently after vector growth");
+    check(l.CommitScriptActor(outer) && !l.CommitScriptActor(outer) && !l.CancelScriptActor(outer,C::QualifiedNormalNull),
+          "nonnull or ambiguous native return spends only its copied receipt once");
+    check(l.AddScriptActor(a)==A::Duplicate && l.ScriptActorState(a)==S::Consumed,"consumed duplicate never regrants a birth");
+    check(l.CancelScriptActor(nested,C::QualifiedNormalNull) && !l.CancelScriptActor(nested,C::QualifiedNormalNull),
+          "qualified side-effect-free normal-null releases exactly once");
+    check(l.ReserveScriptActor(b,retry) && retry.attempt>nested.attempt,"normal-null retry gets a new monotonic attempt");
+    check(!l.CommitScriptActor(nested) && !l.CancelScriptActor(nested,C::QualifiedNormalNull) && l.ScriptActorState(b)==S::Reserved,
+          "stale pre-null callback cannot consume or cancel a later same-descriptor attempt");
+    check(l.CommitScriptActor(retry) && l.ScriptActorState(b)==S::Consumed,"only current retry token commits");
+    l.Clear();check(l.AddScriptActor(a)==A::Added && l.ReserveScriptActor(a,retry) && retry.attempt>nested.attempt,
+                    "room clear does not rewind the local attempt sequence");
+    check(!l.CommitScriptActor(outer) && !l.CancelScriptActor(outer,C::QualifiedNormalNull),"pre-Clear token cannot hit a new-room identical descriptor");
+    auto end=a;end.index=SCRIPT_ACTOR_BIRTH_END;
+    check(l.AddScriptActor(end)==A::Ended && l.ScriptActorState(a)==S::Ended && l.CommitScriptActor(retry),
+          "end during native entry stops new birth but still permits exact in-flight spend bookkeeping");
+    check(!l.ReserveScriptActor(a,refused) && l.AddScriptActor(a)==A::Ended && l.AddScriptActor(end)==A::Ended,
+          "end does not reset consumed history or permit resurrection");
+    l.Clear();check(l.AddScriptActor(end)==A::Ended && l.AddScriptActor(a)==A::Ended && !l.PendingScriptActor(copied),
+                    "end-before-start stores a permanent tombstone");
+    check(!l.ReserveScriptActor(end,refused),"END operation itself cannot reserve a native birth");
+    l.Clear();l.AddScriptActor(a);l.ReserveScriptActor(a,outer);l.AddScriptActor(end);
+    check(l.CancelScriptActor(outer,C::QualifiedNormalNull) && l.ScriptActorState(a)==S::Ended && !l.ReserveScriptActor(a,retry),
+          "normal-null after end closes reservation without reopening creation");
+}
+void scriptLedgerIsolationAndConflict() {
+    using A=SpawnEmissionLedger::ScriptActorAdd;using S=SpawnEmissionLedger::ScriptActorReceiptState;
+    using T=SpawnEmissionLedger::ScriptActorReservation;using C=SpawnEmissionLedger::ScriptActorCancel;
+    SpawnEmissionLedger l;auto a=scriptBirth();T token{},otherToken{};
+    check(l.AddScriptActor(a)==A::Added,"typed receipt starts independent namespace");
+    for(int mode=0;mode<11;++mode) {
+        auto bad=a;
+        switch(mode) {
+        case 0:bad.table=1;break;case 1:bad.index=1;break;case 2:bad.netId=0;break;
+        case 3:bad.objectId=318;break;case 4:bad.effect=0;break;case 5:++bad.effect;break;
+        case 6:bad.args[0]=static_cast<std::uint32_t>(bad.args[0]);break;
+        case 7:bad.args[0]=static_cast<std::uint64_t>(SCRIPT_TAG_INT)<<32;bad.args[1]=bad.args[0];break;
+        case 8:bad.args[3]=(static_cast<std::uint64_t>(SCRIPT_TAG_INT)<<32)|318;break;
+        case 9:bad.netId=7;break;
+        case 10:bad.effect=65536;bad.args[2]=(static_cast<std::uint64_t>(SCRIPT_TAG_INT)<<32)|65536;break;
+        }
+        check(l.AddScriptActor(bad)==A::Refused && l.ScriptActorState(a)==S::Pending,
+              "shared helper rejects malformed source/tag/identity/policy without poisoning valid receipt");
+    }
+    auto indexed=sample();indexed.netId=7;
+    check(l.Add(indexed) && l.Reserve(indexed.controllerKey,indexed.headerId,indexed.recordIndex) && l.ReserveScriptActor(a,token),
+          "numeric indexed netId7 and script child7 coexist in the same vector");
+    check(l.Commit(indexed.sequence) && l.ScriptActorState(a)==S::Reserved && l.CommitScriptActor(token),
+          "indexed and typed commits touch only their respective kind");
+    indexed.sequence=2;indexed.netId=8;
+    check(l.Add(indexed),"script high occurrence bits never advance the indexed sequence floor");
+    auto b=scriptBirth(8,42);check(l.AddScriptActor(b)==A::Added,"indexed netId8 does not deduplicate script child8");
+    l.Clear();a=scriptBirth(7,10);b=scriptBirth(8,20);auto bridge=scriptBirth(7,20);
+    l.AddScriptActor(a);l.AddScriptActor(b);l.ReserveScriptActor(a,token);
+    check(l.AddScriptActor(bridge)==A::Conflict && l.ScriptActorState(a)==S::Poisoned &&
+          l.ScriptActorState(b)==S::Poisoned && l.ScriptActorState(bridge)==S::Poisoned,
+          "same child OR occurrence conflict poisons every retained match and retains incoming alias");
+    check(l.CommitScriptActor(token) && !l.ReserveScriptActor(a,otherToken) && l.ScriptActorState(a)==S::Poisoned,
+          "in-flight poisoned return is spent and never grants adoption authority");
+    check(l.AddScriptActor(a)==A::Conflict && l.AddScriptActor(b)==A::Conflict,"poison survives exact duplicates and consumed history");
+    auto linked=scriptBirth(9,10);
+    check(l.AddScriptActor(linked)==A::Conflict && l.ScriptActorState(linked)==S::Poisoned,"retained conflict alias poisons later transitive occurrence reuse");
+    auto changedParent=a;changedParent.netId=2;
+    check(l.AddScriptActor(changedParent)==A::Conflict,"different historical parent cannot reuse child and occurrence");
+    auto conflictingEnd=scriptBirth(11,20,1,true);
+    check(l.AddScriptActor(conflictingEnd)==A::Conflict && l.ScriptActorState(conflictingEnd)==S::Poisoned,
+          "new conflicting END reports conflict rather than mistaking its appended row for a preexisting exact end");
+    auto exactEnd=a;exactEnd.index=SCRIPT_ACTOR_BIRTH_END;
+    check(l.AddScriptActor(exactEnd)==A::Ended && l.AddScriptActor(exactEnd)==A::Ended && l.ScriptActorState(a)==S::Poisoned,
+          "retained exact ends remain idempotent bookkeeping while poison remains sticky");
+    l.Clear();l.AddScriptActor(a);l.ReserveScriptActor(a,token);l.AddScriptActor(changedParent);
+    check(l.CancelScriptActor(token,C::QualifiedNormalNull) && l.ScriptActorState(a)==S::Poisoned && !l.ReserveScriptActor(a,otherToken),
+          "qualified normal-null after conflict does not reopen poisoned receipt");
+    l.Clear();l.AddScriptActor(a);l.ReserveScriptActor(a,token);l.CommitScriptActor(token);
+    check(l.AddScriptActor(scriptBirth(7,99))==A::Conflict,"a new occurrence cannot reuse a consumed child identity");
+    l.Clear();exactEnd=a;exactEnd.index=SCRIPT_ACTOR_BIRTH_END;l.AddScriptActor(exactEnd);
+    check(l.AddScriptActor(scriptBirth(8,10))==A::Conflict,"an ended occurrence cannot be relabelled to another child");
+}
+void scriptLedgerCapacity() {
+    using A=SpawnEmissionLedger::ScriptActorAdd;using S=SpawnEmissionLedger::ScriptActorReceiptState;
+    using T=SpawnEmissionLedger::ScriptActorReservation;
+    SpawnEmissionLedger l;auto a=scriptBirth(7,10);l.AddScriptActor(a);auto indexed=sample();
+    bool filled=true;
+    for(std::uint64_t i=1;i<SPAWN_EMISSION_CAP;++i){indexed.sequence=i;filled=filled && l.Add(indexed);}
+    check(filled && l.AddScriptActor(scriptBirth(8,20))==A::Refused,"indexed and script receipts share one bounded capacity without eviction");
+    check(l.AddScriptActor(a)==A::Duplicate,"full capacity retains exact duplicate idempotence");
+    auto end=a;end.index=SCRIPT_ACTOR_BIRTH_END;
+    check(l.AddScriptActor(end)==A::Ended && l.ScriptActorState(a)==S::Ended,"full capacity retains exact cleanup/end bookkeeping");
+    const auto alias=scriptBirth(8,10);
+    check(l.AddScriptActor(alias)==A::Conflict && l.ScriptActorState(a)==S::Poisoned && l.ScriptActorState(alias)==S::Missing,
+          "full-capacity conflict poisons retained matches without evicting to store an unknown alias");
+    T token{};
+    check(!l.ReserveScriptActor(alias,token) && l.AddScriptActor(scriptBirth(8,30))==A::Refused && l.AddScriptActor(end)==A::Ended,
+          "unknown conflicting alias cannot later gain rights while permanently full; known ends still work");
+    check(l.Permit(indexed.controllerKey,indexed.headerId,0,true),"script capacity conflict does not poison an indexed receipt");
+    l.Clear();filled=true;
+    for(std::uint32_t i=1;i<=SPAWN_EMISSION_CAP;++i)
+        filled=filled && l.AddScriptActor(scriptBirth(i,100+i,65000))==A::Added;
+    indexed.sequence=1;
+    check(filled && !l.Add(indexed),"script receipts also exhaust the same capacity for indexed adds");
+    const auto first=scriptBirth(1,101,65000);auto lastEnd=scriptBirth(static_cast<std::uint32_t>(SPAWN_EMISSION_CAP),100+SPAWN_EMISSION_CAP,65000,true);
+    check(l.ReserveScriptActor(first,token) && l.CommitScriptActor(token) && l.AddScriptActor(first)==A::Duplicate &&
+          l.AddScriptActor(lastEnd)==A::Ended,"spend/consumed duplicate/exact end remain available in an all-script full ledger");
+    check(!l.Pending(0,0) && !l.Commit(0) && !l.Cancel(0),"all-script history exposes no accidental indexed receipt");
+    l.Clear();filled=true;
+    for(std::uint32_t i=1;i<=SPAWN_EMISSION_CAP;++i)
+        filled=filled && l.AddScriptActor(scriptBirth(i,100+i,65000,true))==A::Ended;
+    ScriptCallEntry pending{};
+    check(filled && !l.PendingScriptActor(pending) && l.AddScriptActor(first)==A::Ended &&
+          l.AddScriptActor(scriptBirth(5000,9999,65000))==A::Refused,"end-before-start tombstones consume capacity and cannot be evicted or resurrected");
+}
+
 // Stable wire/ledger boundary: every arrival order and every processing split
 // preserves the receipt's identity even when the exact host occurrence is dead.
 void splitDelivery() {
@@ -190,4 +336,4 @@ void relay() {
     for(auto& c:clients)if(c)c->disconnect();host.stop();
 }
 }
-int main(){if(enet_initialize()!=0)return 2;codec();ledger();reservations();splitDelivery();relay();enet_deinitialize();std::cout<<"failures="<<errors<<'\n';return errors?1:0;}
+int main(){if(enet_initialize()!=0)return 2;codec();ledger();reservations();scriptLedgerReservations();scriptLedgerIsolationAndConflict();scriptLedgerCapacity();splitDelivery();relay();enet_deinitialize();std::cout<<"failures="<<errors<<'\n';return errors?1:0;}
