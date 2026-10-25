@@ -3407,3 +3407,10 @@ sampled128HP boss floor abort a failed qualification before continuing toward
 a kill. Its Session1 read-only state trace retains raw/qualified reaction fields
 and process identity; encoding gaps and sampling jitter remain explicit. The
 separate full-kill rehearsal keeps its original victory/reward/exit checks.
+
+After any complete two-seat Thorn fight, the read-only
+`tools/scenario/harvest_thorn_defeat.py` can collect VUH-2807's once-only315,
+native capture-time skew, overlay and reward/onward receipt without another
+live run. It requires explicit visual review and closure evidence before PASS;
+no kill remains UNQUALIFIED. See [THORN_DEFEAT_RECEIPT.md](THORN_DEFEAT_RECEIPT.md)
+for the inventory/final invocations and review fields.
