@@ -15,7 +15,10 @@ root steers toward its partner whenever they are more than `radius` apart horizo
   the RC gate and the approach revision;
 - it never acts with an RC offered, outside ordinary field play, in an event-reaction tick, with either seat down or
   a full-party wipe, with a revive window open, on an unknown head or partner read, or during an active Creeper
-  engagement (no tethering on a Creeper objective, lead #344).
+  engagement (no tethering on a Creeper objective, lead #344); the logs are read again just before any input, and an
+  unreadable log or a downing logged during the partner/head reads stops it (r2);
+- ending an episode releases only the keys the tether itself pressed, never a lower core's input from the same tick
+  (r2).
 The steer is pilot.py's own, taken at import (the hold-off swaps it only inside its core tick). Input-only, no native
 writes.
 """
@@ -72,8 +75,9 @@ class TetherPilotMixin:
 class TetherCore(thorn_orbhold.OrbHoldCore):
     """Listed as the last base, after thorn_protect's CooperativeFight: C3 places it directly above OrbHoldCore."""
     tether_since = None
+    tether_held = None  # the pad's held set right after the tether's own last press
 
-    def tether_end(self, pilot, reason):
+    def tether_end(self, pilot, reason, release=True):
         if self.tether_since is None:
             return
         seconds = time.monotonic() - self.tether_since
@@ -82,7 +86,12 @@ class TetherCore(thorn_orbhold.OrbHoldCore):
         stats['ends'][reason] = stats['ends'].get(reason, 0) + 1
         pilot.write('coop_tether_end', reason=reason, seconds=round(seconds, 2), peerPid=self.peer.pid)
         self.tether_since = None
-        pilot.kb.hold(set())
+        # Release only what the tether itself pressed (Sage, on r1). A core that consumed this tick owns its input, even
+        # when it re-held the very keys the tether last pressed (the pad then writes nothing), so that end never
+        # releases; otherwise only a pad still holding exactly the tether's own press is released.
+        if release and self.tether_held is not None and set(pilot.kb.held) == self.tether_held:
+            pilot.kb.hold(set())
+        self.tether_held = None
 
     def tether_check(self, pilot, own, event_reaction):
         """(this tick's tether, None) or (None, why it does not apply)."""
@@ -107,13 +116,18 @@ class TetherCore(thorn_orbhold.OrbHoldCore):
         t = tether(cfg, head, own['playerPos'], peer['playerPos'], pilot.game.pid, self.peer.pid)
         if t is None:
             return None, 'released'
+        # The partner and head reads take time: a downing logged meanwhile, or a log turning unreadable, must stop the
+        # input. Validate the logical state fresh, immediately before pressing, and fail closed (Sage, on r1).
+        if not self.own_log.update() or not self.peer_log.update() or self.since is not None \
+                or self.own_log.downed or self.peer_log.downed or self.own_log.full_party or self.peer_log.full_party:
+            return None, 'yield'
         return dict(t, peer=list(peer['playerPos'])), None
 
     def step(self, pilot, own, event_reaction=False):
         result = super().step(pilot, own, event_reaction)
         if result or getattr(pilot, 'tether_cfg', None) is None:
             if result:
-                self.tether_end(pilot, 'core')
+                self.tether_end(pilot, 'core', release=False)
             return result
         t, why = self.tether_check(pilot, own, event_reaction)
         if t is None:
@@ -126,6 +140,7 @@ class TetherCore(thorn_orbhold.OrbHoldCore):
                         **{k: v for k, v in t.items() if k != 'peer'})
         point = own['playerPos']
         pilot.kb.hold(STEER({**own, 'pos': point}, (t['peer'][0], t['peer'][2])))
+        self.tether_held = set(pilot.kb.held)
         return True
 
 
