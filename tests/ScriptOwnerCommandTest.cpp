@@ -169,8 +169,11 @@ int main() {
         hostOwned[1].roleSlot=0;hostOwned[1].reaction.slot=0;hostOwned[1].reaction.connection=0x5555;
         check(select(hostOwned,admit)<0,"a client never registers the host's own window");
         auto twin=offered;
-        twin[2]=twin[1];twin[2].current=false;
-        check(select(twin,admit)<0,"two roles naming one source refuse even when one is stale");
+        twin[2]=twin[1];
+        check(select(twin,admit)<0,"two otherwise admissible roles naming one source refuse ambiguous ownership");
+        twin=offered;
+        twin[0]=twin[1];twin[0].current=false;
+        check(select(twin,admit)<0,"a stale duplicate ahead of the owner still makes the source ambiguous");
     }
 
     check(R::OwnerCommandContinues(297,2,100,297,2,115),"repeated same-mode command retains its occurrence through frame15");
