@@ -13,6 +13,10 @@ check precedes the door re-anchor. Damage and native-attack predicates are saved
 at the original combat observation points and asserted after the onward checks;
 later events cannot repair a false saved result.
 
+The pilot behind the kill-rate runs zr98–110 is a separate stack: `tools/rig/thorn_pilot/`. It is the s254b react
+layers plus the host's opt-in Creeper-first targeting, run with `run_creeper.py`; see its README. The sections below
+describe the `route_pilot/thorn.py` line it grew from.
+
 ## Run order and install detector
 
 Ivo owns the live cohort. Run this sequence inside the existing Session1 desk

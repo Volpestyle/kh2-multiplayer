@@ -1,0 +1,42 @@
+{
+  "name": "twilight_thorn_fight",
+  "retries": 0,
+  "description": "OFFLINE next-series composed child: head-relative targeting, one bounded pre-revive Potion attempt below 40% with fresh slot-0 proof, and per-swing/item telemetry. Uses the reviewed HealPad/HealPilot plus head mixins. Counted cursor restore is UNVERIFIED pending calibration. Existing 600-second fight, event RCs, revive rules, heal keys and scenario safety checks are preserved. Independent review and series go required before running.",
+  "steps": [
+    {
+      "do": "fight",
+      "reach": 300,
+      "clearSec": 8,
+      "timeoutSec": 600,
+      "retries": 0,
+      "dismissComboTutorial": true,
+      "downedSec": 60,
+      "note": "Native pad combat begins immediately. Only297/298/299 may use Triangle during the owned camera event, with exact initial room scope and living/logical-down checks. The known first-hit menu0/event0 box still receives bounded Cross; unknown event RCs receive no Triangle.",
+      "eventReactions": [
+        297,
+        298,
+        299
+      ],
+      "lowHp": 0,
+      "heal": {
+        "below": 0.4,
+        "keys": [
+          "DOWN",
+          "DOWN",
+          "confirm",
+          "confirm",
+          "confirm",
+          "UP",
+          "UP"
+        ],
+        "max": 3,
+        "missMax": 2
+      },
+      "blockedThornProbe": true,
+      "nextSeries": {
+        "head": true,
+        "healBeforeRevive": true
+      }
+    }
+  ]
+}

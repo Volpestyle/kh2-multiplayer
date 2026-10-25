@@ -1,0 +1,831 @@
+{
+  "name": "net_twilight_thorn_bots_dmgtrace600s254b_trace_react_creeper",
+  "description": "REACT299 (VUH-2617 lead #248): the natural s254b_trace scenario run with run_react299.py, which only adds prompt-transition rows. S254B TRACE (VUH-2617 lead #224): the s254b scenario with KH2COOP_SCRIPT_COMMAND_TRACE=1 on both seats' boot env, for the b816683 build (2506f0f plus VUH-2738's opt-in command trace). S254B SERIES (VUH-2617 lead #209): the combined next-series scenario driven by .local/bot01-next/route_pilot/thorn_survival254b.py (Quill's lead254b: lead254 plus one heal in the settled post-own-revive grace window, over the lead244 stack); for the composed 2506f0f binary; otherwise byte-identical to net_twilight_thorn_bots_dmgtrace600next.json. COMBINED NEXT SERIES (VUH-2617 lead #156-#166): fight600 with both Thorn fight routes from .local/bot01-next/routes (Quill's head targeting + pre-revive heal, nextSeries options) driven by .local/bot01-next/route_pilot/thorn_next.py with Linden's heal2 (readback cursor restore, CURSOR_RVA 0x2A106BC); otherwise byte-identical to net_twilight_thorn_bots_dmgtrace600.json. MAIN DAMAGE TRACE (VUH-2617 lead #125): the bot01 replay with KH2COOP_THORN_HIT_TRACE=1 and KH2COOP_TRACE_HITS=1 (existing NativeHitTrace [damagepolicy] events) in both boots (Struggle orbs left on); otherwise byte-identical to net_twilight_thorn_bots.json here. REPLAY (VUH-2617 lead #60): bot01's exact scenario, pilot (thorn.py 7260f9da, pilot.py a139d1d) and routes (a139d1d), route paths moved to .local/bot01-replay/routes/ with identical content; engine is current main. VUH-2569 FM-00, two-seat single-PC loopback rehearsal through real Serenity/Calling doors to Twilight Thorn. The route is recovered from VUH-2466 run20261020-002047. Both seats use pad pilots, bounded known first-hit menu0/event0 Cross dismissal during combat. No warps, synthetic kills, HP/team writes, immunity, or save. Strict mission/RC/damage/victory assertions intentionally fail unfinished synchronization. Final captioned evidence requires native315 encoding qualification and final video assembly; 30s blocks include encoder gaps. Both combat pilots approach at reach300; owner1 completion remains mandatory without a distant-host bias. Both combat pilots integrate peer revival into their own pad loop; each becomes neutral while logically downed and approaches a lone downed peer for the native1600ms Triangle hold only when nativeRC0. Natural downings must recover; none are forced. Bossdoor hands off on the real room crossing, without waiting for event=false. Combat pilots handle only named native camera RCs297/298/299 under the initial room scope; the first raw two-screen block supplies ingress pixels, avoiding separate capture delays before opening reactions. Both Thorn fight steps explicitly use lowHp0 so25% native revive returns can resume ordinary attacks. At most three bounded jump/two-Cross probes address a reproduced short approach stall; actual hit claims must show any benefit. Live08 keeps both pilot routes, reach, timing and strategy unchanged. Its input observation uses the fresh product-qualified actionable reaction from existing read-only version7 prompt fields; raw cached RC remains diagnostic. No new network fields or synthetic control are introduced. The scenario owns combat recordings; its two combat pilots skip their best-effort failure screenshot/clip to avoid competing for the same capture channel. Gameplay and failure status are unchanged. VUH-2617 separate run_thorn.py/thorn.py pilots; original product assertions and twelve paired blocks are retained. After exact two-driver successful reap/release, try sequential 400ms native pad onward pulses; direction and safe movement are not qualified in advance and any changed scope or insufficient movement fails.",
+  "playerDefaults": true,
+  "protect": [],
+  "qualificationGaps": [
+    "No passing full two-seat kill/reward/exit run has qualified this fixture.",
+    "Native315 event id encoding and owner receipt require live confirmation; current 353133 assertion follows existing ASCII event ids, not a completed native315 receipt.",
+    "Raw 30s blocks are not a captioned uninterrupted kill clip; final edit must label both screens and single-PC loopback, preserve gaps, and attach the full combat evidence.",
+    "Boss actor-role camera/attach ownership requires visual review; HP/mission equality alone cannot qualify it.",
+    "Both seats use normal melee reach300 after live05 stalled at245HP with the host atreach1200. Strict owner1 completion must pass; do not claim first-cinematic friend ownership without its occurrence receipt.",
+    "Integrated cooperative pilots observe logical downing from each current PID log and share no second input driver. Revive evidence is conditional on natural combat: no downing means no live revive qualification; inspect native return state/fault and clips.",
+    "Early door handoff avoids waiting through camera reactions, but native admission reads and pilot startup still take time; review the opening offer/completion receipts before claiming every opening window was exercised.",
+    "LowHp0 trades proactive low-HP retreat for attacks after native25% revival; native damage,120-frame grace, guarding, RC priority, recent-damage escape and revival requirements are unchanged. BlockedThornProbe cannot establish a head position or guaranteed damage.",
+    "VUH-2617: exact build28 must achieve at least two of three consecutive full kills with retained strict assertions; this new fixture alone proves neither the new pilots nor the onward pulse direction."
+  ],
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "slotMoves": -3,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+        "KH2COOP_THORN_HIT_TRACE": "1",
+        "KH2COOP_TRACE_HITS": "1",
+        "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
+        "KH2COOP_DOWNED_SPIKE_CONTROL": "0",
+        "KH2COOP_SCRIPT_COMMAND_TRACE": "1"
+      }
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "slotMoves": -3,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+        "KH2COOP_THORN_HIT_TRACE": "1",
+        "KH2COOP_TRACE_HITS": "1",
+        "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
+        "KH2COOP_DOWNED_SPIKE_CONTROL": "0",
+        "KH2COOP_SCRIPT_COMMAND_TRACE": "1"
+      }
+    },
+    {
+      "do": "assert",
+      "expr": "(log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',0)==1 and log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',1)==1) and all(log_count('[script-lifecycle] installed motionEnd=1 captureId=1 cancel=1 queryBudget=2048 cancelBudget=1024 captureBudget=512 changedOnly=1',i)==1 and log_count('[script-lifecycle] unavailable reason=',i)==0 for i in (0,1))",
+      "message": "Both seats must qualify existing RC-cache hooks, actual motion-end/capture-ID observers and sole cancel hook before any route input"
+    },
+    {
+      "do": "assert",
+      "expr": "location(0)[:2] == [2,32] and location(1)[:2] == [2,32]",
+      "message": "FM-00 must load Station of Serenity on both seats; slotMoves is relative to the save-list cursor"
+    },
+    {
+      "do": "assert",
+      "expr": "(log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',0)==1 and log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',1)==1) and all(log_count('[script-lifecycle] installed motionEnd=1 captureId=1 cancel=1 queryBudget=2048 cancelBudget=1024 captureBudget=512 changedOnly=1',i)==1 and log_count('[script-lifecycle] unavailable reason=',i)==0 for i in (0,1))",
+      "message": "Both seats must qualify existing RC-cache hooks, actual motion-end/capture-ID observers and sole cancel hook before any route input"
+    },
+    {
+      "do": "relay",
+      "port": 27809,
+      "args": [
+        "--bind",
+        "127.0.0.1"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[enemysync] client arrived epoch=',1)>0",
+      "timeoutMs": 60000
+    },
+    {
+      "do": "hang_check",
+      "instance": 0,
+      "on": false
+    },
+    {
+      "do": "hang_check",
+      "instance": 1,
+      "on": false
+    },
+    {
+      "do": "save",
+      "as": "evidence_scope",
+      "expr": "{'topology':'single-PC loopback, two native seats','input':'pad mailbox; no OS focus','boot':'FM-00 rehearsal, not New Game acceptance','clips':'30-second two-screen blocks; encoding gaps are not continuous footage','caption_work':'Burn in HOST / FRIEND and Single-PC loopback labels during final assembly; retain raw blocks','watchdog':'gameplay hang checks off across native event holds; all steps have fixed deadlines','reaction_observation':'Live08: existing read-only v7 promptHide from product-qualified actionable RC; raw cached RC remains diagnostic; routes/reach/timing/strategy unchanged'}"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_serenity_door.json",
+      "name": "host_to_calling",
+      "seconds": 120,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==[2,33,0,0,1,0] and location(1)==location(0)",
+      "timeoutMs": 60000
+    },
+    {
+      "do": "save",
+      "as": "calling_deaths_before",
+      "expr": "log_count('[enemysync] host death epoch',0)"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_calling_path.json",
+      "name": "host_calling_path",
+      "seconds": 360,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 1
+    },
+    {
+      "do": "pilot",
+      "instance": 1,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_calling_path.json",
+      "name": "friend_calling_path",
+      "seconds": 360,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 0
+    },
+    {
+      "do": "pilot_wait"
+    },
+    {
+      "do": "assert",
+      "expr": "log_count('[enemysync] host death epoch',0) >= saved['calling_deaths_before']+10 and all(not any(a.get('objectId')==318 and a.get('hp',-1)>0 for a in actors(i)) for i in (0,1))",
+      "message": "The real Calling path must clear all ten Dusks on both seats before the boss door"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_menu_tutorial.json",
+      "name": "host_menu_tutorial",
+      "seconds": 40,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "pilot",
+      "instance": 1,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_menu_tutorial.json",
+      "name": "friend_menu_tutorial",
+      "seconds": 40,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "assert",
+      "expr": "peek('0x7435D0','u8',0)==255 and peek('0x7435D0','u8',1)==255",
+      "message": "First-open menu tutorial must be closed before boss event hold"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_awakening_door.json",
+      "name": "host_to_awakening",
+      "seconds": 260,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==[2,34,0,157,157,157] and location(1)==location(0) and all(any(a.get('objectId')==307 and a.get('objectType')==12 and a.get('hp',0)>0 for a in actors(i)) for i in (0,1))",
+      "timeoutMs": 120000
+    },
+    {
+      "do": "save",
+      "as": "thorn_ingress",
+      "expr": "[{'location':location(i),'mission':mission(i),'boss':[a for a in actors(i) if a.get('objectId')==307],'player':[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)]} for i in (0,1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['mission'] and row['mission']['file']=='TT34_MS304.bar' and len(row['boss'])==1 and len(row['player'])==1 for row in saved['thorn_ingress'])",
+      "message": "Both seats require the real Thorn mission, one exact307 boss, and a canonical native player"
+    },
+    {
+      "do": "wait_until",
+      "expr": "[(a['hp'],a['maxHp']) for a in actors(0) if a.get('objectId')==307]==[(a['hp'],a['maxHp']) for a in actors(1) if a.get('objectId')==307]",
+      "timeoutMs": 10000
+    },
+    {
+      "do": "save",
+      "as": "thorn_baseline",
+      "expr": "{'host_end':log_count('[mission-mirror] host end trap=mission_dead_boss',0),'friend_end':log_count('[mission-mirror] client boss end host-led file=TT34_MS304.bar trap=16 replays=0',1),'victory_start':log_count('[event-mirror] host publishes start id=353133 ',0),'claims':log_count('[enemysync] host hit claim',0),'downs':[log_count('[downed] gate intercept ',i) for i in (0,1)],'revives':[len(log_matches('\\\\[downed\\\\] revive returned (?![^\\\\n]*fault=[1-9])hp=[1-9]\\\\d*/[^\\\\n]*state=1(?:\\\\s|$)',i)) for i in (0,1)]}"
+    },
+    {
+      "do": "clip",
+      "instance": 0,
+      "seconds": 30,
+      "fps": 30,
+      "name": "thorn_00_host",
+      "background": true
+    },
+    {
+      "do": "clip",
+      "instance": 1,
+      "seconds": 30,
+      "fps": 30,
+      "name": "thorn_00_friend",
+      "background": true
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/thorn_pilot/routes/twilight_thorn_host_fight_creeper.json",
+      "name": "host_thorn",
+      "seconds": 620,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 1,
+      "externalEvidence": true,
+      "_releaseReceipt": {}
+    },
+    {
+      "do": "pilot",
+      "instance": 1,
+      "route": "tools/rig/thorn_pilot/routes/twilight_thorn_fight.json",
+      "name": "friend_thorn",
+      "seconds": 620,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 0,
+      "externalEvidence": true,
+      "_releaseReceipt": {}
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_00",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      }
+    },
+    {
+      "do": "clip_wait"
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_01",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_01_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_01_friend"
+        }
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_02",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_02_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_02_friend"
+        }
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_03",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_03_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_03_friend"
+        }
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_04",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_04_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_04_friend"
+        }
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_05",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_05_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_05_friend"
+        }
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_06",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_06_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_06_friend"
+        }
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_07",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_07_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_07_friend"
+        }
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_08",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_08_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_08_friend"
+        }
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_09",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_09_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_09_friend"
+        }
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_10",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_10_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_10_friend"
+        }
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "fight",
+      "instances": [],
+      "seconds": 30,
+      "as": "thorn_11",
+      "sample": {
+        "expr": "[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)]",
+        "everyMs": 1000
+      },
+      "clips": [
+        {
+          "instance": 0,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_11_host"
+        },
+        {
+          "instance": 1,
+          "seconds": 30,
+          "fps": 30,
+          "name": "thorn_11_friend"
+        }
+      ]
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed; the current paired clip block is finalized. See host_thorn/friend_thorn pilot logs. Stop before recording another block."
+    },
+    {
+      "do": "save",
+      "as": "bot2617_combat",
+      "expr": "[p for p in saved.get('_background_pilots',[]) if p[4] in ('host_thorn','friend_thorn')]"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved.get('_background_pilots',[]))==2 and len(saved['bot2617_combat'])==2 and [p[4] for p in saved['bot2617_combat']]==['host_thorn','friend_thorn'] and [p[2].index for p in saved['bot2617_combat']]==[0,1]",
+      "message": "Retain the exact two combat driver tuples in HOST/FRIEND order before their original pilot_wait"
+    },
+    {
+      "do": "pilot_wait"
+    },
+    {
+      "do": "save",
+      "as": "thorn_downed_recovery",
+      "expr": "[{'downs':log_count('[downed] gate intercept ',i)-saved['thorn_baseline']['downs'][i],'returns':len(log_matches('\\\\[downed\\\\] revive returned (?![^\\\\n]*fault=[1-9])hp=[1-9]\\\\d*/[^\\\\n]*state=1(?:\\\\s|$)',i))-saved['thorn_baseline']['revives'][i],'events':log_matches(r'(?P<line>\\[downed\\] (?:gate intercept|revive returned|logical hold ended|full party down)[^\\n]*)',i)} for i in (0,1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['downs']==0 or row['returns']>=row['downs'] for row in saved['thorn_downed_recovery'])",
+      "message": "Every naturally occurring Thorn downing must have a native revive return; no forced death is introduced. If no seat was downed this run, revive behavior remains unqualified."
+    },
+    {
+      "do": "save",
+      "as": "thorn_final",
+      "expr": "{'seats':[{'location':location(i),'mission':mission(i),'boss':[(a.get('objectId'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if a.get('objectId')==307],'player':[(a.get('address'),a.get('hp'),a.get('maxHp'),a.get('position')) for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)],'reaction':peek('0x2A11162','u16',i),'menu':peek('0x7435D0','u8',i),'event':peek('0xB65210','i32',i),'rc_offers':log_count('[script-rc] offer ',i),'rc_completes':log_count('[script-rc] complete ',i)} for i in (0,1)],'host_rc':log_matches(r'(?P<line>\\[script-rc\\] (?:offer|complete) [^\\n]*)',0),'friend_rc':log_matches(r'(?P<line>\\[script-rc\\] [^\\n]*)',1),'host_mission':log_matches(r'(?P<line>\\[mission-mirror\\] host end [^\\n]*)',0),'friend_mission':log_matches(r'(?P<line>\\[mission-mirror\\] client [^\\n]*end[^\\n]*)',1),'events':[[m['line'] for m in log_matches(r'(?P<line>\\[event-mirror\\] [^\\n]*)',i)] for i in (0,1)]}"
+    },
+    {
+      "do": "assert",
+      "expr": "log_count('[mission-mirror] host end trap=mission_dead_boss',0)==saved['thorn_baseline']['host_end']+1 and log_count('[mission-mirror] client boss end host-led file=TT34_MS304.bar trap=16 replays=0',1)==saved['thorn_baseline']['friend_end']+1",
+      "message": "Exactly one host mission_dead_boss and one host-led friend end are required; no client trap4/16 replay"
+    },
+    {
+      "do": "assert",
+      "expr": "log_count('[event-mirror] host publishes start id=353133 ',0)==saved['thorn_baseline']['victory_start']+1",
+      "message": "Exactly one native ASCII315 event publication is required; qualify this encoding from native receipts before acceptance"
+    },
+    {
+      "do": "assert",
+      "expr": "len(log_matches(r'\\[script-rc\\] complete [^\\n]*owner=1',0))>0",
+      "message": "A reaction must complete through the actual friend owner, not only the host clone"
+    },
+    {
+      "do": "save",
+      "as": "thorn_hp_pairs",
+      "expr": "[entry['value'] for n in range(12) for entry in saved['thorn_%02d_samples' % n] if 'value' in entry and all(len(row['boss'])==1 for row in entry['value'])]"
+    },
+    {
+      "do": "assert",
+      "expr": "sum(pair[0]['boss'][0][1:3]==pair[1]['boss'][0][1:3] for pair in saved['thorn_hp_pairs'])>=3 and any(pair[0]['boss'][0][1] < saved['thorn_ingress'][0]['boss'][0]['hp'] and pair[0]['boss'][0][1:3]==pair[1]['boss'][0][1:3] for pair in saved['thorn_hp_pairs'])",
+      "message": "Require at least three shared HP samples and a shared HP decrease during combat, not merely the same initial boss health"
+    },
+    {
+      "do": "assert",
+      "expr": "all(len(log_matches(r'\\[script-rc\\] complete [^\\n]*command='+str(command)+r' ',0))>0 for command in (297,298,299))",
+      "message": "Key Counter, Lunarsault, and Break Raid must all complete through host validation during the filmed kill"
+    },
+    {
+      "do": "assert",
+      "expr": "all(any('value' in entry and len(entry['value'][i]['player'])==1 and entry['value'][i]['player'][0][1]<saved['thorn_ingress'][i]['player'][0]['hp'] for n in range(12) for entry in saved['thorn_%02d_samples' % n]) for i in (0,1))",
+      "message": "Both canonical native owners must actually lose HP during Thorn combat; hit construction alone is insufficient"
+    },
+    {
+      "do": "assert",
+      "expr": "len(log_matches(r'host hit claim [^\\n]*objectId=307 [^\\n]*damage=[1-9]',0))>0",
+      "message": "Actual friend-owned Thorn damage must be claimed on the host"
+    },
+    {
+      "do": "assert",
+      "expr": "all(len(log_matches(r'\\[hit\\] [^\\n]*attacker=B_EX100 [^\\n]*-> victim=P_EX110',i))>0 for i in (0,1))",
+      "message": "Both seats must receive native Thorn attacks; no protect/immunity fixture"
+    },
+    {
+      "do": "assert",
+      "expr": "location(0)==location(1) and location(0)[:2]!=[2,34] and all(not any(a.get('objectId')==307 and a.get('hp',0)>1 for a in actors(i)) for i in (0,1))",
+      "message": "Both seats must finish the native victory transition together with no living Thorn"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "thorn_victory_host"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "thorn_victory_friend"
+    },
+    {
+      "do": "coop_verdict",
+      "as": "coop_verdict",
+      "require": true
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['bot2617_combat'])==2 and all(p[0].poll()==0 and p[3]['_releaseReceipt'].get('exit')==0 for p in saved['bot2617_combat']) and not saved.get('_background_pilots',[])",
+      "message": "Both exact combat drivers must exit0 and record release0 with no background input driver before onward pad input"
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==location(1) and location(0)[:2]!=[2,34] and all(peek('0x9BA8D0','u8',i)==1 and peek('0x7435D0','u8',i)==255 and peek('0xB65210','i32',i)==0 and not any(a.get('objectId')==307 and a.get('hp',0)>0 for a in actors(i)) for i in (0,1)) and all(len(row)==1 and row[0]['hp']>0 and int(row[0]['status'],16)!=0 for row in [[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)] for i in (0,1)])",
+      "timeoutMs": 15000,
+      "pollMs": 500
+    },
+    {
+      "do": "assert",
+      "expr": "location(0)==location(1) and location(0)[:2]!=[2,34] and all(peek('0x9BA8D0','u8',i)==1 and peek('0x7435D0','u8',i)==255 and peek('0xB65210','i32',i)==0 and not any(a.get('objectId')==307 and a.get('hp',0)>0 for a in actors(i)) for i in (0,1)) and all(len(row)==1 and row[0]['hp']>0 and int(row[0]['status'],16)!=0 for row in [[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)] for i in (0,1)])",
+      "message": "Both living canonical seats must be free in the same full onward scope outside TT34 with no living307"
+    },
+    {
+      "do": "save",
+      "as": "bot2617_onward_scope",
+      "expr": "location(0)"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['bot2617_combat'])==2 and all(p[0].poll()==0 and p[3]['_releaseReceipt'].get('exit')==0 for p in saved['bot2617_combat']) and not saved.get('_background_pilots',[]) and location(0)==location(1)==saved['bot2617_onward_scope'] and (location(0)==location(1) and location(0)[:2]!=[2,34] and all(peek('0x9BA8D0','u8',i)==1 and peek('0x7435D0','u8',i)==255 and peek('0xB65210','i32',i)==0 and not any(a.get('objectId')==307 and a.get('hp',0)>0 for a in actors(i)) for i in (0,1)) and all(len(row)==1 and row[0]['hp']>0 and int(row[0]['status'],16)!=0 for row in [[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)] for i in (0,1)]))",
+      "message": "Recheck released drivers and the exact free onward scope before HOST input"
+    },
+    {
+      "do": "save",
+      "as": "bot2617_host_onward_before",
+      "expr": "[[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)][0] for i in (0,1)]"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "args": [
+        "player-input",
+        "--lx",
+        "0.7",
+        "--ly",
+        "0",
+        "--rx",
+        "0",
+        "--ry",
+        "0",
+        "--duration-ms",
+        "400"
+      ]
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 0,
+      "args": [
+        "player-input",
+        "--lx",
+        "0",
+        "--ly",
+        "0",
+        "--rx",
+        "0",
+        "--ry",
+        "0",
+        "--duration-ms",
+        "1"
+      ]
+    },
+    {
+      "do": "wait",
+      "ms": 400
+    },
+    {
+      "do": "save",
+      "as": "bot2617_host_onward_after",
+      "expr": "[[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)][0] for i in (0,1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "location(0)==location(1)==saved['bot2617_onward_scope'] and (location(0)==location(1) and location(0)[:2]!=[2,34] and all(peek('0x9BA8D0','u8',i)==1 and peek('0x7435D0','u8',i)==255 and peek('0xB65210','i32',i)==0 and not any(a.get('objectId')==307 and a.get('hp',0)>0 for a in actors(i)) for i in (0,1)) and all(len(row)==1 and row[0]['hp']>0 and int(row[0]['status'],16)!=0 for row in [[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)] for i in (0,1)])) and all(saved['bot2617_host_onward_before'][i]['address']==saved['bot2617_host_onward_after'][i]['address'] and saved['bot2617_host_onward_before'][i]['status']==saved['bot2617_host_onward_after'][i]['status'] and saved['bot2617_host_onward_after'][i]['hp']>0 and int(saved['bot2617_host_onward_after'][i]['status'],16)!=0 for i in (0,1)) and dist([saved['bot2617_host_onward_before'][0][\"position\"][k] for k in ('x','z')],[saved['bot2617_host_onward_after'][0][\"position\"][k] for k in ('x','z')])>=20 and dist([saved['bot2617_host_onward_before'][1][\"position\"][k] for k in ('x','z')],[saved['bot2617_host_onward_after'][1][\"position\"][k] for k in ('x','z')])<=10",
+      "message": "Exact HOST native onward pad pulse must move XZ>=20 while parked peer drifts<=10, retaining canonical/status/fullscope/free state"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "host_onward_verified_host"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "host_onward_verified_friend"
+    },
+    {
+      "do": "assert",
+      "expr": "len(saved['bot2617_combat'])==2 and all(p[0].poll()==0 and p[3]['_releaseReceipt'].get('exit')==0 for p in saved['bot2617_combat']) and not saved.get('_background_pilots',[]) and location(0)==location(1)==saved['bot2617_onward_scope'] and (location(0)==location(1) and location(0)[:2]!=[2,34] and all(peek('0x9BA8D0','u8',i)==1 and peek('0x7435D0','u8',i)==255 and peek('0xB65210','i32',i)==0 and not any(a.get('objectId')==307 and a.get('hp',0)>0 for a in actors(i)) for i in (0,1)) and all(len(row)==1 and row[0]['hp']>0 and int(row[0]['status'],16)!=0 for row in [[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)] for i in (0,1)]))",
+      "message": "Recheck released drivers and the exact free onward scope before FRIEND input"
+    },
+    {
+      "do": "save",
+      "as": "bot2617_friend_onward_before",
+      "expr": "[[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)][0] for i in (0,1)]"
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "args": [
+        "player-input",
+        "--lx",
+        "0.7",
+        "--ly",
+        "0",
+        "--rx",
+        "0",
+        "--ry",
+        "0",
+        "--duration-ms",
+        "400"
+      ]
+    },
+    {
+      "do": "kh2ctl",
+      "instance": 1,
+      "args": [
+        "player-input",
+        "--lx",
+        "0",
+        "--ly",
+        "0",
+        "--rx",
+        "0",
+        "--ry",
+        "0",
+        "--duration-ms",
+        "1"
+      ]
+    },
+    {
+      "do": "wait",
+      "ms": 400
+    },
+    {
+      "do": "save",
+      "as": "bot2617_friend_onward_after",
+      "expr": "[[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)][0] for i in (0,1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "location(0)==location(1)==saved['bot2617_onward_scope'] and (location(0)==location(1) and location(0)[:2]!=[2,34] and all(peek('0x9BA8D0','u8',i)==1 and peek('0x7435D0','u8',i)==255 and peek('0xB65210','i32',i)==0 and not any(a.get('objectId')==307 and a.get('hp',0)>0 for a in actors(i)) for i in (0,1)) and all(len(row)==1 and row[0]['hp']>0 and int(row[0]['status'],16)!=0 for row in [[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)] for i in (0,1)])) and all(saved['bot2617_friend_onward_before'][i]['address']==saved['bot2617_friend_onward_after'][i]['address'] and saved['bot2617_friend_onward_before'][i]['status']==saved['bot2617_friend_onward_after'][i]['status'] and saved['bot2617_friend_onward_after'][i]['hp']>0 and int(saved['bot2617_friend_onward_after'][i]['status'],16)!=0 for i in (0,1)) and dist([saved['bot2617_friend_onward_before'][1][\"position\"][k] for k in ('x','z')],[saved['bot2617_friend_onward_after'][1][\"position\"][k] for k in ('x','z')])>=20 and dist([saved['bot2617_friend_onward_before'][0][\"position\"][k] for k in ('x','z')],[saved['bot2617_friend_onward_after'][0][\"position\"][k] for k in ('x','z')])<=10",
+      "message": "Exact FRIEND native onward pad pulse must move XZ>=20 while parked peer drifts<=10, retaining canonical/status/fullscope/free state"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "friend_onward_verified_host"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "friend_onward_verified_friend"
+    }
+  ]
+}
