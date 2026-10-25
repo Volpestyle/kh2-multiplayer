@@ -7,8 +7,8 @@ peer-logical-downed` until `coop_revive combat` or a stuck row):
 - hold-offs (thorn_orbhold.py): `coop_orb_hold` episodes, their seconds and end reasons, and the partner's distance to
   Thorn when each began;
 - the rescuer's hits inside the window, by attack, with the orb (1041/1014) hits called out (rescue_report.hits). The
-  window's frame span is the own-game frames of its `coop_approach` and `coop_orb_hold_sample` rows +-30, so hits
-  taken while held off count too.
+  window's frame span is the own-game frames of its `coop_approach` rows +-30 (the revive core keeps writing them while
+  held off; `coop_orb_hold_sample` rows from r1 logs are read too).
 """
 import collections
 import json

@@ -80,16 +80,20 @@ gate, the engagement bound and the cooldown are described in the review packet's
   - this seat is more than `finish` from the partner.
 
   While held off, the rescuer moves toward Thorn until within `hold` of the root, then stands. The approach resumes
-  when any of those stops being true, or after `maxWaitSec` held off in one revive window. These go to the revive core
-  unchanged: RCs, a started hold, a hold awaiting release, event reactions and any unknown head. The core's 60 s bound
-  and window marker start at the window's first tick, whoever handles it.
+  when any of those stops being true, or after `maxWaitSec` held off in one revive window.
+
+  Placement (r2, after Sage's r1 review): the hook, `OrbHoldCore`, is the class's last base, so C3 puts it directly
+  above `thorn.CooperativeFight`. Every higher layer takes its tick first: the pre-revive Potion, RC gate,
+  Creeper-first and approach revision. The core still makes every refusal of its own: logs, 60 s bound, event/menu,
+  partner state, identity and scope, HP. Only the core's one steer toward the partner is swapped, for that tick. RCs
+  are pressed with the hold-off direction. While held off, `thorn_approach`'s plateau anchor and any detour are reset,
+  so the stand-off isn't treated as a stall.
 - **Logs.**
   - `coop_orb_hold` / `coop_orb_hold_end`, per episode, with the end reason: `released`, `cap`, `timeout`,
     `peer-recovered` or `core`;
-  - `coop_orb_hold_sample`, every 0.5 s while held off;
   - `rescue_orb_hold_summary`, per fight.
-- **Measures.** `orbhold_report.py RUN_DIR...`: per revive window, as `rescue_report.py` plus hold-offs. The hit span
-  includes held-off frames, which `rescue_report.py` would miss.
+- **Measures.** `orbhold_report.py RUN_DIR...`: per revive window, as `rescue_report.py` plus hold-offs. The core keeps
+  writing `coop_approach` while held off, so both reports place the same hits.
 
 ## Checks and analysis
 
