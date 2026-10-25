@@ -82,9 +82,13 @@ class Log:
         self.downs = 1 if downed else 0
         self.revives = 0
         self.path = Path("unused")
+        self.known, self.pending = True, False
 
     def update(self):
-        return True
+        if self.pending:  # an interception appended since the last poll (DownedLog reads it on update)
+            self.pending = False
+            self.downed, self.actor, self.downs = True, PARTNER, self.downs + 1
+        return self.known
 
 
 class Peer:
@@ -92,8 +96,11 @@ class Peer:
 
     def __init__(self, pos=FRIEND_AT, error=False, **over):
         self.pos, self.error, self.over = pos, error, over
+        self.during = None  # called inside state(): something that happens while the partner is being read
 
     def state(self):
+        if self.during is not None:
+            self.during()
         if self.error:
             raise OSError("peer unreadable")
         return dict(dict(free=True, roomScope=SCOPE, playerPos=list(self.pos), player=PARTNER, hp=20), **self.over)
@@ -172,7 +179,8 @@ check(res is True and p.kb.frames and p.kb.frames[-1] & MOVE_KEYS == toward(own(
       and not any(REACT_KEY in f for f in p.kb.frames),
       "zr121 W3 replay: the host steers toward the friend (no Triangle), the tick is consumed")
 row = p.row("coop_tether")
-check(row["gap"] == 1923.5 and row["episode"] == 1 and p.tether_stats["episodes"] == 1, "the tether episode is logged once with the gap")
+check(row["gap"] == 1923.5 and row["episode"] == 1 and p.tether_stats["episodes"] == 1,
+      "the tether episode is logged once with the gap")
 check(base.steer is tt.STEER and tt.STEER is thorn_head.base.steer, "the steer is pilot.py's own and is restored")
 path = [(700.0, 0.0, 650.0), (600.0, 0.0, 380.0), (520.0, 0.0, 300.0)]   # closing in: 1644, 1357, 1262 from the friend
 results = []
@@ -241,6 +249,73 @@ check([f["reason"] for k, f in p.rows if k == "coop_tether_end"] == ["core"] and
       "the partner going down mid-tether: the revive core takes the tick and the episode ends ('core')")
 
 
+# ---- r2 (Sage, on r1): ending the tether never clears a lower core's input from the same tick -----------------
+FAR_OWN, FAR_PARTNER = (-1300.0, 0.0, 1200.0), (0.0, 0.0, 700.0)   # 1393 apart; own 2436 / partner 1560 from Thorn
+
+
+def lower_core_tick(cfg, react=0, motion=207):
+    """A tether episode open (cfg on), then the partner goes down: this tick's input belongs to the revive core."""
+    clock.now = 4000.0
+    p, c = setup(cfg=cfg, peer_pos=FAR_PARTNER)
+    c.step(p, own(pos=FAR_OWN))                                    # Thorn in 202: the tether pulls (if on)
+    opened = "coop_tether" in p.kinds()
+    c.peer_log.downed, c.peer_log.actor, c.peer_log.downs = True, PARTNER, 1
+    p.observed = head(motion=motion)
+    clock.now += 0.3                                               # past the head TTL
+    res = c.step(p, own(pos=FAR_OWN, react=react))
+    return p, c, res, opened
+
+
+for label, kw, want in (("the approach (W toward the partner)", dict(), lambda s: toward(s, FAR_PARTNER)),
+                        ("the reaction press (direction + Triangle)", dict(react=345),
+                         lambda s: toward(s, FAR_PARTNER) | {REACT_KEY}),
+                        ("the orb hold-off (W toward Thorn)", dict(motion=202), lambda s: toward(s, ROOT))):
+    p, c, res, opened = lower_core_tick(CFG, **kw)
+    q, _, _, _ = lower_core_tick(None, **kw)
+    expect = want(own(pos=FAR_OWN))
+    check(opened and res is True and set(p.kb.held) == expect and set(q.kb.held) == expect
+          and [f["reason"] for k, f in p.rows if k == "coop_tether_end"] == ["core"],
+          f"r2: a tether ending on the core's tick keeps {label}, as with the tether off")
+p, c = setup()
+c.step(p, own())
+p.kb.hold({base.KEYS["attack"]})                                   # a higher layer pressed something since
+clock.now += 0.3
+p.observed = head(motion=207)
+c.step(p, own())
+check(p.kb.held == {base.KEYS["attack"].upper()}
+      and [f["reason"] for k, f in p.rows if k == "coop_tether_end"] == ["released"],
+      "r2: keys another layer wrote since the tether's last press are not released when the episode ends")
+
+
+# ---- r2 (Sage, on r1): the logs are validated fresh right before tether input, failing closed ------------------
+p, c = setup()
+c.peer.during = lambda: setattr(c.peer_log, "pending", True)       # an interception logged during the partner read
+res = c.step(p, own())
+check(res is False and not any(f & MOVE_KEYS for f in p.kb.frames) and "coop_tether" not in p.kinds(),
+      "r2: a downing logged while the partner is read stops the tether before any input")
+p, c = setup()
+c.peer.during = lambda: setattr(c.own_log, "known", False)         # the own log turns unreadable
+res = c.step(p, own())
+check(res is False and not any(f & MOVE_KEYS for f in p.kb.frames) and "coop_tether" not in p.kinds(),
+      "r2: an own log turning unreadable during the reads stops the tether (fail closed)")
+p, c = setup()
+c.peer.during = lambda: setattr(c.peer_log, "known", False)
+res = c.step(p, own())
+check(res is False and not any(f & MOVE_KEYS for f in p.kb.frames), "r2: a partner log turning unreadable stops it too")
+p, c = setup()
+c.step(p, own())
+c.peer.during = lambda: setattr(c.peer_log, "pending", True)
+clock.now += 0.5
+frames = len(p.kb.frames)
+res = c.step(p, own())
+check(res is False and [f["reason"] for k, f in p.rows if k == "coop_tether_end"] == ["yield"] and not p.kb.held
+      and not any(f & MOVE_KEYS for f in p.kb.frames[frames:]),
+      "r2: mid-episode, the same late downing ends it ('yield') and releases only the tether's own press")
+p, c = setup()
+c.peer.during = lambda: None
+check(c.step(p, own()) is True, "r2 control: with nothing happening during the reads, the tether pulls")
+
+
 # ---- full production MRO: layers above take the tick first; the plateau monitor is unaffected ------------------
 class ApproachCore(thorn_approach.ApproachRevisionMixin, Core):
     pass
@@ -290,7 +365,8 @@ check(c.anchor is None and c.detour is None and c.escape_tries == 0
 p, c, res = production(cfg=None)
 check(p.heads == [list(HOST_AT)] and "coop_tether" not in p.kinds(), "control: tether off, the head turn runs as before")
 p, c, res = production(observed=head(motion=207))
-check(p.heads == [list(HOST_AT)] and "coop_tether" not in p.kinds(), "control: out of the volley, the head turn runs as before")
+check(p.heads == [list(HOST_AT)] and "coop_tether" not in p.kinds(),
+      "control: out of the volley, the head turn runs as before")
 p, c, res = production(creeper_turn=True)
 check(res is True and "coop_tether" not in p.kinds() and p.heads == [],
       "production MRO: a Creeper turn above takes the tick; the tether never runs")
@@ -322,10 +398,12 @@ check(any(k == "coop_detour" and f.get("stage") == "pulse" for k, f in on.rows) 
 
 mro = tt.CooperativeFight.__mro__
 i = mro.index(tt.TetherCore)
-check(mro[i - 1] is thorn_head.HeadCooperativeMixin and mro[i + 1] is o.OrbHoldCore and mro[i + 2] is tt.child.child.ProtectCore
+check(mro[i - 1] is thorn_head.HeadCooperativeMixin and mro[i + 1] is o.OrbHoldCore
+      and mro[i + 2] is tt.child.child.ProtectCore
       and mro[i + 3] is thorn.CooperativeFight,
       "TetherCore sits below the head turn and above the hold-off, protect and revive cores")
-check(tt.Pilot.__mro__[1] is tt.TetherPilotMixin and tt.Pilot.__mro__[2] is tt.child.Pilot, "Pilot: tether over thorn_potion")
+check(tt.Pilot.__mro__[1] is tt.TetherPilotMixin and tt.Pilot.__mro__[2] is tt.child.Pilot,
+      "Pilot: tether over thorn_potion")
 
 
 # ---- switch semantics and summary ---------------------------------------------------------------------------------
@@ -345,7 +423,8 @@ class P(tt.TetherPilotMixin, Lower):
 
 pp = P()
 check(pp.fight({"eventReactions": True, "partnerTether": {}}, 0) == "fought" and pp.seen == CFG, "{} gives radius 1300")
-check(bool(pp.rows) and pp.rows[-1][0] == "partner_tether_summary" and pp.tether_cfg is None, "one summary row; off after the fight")
+check(bool(pp.rows) and pp.rows[-1][0] == "partner_tether_summary" and pp.tether_cfg is None,
+      "one summary row; off after the fight")
 pp = P()
 pp.fight({"eventReactions": True, "partnerTether": {"radius": 1100}}, 0)
 check(pp.seen == dict(radius=1100.0), "an explicit radius overrides the default")

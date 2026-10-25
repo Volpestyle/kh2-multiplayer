@@ -174,6 +174,9 @@ gate, the engagement bound and the cooldown are described in the review packet's
     - on an unknown head or partner read;
     - during an active Creeper engagement.
   - Its steer is pilot.py's own, taken at import.
+  - r2 (Sage, on r1): the logs are polled again immediately before any input, so an unreadable log or a downing
+    logged during the partner/head reads stops it. Ending an episode releases only the tether's own press: never
+    on a tick a core consumed, and otherwise only if the pad still holds exactly what the tether pressed.
 - **Logs.** `coop_tether` / `coop_tether_end` per episode, with end reasons `released`, `yield`, `creeper`, `core` and
   `off`; `partner_tether_summary` per fight.
 
