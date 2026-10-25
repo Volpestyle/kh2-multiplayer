@@ -21,6 +21,10 @@ struct ScriptChild {
     bool held{};                                   // brain hook refused: its native update never runs
 };
 std::vector<ScriptChild> g_scriptChildren;
+// Held bodies follow their native lifetime, not the session (Sage 0ca5bf98): no reset, role or generation change
+// releases one. Only its native disposal does: its own handle no longer at its +0, or it left the native list.
+struct HeldScriptChild { uintptr_t actor{}; std::uint32_t handle{}; };
+std::vector<HeldScriptChild> g_heldScriptChildren;
 std::uint64_t g_scriptReturnSerial = 0;           // never rewinds
 EnemyFactoryFn g_scriptChildFactory = nullptr;    // 0x3DF930, prologue byte-checked at install; scoped to this path
 unsigned g_scriptChildLogs = 0;
@@ -49,7 +53,8 @@ void ScriptChildLog(const char* fmt, ...) {
 }
 
 void ResetScriptChildren() {
-    // The room teardown owns every native body; only our records go.
+    // The room teardown owns every native body; only our records go. Held bodies are not records: they stay held
+    // until their own native disposal (g_heldScriptChildren).
     g_scriptChildren.clear();
     g_scriptChildNullRetries = 0;
     g_scriptChildLogs = 0;
@@ -117,15 +122,37 @@ bool ReceiveScriptActorBirthImpl(std::uint16_t netId, std::uint32_t objectId, st
     }
 }
 
+// Still that held native body: its own handle at its +0. A disposed body (unreadable, or a new entity at the
+// address with a new handle) releases its entry.
+bool ScriptChildHeldImpl(uintptr_t actor) noexcept {
+    if (!actor) return false;
+    for (auto it = g_heldScriptChildren.begin(); it != g_heldScriptChildren.end(); ++it) {
+        if (it->actor != actor) continue;
+        std::uint32_t handle = 0;
+        if (ReadNative(actor, handle) && handle == it->handle) return true;
+        if (g_log) g_log("[script-birth] client HOLD released actor=%llX reason=disposed frame=%u",
+                         static_cast<unsigned long long>(actor), g_hitTraceFrame);
+        g_heldScriptChildren.erase(it);
+        return false;
+    }
+    return false;
+}
 bool ScriptChildOwnedImpl(uintptr_t actor) noexcept {
-    if (!actor || g_role != Role::Client) return false;
+    if (!actor) return false;
+    if (ScriptChildHeldImpl(actor)) return true; // whatever the role or session
+    if (g_role != Role::Client) return false;
     for (const auto& c : g_scriptChildren) if (c.actor == actor) return true;
     return false;
 }
-bool ScriptChildHeldImpl(uintptr_t actor) noexcept {
-    if (!actor || g_role != Role::Client) return false;
-    for (const auto& c : g_scriptChildren) if (c.actor == actor && c.held) return true;
-    return false;
+// A held body that left the native active list was disposed natively (room teardown or its own removal).
+void PruneHeldScriptChildren() {
+    std::erase_if(g_heldScriptChildren, [](const HeldScriptChild& h) {
+        const auto census = CaptureNativeCensus(h.actor);
+        if (census.state != CensusState::Complete || census.watchedActorPresent) return false;
+        if (g_log) g_log("[script-birth] client HOLD released actor=%llX reason=left-native-list frame=%u",
+                         static_cast<unsigned long long>(h.actor), g_hitTraceFrame);
+        return true;
+    });
 }
 // Last resort (lead #268): never updated, so it has no VM, status or census row (never a mirror, claim or hit
 // target); hidden with the game's own obj_hide (type-4 mob +0x80: actor+0x124 |= 0x300, flags only); the room
@@ -135,6 +162,9 @@ void HoldScriptChildImpl(uintptr_t actor) noexcept {
         if (c.actor == actor && !c.held) {
             c.held = true;
             c.retired = true; // never adopted, streamed or driven
+            std::uint32_t handle = 0;
+            (void)ReadNative(actor, handle);
+            try { g_heldScriptChildren.push_back({actor, handle}); } catch (...) {}
             const bool hidden = g_scriptChildHide && g_scriptChildHide(actor);
             if (g_log)
                 g_log("[script-birth] client HOLD child=%u actor=%llX reason=brain-hook hidden=%d frame=%u (native update skipped until room teardown)",
@@ -169,6 +199,7 @@ bool ScriptChildRowCurrent(const ScriptChild& c) noexcept { return c.row >= 0 &&
 void TickScriptChildBirths() {
     namespace ob = ordinarybinding;
     using Out = spawncontroller::ScriptChildNativeOutcome;
+    if (!g_heldScriptChildren.empty()) PruneHeldScriptChildren();
     if (g_role != Role::Client || !g_scriptChildFactory || !spawncontroller::ScriptChildNativeReady()) return;
     // Constructed children the binder never took stop being candidates (their brain stays suppressed).
     for (auto& c : g_scriptChildren)

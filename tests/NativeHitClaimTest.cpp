@@ -3698,7 +3698,7 @@ uintptr_t scriptHidden = 0; unsigned scriptHides = 0;
 bool TestScriptChildHide(uintptr_t actor) noexcept { ++scriptHides; scriptHidden = actor; return true; }
 std::uint64_t BirthInt(std::uint32_t v) { return (static_cast<std::uint64_t>(SCRIPT_TAG_INT) << 32) | v; }
 ScriptCallEntry SeedScriptChild(kh2coop::inject::spawncontroller::ScriptChildNativeOutcome release) {
-    Reset(true); ResetSpawnEmissions(); g_mirrorRequested = true; g_hitTraceFrame = 100;
+    Reset(true); ResetSpawnEmissions(); g_heldScriptChildren.clear(); g_mirrorRequested = true; g_hitTraceFrame = 100;
     g_recordBindingRequested = g_recordAuthorityRequested = false;
     g_bridge.Open(0);
     // The body the factory returns is the fixture's listed actor, now a 317 with no bound ID.
@@ -3805,10 +3805,37 @@ void TestScriptChildOwnerTransitions() {
         kh2coop::inject::ordinarybinding::ScriptActorWitness witness;
         Check(!QueryScriptActorWitness({ScriptActorUse::Stream, scope, 0, 6, SCRIPT_ACTOR_BIRTH_CHILD_OBJECT, {}}, witness),
               "a held child is never streamed or adopted");
-        ResetSpawnEmissions();
-        Check(!ScriptChildOwned(enemy) && !ScriptChildHeld(enemy), "the room reset releases the held record with the room");
+        // Sage 0ca5bf98: the hold follows the native body, never the logical session or role.
+        RetireWorldSession();
+        Check(ScriptChildHeld(enemy) && ScriptChildOwned(enemy) && g_scriptChildren.empty(),
+              "a session retirement drops the records but the native body stays held");
+        g_role = Role::Off;
+        Check(ScriptChildHeld(enemy) && ScriptChildOwned(enemy), "role Off keeps a still-native held body held");
+        g_role = Role::Host;
+        Check(ScriptChildHeld(enemy), "a role change to host keeps it held");
+        g_role = Role::Client; g_hitTraceFrame = 300 + kScriptChildAdoptFrames; TickScriptChildBirths();
+        Check(ScriptChildHeld(enemy), "a listed held body is not pruned by the owner tick");
+        const auto handle = Read<std::uint32_t>(enemy);
+        Put(enemy, handle + 1); // the address now carries another entity's handle: the held body was disposed
+        Check(!ScriptChildHeld(enemy) && !ScriptChildOwned(enemy) && g_heldScriptChildren.empty(),
+              "a new handle at the address releases the hold: only native disposal ends it");
+        Put(enemy, handle);
+        Check(!ScriptChildHeld(enemy), "a released hold never returns");
     }
-    SetScriptChildBrainGate(nullptr); SetScriptChildHide(nullptr); g_scriptChildFactory = nullptr;
+    {
+        (void)SeedScriptChild(Out::Completed); scriptBrainBody = false;
+        g_hitTraceFrame = 101; TickScriptChildBirths();
+        ResetSpawnEmissions();
+        Check(ScriptChildHeld(enemy), "a spawn-emission reset keeps the native body held");
+        // The body leaves the native active list (its native disposal at room teardown).
+        Put(image + offsets::active_entity_list::TAIL, player);
+        Put(player + offsets::actor::LINKED_NEXT_HANDLE, std::uint32_t{0});
+        const auto census = CaptureNativeCensus(enemy);
+        Check(census.state == CensusState::Complete && !census.watchedActorPresent, "fixture: the body left the native list");
+        g_hitTraceFrame = 102; TickScriptChildBirths();
+        Check(!ScriptChildHeld(enemy) && g_heldScriptChildren.empty(), "a held body that left the native list is released");
+    }
+    SetScriptChildBrainGate(nullptr); SetScriptChildHide(nullptr); g_scriptChildFactory = nullptr; g_heldScriptChildren.clear();
     Reset();
 }
 
