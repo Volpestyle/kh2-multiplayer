@@ -324,14 +324,23 @@ bool ApplyInput(void* inputStruct) {
             EventStart start {};
             start.worldId = command.startWorld; start.roomId = command.startRoom; start.id = command.startId;
             start.flags = static_cast<std::uint8_t>(command.startFlags); start.params = command.startParams;
-            const bool nativeThorn = hostRoom && command.startId && command.startFlags <= 0xFF &&
+            // EventHold is reliable; end16's MissionState is not. A checked315
+            // may therefore arrive before (or without) any retained native owner.
+            // It never authorizes a generic replay or16. Leave native input free
+            // for a later qualified end16/local315; only that owner can start315.
+            const bool thorn315 = command.startFlags <= 0xFF && start.worldId == 2 && start.roomId == 34 &&
+                command.eventProgram == 157 && start.id == 0x353133 &&
+                eventscenes::QualifiedStart(start.worldId,start.roomId,command.eventProgram,start.id,start.flags,start.params);
+            const bool nativeThorn = thorn315 && hostRoom &&
                 !input.Holding() && native.value.healthy && !ConsumeInputRejection() &&
                 channel.Healthy(GetTickCount64()) && enemysync::OwnsThorn315(start,command.eventProgram);
-            const bool mirrored = !nativeThorn && hostRoom && command.startId && command.startFlags <= 0xFF && !input.Holding() &&
+            const bool mirrored = !thorn315 && hostRoom && command.startId && command.startFlags <= 0xFF && !input.Holding() &&
                 native.value.healthy && native.value.safeToPause && !ConsumeInputRejection() &&
                 channel.Healthy(GetTickCount64()) && eventstartmirror::Replay(start, command.eventProgram);
-            if (nativeThorn) {
-                if (log) log("[thorn-defeat] host315 joins native owner epoch=%u source=%llu",command.epoch,
+            if (thorn315) {
+                if (log) log("[thorn-defeat] host315 %s epoch=%u source=%llu",
+                    nativeThorn?"joins native owner":"generic replay refused; no qualified owner",
+                    command.epoch,
                     static_cast<unsigned long long>(command.hostSourceSerial));
             } else if (mirrored) {
                 if (log) log("[event-mirror] client plays the host's in-field event epoch=%u id=%X", command.epoch, command.startId);

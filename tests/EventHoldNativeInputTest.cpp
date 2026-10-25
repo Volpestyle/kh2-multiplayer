@@ -236,38 +236,73 @@ int main(int argc,char** argv){
  n::Observe(scope,e::Kind::Transition,3,1,&room,0);n::OwnerAck(scope,1,true,true);
  check(runtime.Arm(GetTickCount64()),"test owner baseline arm");tick();
  e::Command acquire{};acquire.scope=scope;acquire.hostSourceSerial=8;acquire.kind=e::Kind::Acquire;acquire.epoch=1;acquire.eventProgram=1;
- if(mode=="thorn-owned" || mode=="thorn-owned-closing") {
-   if(mode=="thorn-owned-closing") {
+ if(mode=="thorn-owned" || mode=="thorn-owned-closing" || mode=="thorn-late-owner" ||
+    mode=="thorn-missing-end" || mode=="thorn-no-end" || mode=="thorn-late-owner-closing") {
+   const bool late=mode=="thorn-late-owner" || mode=="thorn-late-owner-closing";
+   const bool absent=mode=="thorn-missing-end" || mode=="thorn-no-end";
+   const bool closes=mode=="thorn-owned-closing" || mode=="thorn-late-owner-closing";
+   if(closes) {
      check(runtime.Publish(acquire,GetTickCount64()),"prior hold published");tick();tick();menu=8;tick();
      e::Command release{};release.scope=scope;release.kind=e::Kind::Release;release.hostSourceSerial=9;release.epoch=1;
      check(runtime.Publish(release,GetTickCount64()),"prior release published");tick();tick();
-     menu=255;tick();
    }
    acquire.hostSourceSerial=10;acquire.eventProgram=157;acquire.startWorld=2;acquire.startRoom=34;
    acquire.startId=0x353133;acquire.startFlags=0x12;
-   acquire.startParams={2,2,0x00330033,0x33,1,0xFFFFFFFF,3,0,0};
+   acquire.startParams={2,0xA5000002,0x00330033,0x33,1,0xFFFFFFFF,3,0,0};
    kh2coop::inject::thorndefeat::State defeat;
    kh2coop::inject::thorndefeat::Key defeatKey;
    defeatKey.session.fill(1);defeatKey.host=1;defeatKey.hostDelivery=1;defeatKey.self=2;defeatKey.delivery=1;
    defeatKey.generation=2;defeatKey.epoch=1;defeatKey.load=1;defeatKey.mission=0x1000;defeatKey.slot=1;
-   check(defeat.Observe(defeatKey,true,9)&&defeat.Seal(defeatKey),"retained native owner armed");
+   if(!late&&!absent)check(defeat.Observe(defeatKey,true,9)&&defeat.Seal(defeatKey),"retained native owner armed");
    thornOwned=defeat.Owns315(defeatKey);
    unsigned nativeStarts=0;
    if(mode=="thorn-owned"&&defeat.Native315(defeatKey))++nativeStarts;
-   check(runtime.Publish(acquire,GetTickCount64()),"host315 joins owned native defeat");tick();tick();
+   check(runtime.Publish(acquire,GetTickCount64()),"host315 published through the real FIFO");
+   if(closes) {
+     tick();tick();check(replays==0&&n::HoldingInput(),"host315 stays queued during the owned pause close");
+     menu=255;tick();check(replays==0,"the close-observation callback cannot start315");
+   }
+   tick();tick();
+   check(replays==0,"a host315 with or without an owner never uses generic replay");
+   if(late||absent) {
+     const kh2coop::inject::thorndefeat::Gates ready{true,true,true,true,true,true};
+     check(!defeat.Begin(defeatKey,ready)&&defeat.Source()==0,
+           "reliable host315 alone grants no end16 or native-prelude authority");
+     check(!n::HoldingInput()&&buttons()==0x4d4d&&runtime.Reason()==e::Abort::None,
+           "unowned host315 leaves native input free for the qualified local sequence");
+     if(late) {
+       check(defeat.Observe(defeatKey,true,11)&&defeat.Seal(defeatKey),"late exact end16 admitted once");
+       check(defeat.Begin(defeatKey,ready),"late end16 permits its first qualified native prelude");
+       defeat.CompletePrelude(true);
+       if(defeat.Native315(defeatKey))++nativeStarts;
+     } else if(mode=="thorn-missing-end") {
+       if(defeat.AdoptNative315(defeatKey))++nativeStarts;
+       check(defeat.Source()==0&&!defeat.Begin(defeatKey,ready),
+             "qualified local native315 without end16 grants dedup only");
+     }
+     thornOwned=defeat.Owns315(defeatKey);
+     e::Command hostRelease{};hostRelease.scope=scope;hostRelease.kind=e::Kind::Release;
+     hostRelease.hostSourceSerial=11;hostRelease.epoch=1;
+     check(runtime.Publish(hostRelease,GetTickCount64()),"host315 release published");tick();tick();
+     acquire.hostSourceSerial=12;
+     check(runtime.Publish(acquire,GetTickCount64()),"repeated reliable host315 published");tick();tick();
+     std::printf("host-first observed replays=%u nativeStarts=%u total=%u\n",replays,nativeStarts,replays+nativeStarts);
+   }
    // Exactly one game-side native315 is supplied by the already owned
    // prelude. A consumer replay here would be a second actual start.
    if(mode=="thorn-owned-closing"&&defeat.Native315(defeatKey))++nativeStarts;
    check(!defeat.Native315(defeatKey),"second native315 callback refused by the real occurrence state");
-   check(nativeStarts+replays==1,"exactly one315 with native owner, no consumer replay");
+   check(nativeStarts+replays==(mode=="thorn-no-end"?0u:1u),
+         "one qualified native315, or zero starts while end16 and local315 are both absent");
    check(!n::HoldingInput()&&buttons()==0x4d4d,"owned315 takes no new pause or input overlay");
    n::Disable();VirtualFree(memory,0,MEM_RELEASE);
    std::printf("mode=%.*s checks=%u failures=%u\n",static_cast<int>(mode.size()),mode.data(),checks,failures);
    return failures?1:0;
  }
  if(mode.starts_with("closing-")) {
-   // VUH-2807 zr100: death-camera Acquire, Release, then native 315 on the very next host frame.
-   // The real adapter/FIFO must finish its own pause close before consuming the checked start.
+   // VUH-2807 zr100's Closing ordering, exercised with an ordinary checked scene
+   // that retains generic replay. Exact315 now requires its separate native
+   // owner (thorn-owned-closing/thorn-late-owner-closing above).
    check(runtime.Publish(acquire,GetTickCount64()),"death-camera acquire published");tick();tick();menu=8;tick();
    check(n::HoldingInput()&&buttons()==0,"death-camera pause is owned");
    e::Command release{};release.scope=scope;release.kind=e::Kind::Release;release.hostSourceSerial=9;release.epoch=1;
@@ -275,9 +310,9 @@ int main(int argc,char** argv){
    check(n::HoldingInput()&&buttons()==8,"release starts closing the owned combat pause");
    // Exercise both points of the close, including a delayed native menu close.
    if(mode!="closing-release")tick();
-   acquire.hostSourceSerial=10;acquire.eventProgram=157;acquire.startWorld=2;acquire.startRoom=34;
-   acquire.startId=0x353133;acquire.startFlags=0x12;
-   acquire.startParams={2,0xA5000002,0x00330033,0x33,1,0xFFFFFFFF,3,0,0};
+   acquire.hostSourceSerial=10;acquire.eventProgram=95;acquire.startWorld=2;acquire.startRoom=7;
+   acquire.startId=0x343031;acquire.startFlags=9;
+   acquire.startParams={1,0x702,0xFFFFFFFF,0xFFFF,1,0xFFFFFFFF,3,0,0};
    check(runtime.Publish(acquire,GetTickCount64()),"315 acquire queued during pause close");
    tick();tick();tick();
    check(replays==0&&n::HoldingInput()&&buttons()==0,"315 never replays while the pause remains open");
@@ -301,8 +336,9 @@ int main(int argc,char** argv){
    tick();tick();
    if(allowed) {
      check(replays==1&&replayed.id==acquire.startId&&replayed.flags==acquire.startFlags&&
-           replayed.worldId==2&&replayed.roomId==34&&replayedProgram==157&&replayed.params==acquire.startParams,
-           "first eligible callback replays 315 once with the complete raw host descriptor");
+           replayed.worldId==acquire.startWorld&&replayed.roomId==acquire.startRoom&&
+           replayedProgram==acquire.eventProgram&&replayed.params==acquire.startParams,
+           "first eligible callback replays the checked scene once with the complete raw host descriptor");
      check(!n::HoldingInput()&&buttons()==0x4d4d&&runtime.Reason()==e::Abort::None,
            "315 supersedes the closed hold without another pause or a release timeout");
    } else check(replays==0,"queued 315 retains every existing health, scope, affinity, convergence and native safety gate");
@@ -358,15 +394,15 @@ int main(int argc,char** argv){
  acquire.startId=0x353133;acquire.startFlags=0x12;
  acquire.startParams={2,0xA5000002,0x00330033,0x33,1,0xFFFFFFFF,3,0,0};
  check(runtime.Publish(acquire,GetTickCount64()),"Thorn victory acquire with raw padding published");tick();
- check(replays==2 && replayed.id==acquire.startId && replayed.flags==acquire.startFlags &&
-       replayed.worldId==2 && replayed.roomId==34 && replayedProgram==157 && replayed.params==acquire.startParams,
-       "Thorn native replay receives the complete raw host descriptor, including padding");
- check(!n::HoldingInput() && buttons()==0x4d4d,"Thorn in-field replay keeps native event control");
+ check(replays==1,"unowned checked Thorn315 including raw padding refuses generic replay");
+ check(!n::HoldingInput() && buttons()==0x4d4d,"unowned Thorn315 leaves native event control free");
  release.hostSourceSerial=23;
  check(runtime.Publish(release,GetTickCount64()),"Thorn victory release published");tick();
  replayStarts=false;acquire.hostSourceSerial=24;
+ acquire.eventProgram=95;acquire.startWorld=2;acquire.startRoom=7;
+ acquire.startId=0x343031;acquire.startFlags=9;acquire.startParams={1,0x702,0xFFFFFFFF,0xFFFF,1,0xFFFFFFFF,3,0,0};
  check(runtime.Publish(acquire,GetTickCount64()),"second in-field acquire published");tick();
- check(replays==3&&buttons()==8&&n::HoldingInput(),"a refused replay falls back to the owned pause");
+ check(replays==2&&buttons()==8&&n::HoldingInput(),"a refused ordinary replay falls back to the owned pause");
  }
  }
  if(mode=="normal") {
