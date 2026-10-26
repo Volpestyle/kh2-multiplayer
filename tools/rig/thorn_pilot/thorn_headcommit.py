@@ -9,8 +9,14 @@ head stopped there ~700 short, and the base loop then swings near the root. Opt-
 
   "headCommit202": true
 
-While Thorn is in motion 202 with its head grounded (head height above GROUND_Y, i.e. headPos y > -300), the head
-approach is not capped: each head turn's own head read refreshes the approach clock, so the 3 s check never runs out.
+While Thorn is in motion 202 with its head grounded (head height above GROUND_Y, i.e. headPos y > -300) and within
+REACH of the TT34 arena centre, the head approach is not capped: each head turn's own head read refreshes the approach
+clock, so the 3 s check never runs out. Reachability (lead #357/#358): seats never stand more than 1210 from the arena
+centre (0, 0) (57,946 positions, 96 runs), and Thorn's root always sits on its 860 ring. Grounded heads land either
+within ~1100 of the centre (161 of 259 swings in reach) or ~1700-2500 out (0 of 841 in reach, no seat ever closer than
+~611): chasing those pinned the committed seat against the arena edge (zr132, radius 1205-1210, sliding tangentially).
+REACH = 1500 sits in the empty gap. A head beyond it, or geometry that isn't as pinned (non-finite positions, or a root
+off its ring), commits nothing: the original 3 s cap applies.
 With the head raised in 202, or outside 202, the cap is as before. When Thorn leaves 202 after such a commitment, the
 approach clock is cleared, so the next approach starts its own 3 s. Everything else about the head turn is unchanged
 (head_action still yields to RCs, low HP, downed seats and unknown heads), and every higher layer still takes the tick
@@ -27,14 +33,25 @@ import thorn_tether as child  # noqa: E402
 base, previous = child.base, child.previous
 VOLLEY = 202
 GROUND_Y = -300.0  # head heights above this (KH2 y grows downward) count as grounded
+ARENA_CENTRE = (0.0, 0.0)  # TT34 (x, z): the walkable disc's centre; seats never stand more than 1210 from it
+REACH = 1500.0             # a grounded head this far from the centre or nearer can be reached from the disc
+ROOT_RING, ROOT_SLACK = 860.0, 60.0  # Thorn's root always sits 860 from the centre; otherwise the geometry is suspect
+
+
+def finite3(v):
+    return isinstance(v, (list, tuple)) and len(v) == 3 and all(isinstance(x, (int, float)) and math.isfinite(x) for x in v)
 
 
 def grounded_volley(head):
-    """Thorn in its volley with its head on the ground."""
+    """Thorn in its volley with its head on the ground, within reach of the arena, on geometry as pinned."""
     if not head or not head.get('known') or head.get('motion') != VOLLEY:
         return False
-    pos = head.get('headPos')
-    return bool(pos) and len(pos) == 3 and all(math.isfinite(v) for v in pos) and pos[1] > GROUND_Y
+    pos, root = head.get('headPos'), head.get('rootWorldPos')
+    if not finite3(pos) or not finite3(root) or pos[1] <= GROUND_Y:
+        return False
+    if abs(math.hypot(root[0] - ARENA_CENTRE[0], root[2] - ARENA_CENTRE[1]) - ROOT_RING) > ROOT_SLACK:
+        return False
+    return math.hypot(pos[0] - ARENA_CENTRE[0], pos[2] - ARENA_CENTRE[1]) <= REACH
 
 
 class HeadCommitPilotMixin:
