@@ -1,0 +1,40 @@
+{
+  "name": "fm02_computer_to_hall",
+  "description": "VUH-2866: FM-02 Computer Room (2/21) to the Basement Hall (2/19) through the south-west door; the hall loads into the Day 6 Dusk ambush (btl134). From the VUH-2487/2466 scratch route.",
+  "retries": 0,
+  "steps": [
+    {
+      "do": "walk",
+      "to": [
+        -385,
+        -5
+      ],
+      "tol": 60,
+      "timeoutSec": 15,
+      "note": "off the save point, west along the room"
+    },
+    {
+      "do": "walk",
+      "to": [
+        -250,
+        -760
+      ],
+      "tol": 40,
+      "timeoutSec": 15,
+      "note": "in front of the south-west doorway"
+    },
+    {
+      "do": "door",
+      "to": [
+        -250,
+        -1400
+      ],
+      "room": [
+        2,
+        19
+      ],
+      "timeoutSec": 15,
+      "note": "trigger logged at (-234, -785)"
+    }
+  ]
+}
