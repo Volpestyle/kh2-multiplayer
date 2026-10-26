@@ -2319,9 +2319,14 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
         const float* tick = nativePoint;
         if (CopyNative(reinterpret_cast<uintptr_t>(nativePoint), point, sizeof(point)) &&
             FinitePoint(point) && SameStamp(q.stamp) && g_role() == 1) {
-            const auto seat = ChooseActivationPoint(reinterpret_cast<uintptr_t>(controller), point, seats, chosen);
+            // Combat activation only: an emission-only controller (the HB749/753 mixed helpers,
+            // the LoD generated waves) keeps the native point, so a friend's point never activates it.
+            const bool combatActivation = !q.mixedEmission && !q.generatedEmission;
+            std::size_t seat = 0;
+            if (combatActivation)
+                seat = ChooseActivationPoint(reinterpret_cast<uintptr_t>(controller), point, seats, chosen);
             if (seat) tick = chosen;
-            if(!q.mixedEmission && !q.generatedEmission) {
+            if(combatActivation) {
                 const activationseats::Choice choice {q.key, q.headerId,
                     static_cast<std::uint8_t>(seat ? seats.slots[seat - 1] : 0),
                     {chosen[0], chosen[1], chosen[2], chosen[3]}};

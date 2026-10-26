@@ -1580,10 +1580,14 @@ into a group's region while the host stays behind starts nothing on either game,
 host (logically downed, VUH-2465, so the bit stays clear) still starts groups only at its own
 feet.
 
-For each qualified host controller, `NativeSpawnController` now passes the host's own point when
-one of the controller's regions holds it, otherwise the first remote seat (slot order) whose
+For each combat-qualified host controller, `NativeSpawnController` now passes the host's own point
+when one of the controller's regions holds it, otherwise the first remote seat (slot order) whose
 point a region holds, otherwise the host's point. That is "any living human in any region" for
-type 2, with one original call per tick, so no cooldown or timer runs twice. The rules are
+type 2, with one original call per tick, so no cooldown or timer runs twice. Controllers admitted
+only for emission keep the native point and record no row. These are the HB04/15 mixed helpers
+(key 825778018, headers 749/753) and the LoD generated waves. Review found that an earlier draft
+let a friend's point activate those noncombat helpers (VUH-2864 review r2, comment 17575fc7).
+The rules are
 `common/include/kh2coop/ActivationSeats.hpp`: BOX, CYLINDER and INFINITY containment as the native
 predicates compute it (`docs/pointer_map_v1.md`, "Runtime region nodes"). Before using them the
 DLL checks each predicate's vtable slot and an FNV-1a hash of its whole body, and the two

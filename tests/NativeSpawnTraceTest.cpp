@@ -2285,6 +2285,10 @@ bool EmissionPolicy(std::uint32_t key,std::uint16_t header,std::uint16_t record,
     if(phase==EmissionPhase::Birth && point){++emissionPublished;std::copy_n(point,4,emissionTrigger.begin());}
     return true;
 }
+// VUH-2864 review r2: an armed seat source for the emission-only (mixed) controllers.
+bool EmissionSeatSource(kh2coop::activationseats::SeatPoints& out) {
+    out = {}; out.count = 1; out.slots[0] = 1; out.points[0] = {500, 0, 0, 1}; return true;
+}
 void EmissionControls(std::uint8_t* image) {
     auto put=[](void* to,const auto& v){std::memcpy(to,&v,sizeof(v));};
     std::array<std::uint8_t,8+0x60> objects{};
@@ -2437,6 +2441,28 @@ void EmissionControls(std::uint8_t* image) {
         emissionLastBirth.available && emissionLastBirth.helper && emissionLastBirth.objectId==2406 &&
         emissionLastBirth.headerId==headerId && emissionLastBirth.recordIndex==0 && emissionLastBirth.records==count,
         "mixed host publishes checked helper birth without combat activation authority");
+    {
+        // A readable pinned BOX holds an eligible friend's point (500,0,0), not the host's.
+        alignas(16) std::array<std::uint8_t,0x80> node{};
+        const float inverse[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, -500,0,0,1};const float extent[3]={10,10,10};
+        put(node.data(),g_exeBase+BOX_VTABLE_RVA);std::memcpy(node.data()+8,inverse,64);std::memcpy(node.data()+0x48,extent,12);
+        put(node.data()+0x68,mixedController.regionArray);
+        mixedController.regionHead=mixedController.regionTail=reinterpret_cast<uintptr_t>(node.data());
+        const auto seatsBefore=g_seats;const bool pinsBefore=g_seatPredicatesVerified,requestedBefore=g_seatRequested;
+        g_seats=&EmissionSeatSource;g_seatPredicatesVerified=true;g_seatRequested=true;
+        kh2coop::activationseats::SeatPoints armed;EmissionSeatSource(armed);
+        alignas(16) float probe[4]{};
+        Check(ChooseActivationPoint(reinterpret_cast<uintptr_t>(&mixedController),point,armed,probe)==1 && probe[0]==500,
+            "control: the mixed controller's region list is readable and would select the friend's point");
+        const auto choicesBefore=g_seatChoices;const auto capturesBefore2=phaseCaptureCalls;const auto publishedBefore2=emissionPublished;
+        emissionLastUpdatePoint={};
+        RunUpdate(&mixedController,point,g_exeBase+RETURN_RVA);
+        Check(emissionPublished==publishedBefore2+1 && emissionLastUpdatePoint==std::array<float,4>{point[0],point[1],point[2],point[3]} &&
+            g_seatChoices==choicesBefore && phaseCaptureCalls==capturesBefore2,
+            "emission-only mixed host with an armed seat in its region keeps the native point and records no seat choice");
+        g_seats=seatsBefore;g_seatPredicatesVerified=pinsBefore;g_seatRequested=requestedBefore;
+        mixedController.regionHead=mixedController.regionTail=0;
+    }
     std::memcpy(image+kh2coop::offsets::NOW,oldLocation.data(),10);emissionMixedHelper=nullptr;
     }
     // Last emission check: Same() must reject this cell permanently, so leave
