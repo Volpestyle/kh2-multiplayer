@@ -177,6 +177,8 @@ gate, the engagement bound and the cooldown are described in the review packet's
   - r2 (Sage, on r1): the logs are polled again immediately before any input, so an unreadable log or a downing
     logged during the partner/head reads stops it. Ending an episode releases only the tether's own press: never
     on a tick a core consumed, and otherwise only if the pad still holds exactly what the tether pressed.
+- **Protected Reversals on the `_tether` routes (lead #352).** Their `rescueProtect` covers 345 as well as 432/667:
+  in zr124–126 every revive cut by an RC was a 345, about 70 from the partner (3 of 3).
 - **Logs.** `coop_tether` / `coop_tether_end` per episode, with end reasons `released`, `yield`, `creeper`, `core` and
   `off`; `partner_tether_summary` per fight.
 

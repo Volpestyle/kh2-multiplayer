@@ -435,5 +435,17 @@ pp = P()
 pp.fight({"partnerTether": {}}, 0)
 check(pp.seen is None, "the key outside the Thorn fight step is ignored")
 
+# ---- the _tether routes' protected Reversals (lead #352) --------------------------------------------------------
+ROUTES = Path(__file__).resolve().parents[1] / "tools" / "rig" / "thorn_pilot" / "routes"
+for name in ("twilight_thorn_fight_tether.json", "twilight_thorn_host_fight_creeper_tether.json"):
+    step = json.loads((ROUTES / name).read_text(encoding="utf-8"))["steps"][-1]
+    check(step.get("rescueProtect") == {"commands": [345, 432, 667], "within": 300}
+          and step.get("partnerTether") == {"radius": 1300} and step.get("rescuePotionReserve") is True,
+          f"{name}: rescueProtect covers 345/432/667 within 300, with the tether and the Potion reserve on")
+import thorn_protect  # noqa: E402
+cfg = dict(commands=frozenset((345, 432, 667)), within=300.0)
+check(thorn_protect.protect(cfg, 345, True, 70.0) and not thorn_protect.protect(cfg, 426, True, 70.0),
+      "with the route's commands, a 345 mid-revive is protected; 426 stays unlisted")
+
 print(f"failures={failures}")
 sys.exit(1 if failures else 0)
