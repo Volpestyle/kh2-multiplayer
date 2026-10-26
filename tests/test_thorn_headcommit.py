@@ -18,6 +18,7 @@ ROOT = (0.0, 0.0, -860.0)
 OWN = [0.0, 0.0, -600.0]                      # near the root, as the friend stood in zr129
 GROUND = [0.0, -148.0, 840.0]                 # grounded head, 1700 from the root, 1440 from OWN
 RAISED = [0.0, -961.0, 840.0]
+OUTSIDE = [1716.0, -148.0, -860.0]            # zr132's tangential head: 1919 from the arena centre, beyond the edge
 
 
 def check(ok, label):
@@ -73,9 +74,10 @@ class Reader:
         return self.p.head
 
 
-def head(motion=202, pos=GROUND, own=OWN, known=True):
-    return dict(known=known, collisionEnabled=True, nativeVictimEligible=True, motion=motion, headPos=list(pos),
-                targetPos=list(pos), headRadius=90, playerPos=list(own), rootWorldPos=list(ROOT), lockedHead=True)
+def head(motion=202, pos=GROUND, own=OWN, known=True, root=ROOT):
+    return dict(known=known, collisionEnabled=True, nativeVictimEligible=True, motion=motion,
+                headPos=list(pos) if pos is not None else None, targetPos=list(pos) if pos is not None else None,
+                headRadius=90, playerPos=list(own), rootWorldPos=list(root) if root is not None else None, lockedHead=True)
 
 
 def pilot(commit=True, h=None):
@@ -115,6 +117,32 @@ check(not hc.grounded_volley(head(pos=[0.0, -300.0, 840.0])) and hc.grounded_vol
 check(not hc.grounded_volley(head(motion=209)), "outside 202 (209): not a grounded volley")
 check(not hc.grounded_volley(head(known=False)) and not hc.grounded_volley(None), "unknown or missing head: no")
 check(not hc.grounded_volley(head(pos=[float("nan"), -148.0, 840.0])), "non-finite head position: no")
+# Reachability (lead #357/#358): within 1500 of the TT34 arena centre (0, 0), on geometry as pinned.
+
+
+def gv(h):
+    """grounded_volley, with a crash on bad geometry counted as an answer (a crash is never a refusal)."""
+    try:
+        return hc.grounded_volley(h)
+    except Exception as e:  # noqa: BLE001
+        return f"raised {type(e).__name__}"
+
+
+check(gv(head(pos=OUTSIDE)) is False, "zr132's tangential head, 1919 from the centre: beyond reach, no commit")
+check(gv(head(pos=[1600.0, -84.0, -1906.0])) is False, "zr132's second head, 2489 from the centre: no commit")
+check(gv(head(pos=[0.0, -148.0, 1500.0])) is True and gv(head(pos=[0.0, -148.0, 1500.1])) is False,
+      "the threshold: 1500 from the centre commits, 1500.1 doesn't")
+check(gv(head(pos=[-1055.0, -148.0, 0.0])) is True, "zr130's reachable head (~1055 from the centre): commits")
+check(gv(head(root=None)) is False and gv(head(root=[0.0, 0.0, float("inf")])) is False,
+      "missing or non-finite root: no commit")
+check(gv(head(root=[0.0, 0.0, -500.0])) is False and gv(head(root=[0.0, 0.0, -930.0])) is False
+      and gv(head(root=[0.0, 0.0, -910.0])) is True and gv(head(root=[0.0, 0.0, -810.0])) is True,
+      "a root off its 860 ring by more than 60 (500, 930): geometry not as pinned, no commit; 810/910 still commit")
+check(gv(head(pos=None)) is False and gv(head(pos=[0.0, -148.0])) is False
+      and gv(dict(head(), headPos=["0", -148.0, 840.0])) is False
+      and gv(dict(head(), headPos=[float("nan"), -148.0, 840.0])) is False
+      and gv(dict(head(), headPos=[0.0, float("nan"), 840.0])) is False,
+      "missing, short, non-numeric or non-finite head: no commit (and no crash)")
 
 # ---- the real head turn ------------------------------------------------------------------------------------------
 T = [0.0, 1.0, 2.0, 3.1, 4.2, 6.0, 9.0]
@@ -136,6 +164,25 @@ ticks(p, [0.0, 1.0, 2.0])                                # grounded: clock refre
 p.head = head(pos=RAISED)
 check(ticks(p, [2.5, 4.0, 5.1, 6.0]) == [True, True, False, False] and p.head_commit_stats["exits"] == 0,
       "head raised mid-202: capped 3 s after the last grounded refresh; still the same occurrence (no exit)")
+
+# An unreachable grounded head (zr132) keeps the original cap: no refresh, no commit row, no reset on exit.
+q = pilot(h=head(pos=OUTSIDE))
+check(ticks(q, T) == [True, True, True, False, False, False, False] and q.head_commit_stats["refreshes"] == 0
+      and "head_commit_202" not in [k for k, _ in q.rows] and not q.head_commit_202,
+      "zr132's unreachable head: the approach is capped at 3 s as before, nothing committed")
+# Committed on a reachable head that then lies beyond reach within the same 202: the cap counts from the last
+# reachable refresh (no exit, no reset), so the seat isn't walked into the wall.
+p = pilot()
+ticks(p, [0.0, 1.0, 2.0])                                # reachable: refreshed at 1002
+p.head = head(pos=OUTSIDE)
+check(ticks(p, [2.5, 4.0, 5.1, 6.0]) == [True, True, False, False] and p.head_commit_stats["exits"] == 0,
+      "reachable then unreachable mid-202: capped 3 s after the last reachable refresh")
+# An unreachable 202 then a phase exit: nothing was committed, so nothing is reset and the next approach is unchanged.
+q = pilot(h=head(pos=OUTSIDE))
+ticks(q, [0.0, 1.0])
+q.head = head(motion=209)
+check(ticks(q, [1.5]) == [True] and q.head_commit_stats["exits"] == 0 and q.approach_since == 1000.0,
+      "no commitment, then 209: no reset (the original approach clock from 1000 carries on, as before the commit)")
 
 # Reset when Thorn leaves 202: a 209 approach right after the commitment gets its own 3 s.
 p = pilot()

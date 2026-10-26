@@ -198,6 +198,14 @@ scenario.
   - When Thorn leaves 202 after such a commitment, the clock is cleared, so the next approach gets its own 3 s.
   - Head reads outside the head turn (Creeper-first, the hold-off, the tether) never touch it.
   - `head_action`'s yields (RC, under 40% HP, a downed seat, an unknown head) and every higher layer still win.
+- **Reachability gate (lead #357/#358).** The commit applies only to a grounded head within 1500 of the TT34 arena centre
+  (0, 0), on geometry as pinned: finite positions, with Thorn's root on its 860 ring (±60). Otherwise the original 3 s
+  cap applies.
+  - Seats never stand more than 1210 from that centre (57,946 positions, 96 runs).
+  - Grounded heads land either within ~1100 of it (161 of 259 swings in reach) or ~1700–2500 out (0 of 841 in reach;
+    no seat ever closer than ~611).
+  - The zr131–133 commit chased the far ones into the arena edge (zr132: radius 1205–1210, sliding tangentially).
+  - This removes that unreachable-head chasing; it doesn't by itself raise damage or establish reliable clearing.
 - **Logs.** `head_commit_202`, once per 202 occurrence, with the head position and gap; `head_commit_summary` per fight
   (occurrences, refreshes, exits).
 
