@@ -258,11 +258,11 @@ bool SpawnPickContext(SpawnPickInputs& out, const char*& reason);
 void NoteSpawnPickOp(bool shared, std::uint64_t salt);
 // Review F1: whether the spawn-pick detour is live (spawnpick::Install's result); the host stamps the bit only then.
 void SetSpawnPickLive(bool live);
-void CaptureHostActivation(const float* position4, const activationseats::SeatPoints& seats);
+void CaptureHostActivation(const float* position4, const activationseats::Choice* choice, uintptr_t controller);
 bool SpawnEmissionPolicy(std::uint32_t key, std::uint16_t header, std::uint16_t record, const float* trigger, spawncontroller::EmissionPhase phase, spawncontroller::EmissionPermit& permit, const spawncontroller::EmissionBirth* birth);
 bool CopySpawnEmissionPoint(std::uint32_t key, std::uint16_t header, float* output);
 bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t updateSequence,
-                        activationseats::SeatPoints* seats);
+                        activationseats::Choices* choices);
 // VUH-2466: the Struggle orb hooks (StruggleOrbsHook.hpp), on the game thread. The host books each orb
 // and queues its birth and collection as SpawnEmission rows; the client shows the host's orbs.
 bool OrbHostLive();

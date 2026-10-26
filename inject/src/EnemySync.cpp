@@ -536,9 +536,16 @@ void ResetPopulationRepair();
 void ResetOrdinaryLifecycle();
 void ClearPendingOrdinaryCuts();
 void ResetSpawnEmissions();
+// VUH-2864: the host's actual seat decisions since the last response flush, one row per
+// controller identity; every pending response carries the whole table.
+activationseats::Choices g_activationChoices;
+std::array<std::uintptr_t, activationseats::kMaxChoices> g_activationChoiceOwners {};
+void ResetActivationChoices() { g_activationChoices = {}; g_activationChoiceOwners = {}; }
+
 void ClearActivation() {
     g_activationLease.Clear();
     g_activationChallenges = {};
+    ResetActivationChoices();
 }
 
 // Client claim authority is independent of optional historical replay. A
@@ -1926,6 +1933,7 @@ void FlushActivationResponses() {
     RoomTransition location;
     if (!ActivationContext(Role::Host, location)) {
         g_activationChallenges = {};
+        ResetActivationChoices();
         return;
     }
     const auto now = GetTickCount64();
@@ -1945,6 +1953,8 @@ void FlushActivationResponses() {
             if (SendCapturedWorld(encode(*pending->response), pending->responseContext)) pending.reset();
         }
     }
+    // The next window's rows start empty; every capture of one controller loop lands in one window.
+    ResetActivationChoices();
 }
 
 namespace PR = partyrow;
@@ -7016,7 +7026,7 @@ bool SpawnPickContext(SpawnPickInputs& out, const char*& reason) {
     return false;
 }
 
-void CaptureHostActivation(const float* position4, const activationseats::SeatPoints& seats) {
+void CaptureHostActivation(const float* position4, const activationseats::Choice* choice, uintptr_t controller) {
     // The hook provides a checked, aligned local copy of its actual native
     // argument. Never read an avatar bridge or answer from a cached old point.
     RoomTransition location;
@@ -7029,6 +7039,7 @@ void CaptureHostActivation(const float* position4, const activationseats::SeatPo
     if(CurrentRole()==Role::Host && WorldSessionGeneration()!=0 && SafeNativeGameplay() && ReadLocationChecked(location))
         ObservePopulationActivation(point);
     if(!ActivationContext(Role::Host,location) || g_activationSourceSeq==std::numeric_limits<std::uint64_t>::max())return;
+    if (choice) activationseats::Record(g_activationChoices, g_activationChoiceOwners, controller, *choice);
     const auto sequence = ++g_activationSourceSeq;
     const auto now = GetTickCount64();
     for (auto& pending : g_activationChallenges) {
@@ -7040,7 +7051,7 @@ void CaptureHostActivation(const float* position4, const activationseats::SeatPo
         response.request = pending->request;
         response.sourceSeq = sequence;
         response.position = point;
-        response.seats = activationseats::WellFormed(seats) ? seats : activationseats::SeatPoints {};
+        response.choices = g_activationChoices;
         if (!CaptureWorldContext(pending->responseContext)) continue;
         pending->response = response;
     }
@@ -7137,16 +7148,16 @@ bool CopySpawnEmissionPoint(std::uint32_t key, std::uint16_t header, float* outp
 }
 
 bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t updateSequence,
-                        activationseats::SeatPoints* seats) {
+                        activationseats::Choices* choices) {
     RoomTransition location;
-    if (seats) *seats = {};
-    activationseats::SeatPoints leased;
+    if (choices) *choices = {};
+    activationseats::Choices leased;
     if (!position4 || !ActivationContext(Role::Client, location) ||
         !g_activationLease.Copy(GetTickCount64(), position4, &leased) ||
         g_bridge.SessionGeneration() != g_activationGeneration) return false;
     // A historical or population replay below is the host's point alone.
     if (CopyPopulationActivation(position4,controller))return true;
-    if (seats) *seats = leased;
+    if (choices) *choices = leased;
     if (!g_activationRecovery || g_activationRecovery->controller != controller ||
         !g_nativeResync || g_nativeResync->finished) return true;
     auto& recovery = *g_activationRecovery;
@@ -7178,7 +7189,7 @@ bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t up
         }
         const auto& historical = g_nativeResync->snapshot.activationReplay->point;
         std::copy(historical.begin(), historical.end(), position4);
-        if (seats) *seats = {};
+        if (choices) *choices = {};
     }
     return true;
 }

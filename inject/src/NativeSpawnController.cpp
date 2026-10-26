@@ -181,7 +181,7 @@ CaptureFn g_capture = nullptr;
 CopyFn g_copy = nullptr;
 SeatsFn g_seats = nullptr;
 bool g_seatPredicatesVerified = false, g_seatRequested = true;
-std::uint64_t g_seatChoices = 0, g_seatRegionsUnavailable = 0;
+std::uint64_t g_seatChoices = 0, g_seatRegionsUnavailable = 0, g_seatHolds = 0;
 EmissionFn g_emission = nullptr;
 ReplayFn g_replay = nullptr;
 struct EmissionUpdate {
@@ -2256,14 +2256,15 @@ void ReportSeat(const char* side, std::uint8_t slot, const Qualification& q, con
     const auto now = GetTickCount64();
     if (g_lastReport[5] && now - g_lastReport[5] < 1000) return;
     g_lastReport[5] = now;
-    g_log("[spawnctl] seat-activation side=%s slot=%u controller=%llX key=%u headerId=%u room=%02X/%02X choices=%llu regionsUnavailable=%llu point=(%.3f,%.3f,%.3f)",
+    g_log("[spawnctl] seat-activation side=%s slot=%u controller=%llX key=%u headerId=%u room=%02X/%02X choices=%llu regionsUnavailable=%llu holds=%llu point=(%.3f,%.3f,%.3f)",
           side, slot, static_cast<unsigned long long>(q.controller), q.key, q.headerId,
           q.stamp.location[0], q.stamp.location[1], static_cast<unsigned long long>(g_seatChoices),
-          static_cast<unsigned long long>(g_seatRegionsUnavailable), point[0], point[1], point[2]);
+          static_cast<unsigned long long>(g_seatRegionsUnavailable), static_cast<unsigned long long>(g_seatHolds),
+          point[0], point[1], point[2]);
 }
 
-// Writes the chosen point to out4 and returns its seat (0 = the host's own point). The host
-// and the client run this over the same candidates and the same authored regions.
+// Host only. Writes the chosen point to out4 and returns its seat index (0 = the host's own
+// point, also when the regions are unreadable). Clients apply the host's recorded row instead.
 std::size_t ChooseActivationPoint(uintptr_t controller, const float* host4,
                                   const activationseats::SeatPoints& seats, float* out4) {
     std::copy_n(host4, 4, out4);
@@ -2310,20 +2311,24 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
     alignas(16) float point[4] {};
     if (role == 1) {
         // VUH-2864: the remote seats are tested only when the host's own point is in no region.
+        // The host's actual choice, its fallback included, is the row clients apply.
+        const bool seatActive = g_seatRequested && g_seatPredicatesVerified && g_seats;
         activationseats::SeatPoints seats {};
-        if (!g_seatRequested || !g_seatPredicatesVerified || !g_seats || !g_seats(seats) ||
-            !activationseats::WellFormed(seats)) seats = {};
+        if (!seatActive || !g_seats(seats) || !activationseats::WellFormed(seats)) seats = {};
         alignas(16) float chosen[4] {};
         const float* tick = nativePoint;
         if (CopyNative(reinterpret_cast<uintptr_t>(nativePoint), point, sizeof(point)) &&
             FinitePoint(point) && SameStamp(q.stamp) && g_role() == 1) {
+            const auto seat = ChooseActivationPoint(reinterpret_cast<uintptr_t>(controller), point, seats, chosen);
+            if (seat) tick = chosen;
             if(!q.mixedEmission && !q.generatedEmission) {
-                g_capture(point, seats);++g_captures;Report(0,"capture",q,point);
+                const activationseats::Choice choice {q.key, q.headerId,
+                    static_cast<std::uint8_t>(seat ? seats.slots[seat - 1] : 0),
+                    {chosen[0], chosen[1], chosen[2], chosen[3]}};
+                g_capture(point, seatActive ? &choice : nullptr, reinterpret_cast<uintptr_t>(controller));
+                ++g_captures;Report(0,"capture",q,point);
             } else Report(0,"emission-host",q,point);
-            if (const auto seat = ChooseActivationPoint(reinterpret_cast<uintptr_t>(controller), point, seats, chosen)) {
-                tick = chosen;
-                ReportSeat("host", seats.slots[seat - 1], q, chosen);
-            }
+            if (seat) ReportSeat("host", seats.slots[seat - 1], q, chosen);
         } else {
             q.reason = "host point/lifecycle unavailable";
             ++g_unavailable;
@@ -2345,8 +2350,8 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
     BeginGeometry(q, role); // All diagnostic native reads precede both lease copies.
     const auto clientReturnMutation = AcquireKnownMutationTicket();
     const bool replay = g_replay && g_replay(q.key, q.headerId, point);
-    activationseats::SeatPoints seats {};
-    const bool havePoint = replay || (!q.mixedEmission && !q.generatedEmission && g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence, &seats));
+    activationseats::Choices choices {};
+    const bool havePoint = replay || (!q.mixedEmission && !q.generatedEmission && g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence, &choices));
     if (g_role() != 2) {
         OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::RoleChangedAfterFirstCopy, nativePoint, g_original(controller, nativePoint));
         return;
@@ -2363,7 +2368,7 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
     // The role check above can observe a new session generation and invalidate
     // the first copy while still returning Client. Refresh after that check;
     // no role query or telemetry may invalidate/delay this final copied lease.
-    if (!(replay ? g_replay(q.key, q.headerId, point) : g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence, &seats)) || !FinitePoint(point) || !SameStamp(q.stamp)) {
+    if (!(replay ? g_replay(q.key, q.headerId, point) : g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence, &choices)) || !FinitePoint(point) || !SameStamp(q.stamp)) {
         q.reason = "final host lease unavailable; native tick paused";
         ++g_holds;
         Report(1, "hold", q);
@@ -2371,16 +2376,26 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
             g_geometryScope->geometry.originalPhase.hold = OriginalHold::FinalLeaseOrLifecycle;
         return;
     }
-    // VUH-2864: the host's leased seat candidates, chosen the way the host chose. A replayed
-    // emission already carries the host's chosen trigger point.
-    std::size_t seat = 0;
-    if (!replay && seats.count) {
-        alignas(16) float chosen[4] {};
-        seat = ChooseActivationPoint(reinterpret_cast<uintptr_t>(controller), point, seats, chosen);
-        if (seat) std::copy_n(chosen, 4, point);
+    // VUH-2864: the host's actual decision for this controller, never a second local choice.
+    // A replayed emission already carries the host's chosen trigger point.
+    std::uint8_t seat = 0;
+    if (!replay) {
+        const auto resolved = activationseats::Resolve(choices, q.key, q.headerId);
+        if (resolved.kind == activationseats::Resolution::Hold) {
+            q.reason = "host seat decision unavailable; native tick paused";
+            ++g_holds; ++g_seatHolds;
+            Report(1, "hold", q);
+            if (g_geometryScope && g_geometryScope->geometry.originalPhase.available)
+                g_geometryScope->geometry.originalPhase.hold = OriginalHold::FinalLeaseOrLifecycle;
+            return;
+        }
+        if (resolved.kind == activationseats::Resolution::Row) {
+            std::copy(resolved.point.begin(), resolved.point.end(), point);
+            seat = resolved.seat;
+        }
     }
     OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::ClientLeaseApply, point, CallEmissionUpdate(controller, point));
-    if (seat) ReportSeat("client", seats.slots[seat - 1], q, point);
+    if (seat) ReportSeat("client", seat, q, point);
     if (g_traceInstalled.load() && g_traceTick.active && !g_traceNestedDepth &&
         g_traceTick.controller == reinterpret_cast<uintptr_t>(controller) &&
         g_traceTick.sequence && g_traceTick.sequence != UINT64_MAX && IsDiagnosticGameThread() &&
@@ -4010,7 +4025,7 @@ void Shutdown() {
     g_copy = nullptr;
     g_seats = nullptr;
     g_seatPredicatesVerified = false;
-    g_seatChoices = g_seatRegionsUnavailable = 0;
+    g_seatChoices = g_seatRegionsUnavailable = g_seatHolds = 0;
     g_emission = nullptr; g_replay = nullptr;
     g_lastReport = {};
     g_captures = g_applies = g_holds = g_unsupported = g_unavailable = 0;

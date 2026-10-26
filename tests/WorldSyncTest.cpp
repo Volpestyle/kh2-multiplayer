@@ -178,7 +178,7 @@ void testActivationCodec() {
     HostActivationPoint decoded;
     ByteReader reader(payload, size);
     read(reader, decoded);
-    check(packet.size() == 103 && encode(request).size() == 44 &&
+    check(packet.size() == 70 && encode(request).size() == 44 &&
               decoded.request.incarnation == request.incarnation &&
               decoded.request.requestSeq == request.requestSeq && decoded.sourceSeq == 78 &&
               decoded.position == point.position && decoded.request.location.eventProgram == 0,
@@ -207,35 +207,42 @@ void testActivationCodec() {
     try { (void)encode(invalid); } catch (const std::exception&) { writeRejected = true; }
     check(writeRejected, "native nonfinite activation cannot be encoded");
 
-    // v38 (VUH-2864): the remote seats' points ride with the host's.
+    // v38 (VUH-2864): the host's per-controller seat decisions ride with its point.
     auto seated = point;
-    seated.seats.count = 2;
-    seated.seats.slots = {1, 2};
-    seated.seats.points = {{{40.0f, 0.0f, 2650.0f, 1.0f}, {-150.0f, 80.0f, 250.0f, 1.0f}}};
+    seated.choices.count = 2;
+    seated.choices.rows[0] = {808476514, 73, 1, {40.0f, 0.0f, 2650.0f, 1.0f}};
+    seated.choices.rows[1] = {808476515, 30, activationseats::kSeatConflict, {}};
     const auto seatedPacket = encode(seated);
     decodePacketHeader(seatedPacket.data(), seatedPacket.size(), payload, size);
     HostActivationPoint seatedDecoded;
     ByteReader seatedReader(payload, size);
     read(seatedReader, seatedDecoded);
-    check(seatedPacket.size() == 103 && seatedDecoded.seats == seated.seats && seatedDecoded.position == seated.position,
-          "activation carries both seat points and slots");
+    check(seatedPacket.size() == 70 + 2 * 23 && seatedDecoded.choices == seated.choices &&
+              seatedDecoded.position == seated.position,
+          "activation carries the host's rows exactly (23 bytes a row)");
     const auto encodes = [](const HostActivationPoint& m) {
         try { (void)encode(m); } catch (const std::exception&) { return false; }
         return true;
     };
-    auto reversed = seated;
-    reversed.seats.slots = {2, 1};
+    auto duplicate = seated;
+    duplicate.choices.rows[1].key = 808476514;
+    duplicate.choices.rows[1].header = 73;
+    auto badSeat = seated;
+    badSeat.choices.rows[0].seat = 3;
     auto stray = point;
-    stray.seats.points[1] = {1.0f, 2.0f, 3.0f, 1.0f};
-    auto counted = seated;
-    counted.seats.count = 3;
-    check(!encodes(reversed) && !encodes(stray) && !encodes(counted),
-          "unordered seats, stray unused points and a count past two cannot be encoded");
+    stray.choices.rows[0].key = 1;
+    auto badTruncated = seated;
+    badTruncated.choices.truncated = 2;
+    check(!encodes(duplicate) && !encodes(badSeat) && !encodes(stray) && !encodes(badTruncated),
+          "duplicate identities, a bad seat, stray unused rows and a bad truncated flag cannot be encoded");
     auto wireCount = seatedPacket;
-    wireCount[3 + 65] = 3;
-    auto wireStray = encode(point);
-    wireStray[3 + 65 + 1 + 16] = 0x3F; // a byte of the unused second seat point
-    check(rejects(wireCount) && rejects(wireStray), "malformed seat bytes are rejected on decode");
+    wireCount[3 + 65] = 3;  // claims three rows, carries two
+    auto wireConflict = seatedPacket;
+    wireConflict[3 + 65 + 2 + 23 + 7] = 0x3F;  // a point byte in the conflict row
+    auto wireCap = encode(point);
+    wireCap[3 + 65] = static_cast<std::uint8_t>(activationseats::kMaxChoices + 1);
+    check(rejects(wireCount) && rejects(wireConflict) && rejects(wireCap) && packet.size() == 70,
+          "malformed row bytes are rejected on decode; no rows is a 67-byte payload");
 }
 
 void testAppliedEnemyHash() {

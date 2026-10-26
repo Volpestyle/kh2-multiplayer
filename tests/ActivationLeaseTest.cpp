@@ -64,19 +64,18 @@ int main() {
     check(fifth && fifth->requestSeq > fourth->requestSeq,
           "reset preserves monotonic request identity when an epoch is reused");
     check(!lease.Accept(reply(*fifth, 6), 2401), "a regressed monotonic clock cannot grant authority");
-    // VUH-2864: the seat candidates are leased with the host's point, and only well formed.
+    // VUH-2864: the host's seat decisions are leased with its point, and only well formed.
     ActivationLease seated;
     const auto ask = seated.Request(location, incarnation, 1, 3000);
     auto withSeats = reply(*ask, 1);
-    withSeats.seats.count = 1;
-    withSeats.seats.slots[0] = 2;
-    withSeats.seats.points[0] = {40.f, 0.f, 2650.f, 1.f};
+    withSeats.choices.count = 1;
+    withSeats.choices.rows[0] = {808476514, 73, 2, {40.f, 0.f, 2650.f, 1.f}};
     auto malformed = withSeats;
-    malformed.seats.points[0][3] = 0.5f;
-    activationseats::SeatPoints leased;
-    check(!seated.Accept(malformed, 3010), "a malformed seat set cannot grant a lease");
-    check(seated.Accept(withSeats, 3020) && seated.Copy(3030, point, &leased) && leased == withSeats.seats,
-          "the host's seat candidates come back with its point");
+    malformed.choices.rows[0].point[0] = std::numeric_limits<float>::infinity();
+    activationseats::Choices leased;
+    check(!seated.Accept(malformed, 3010), "a malformed decision table cannot grant a lease");
+    check(seated.Accept(withSeats, 3020) && seated.Copy(3030, point, &leased) && leased == withSeats.choices,
+          "the host's decisions come back with its point");
     check(seated.Copy(3030, point) && point[0] == 1.f, "callers that ask only for the point still get it");
     ActivationLease bound;
     bool bounded = true;

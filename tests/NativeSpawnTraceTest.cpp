@@ -7,6 +7,8 @@
 
 #include "../inject/src/NativeSpawnController.cpp"
 #include "kh2coop/SpawnEmissionLedger.hpp"
+#include "kh2coop/Codec.hpp"
+#include "kh2coop/ActivationLease.hpp"
 #include "kh2coop/ProgressAllowList.hpp"
 #include "fixtures/Fm00MixedCatalogFixture.hpp"
 
@@ -370,7 +372,7 @@ std::uint8_t PhaseRole() {
     ++phaseRoleIndex;
     return phaseRoles[index];
 }
-void PhaseCapture(const float*, const kh2coop::activationseats::SeatPoints&) { ++phaseCaptureCalls; }
+void PhaseCapture(const float*, const kh2coop::activationseats::Choice*, uintptr_t) { ++phaseCaptureCalls; }
 void __fastcall PhasePassOriginal(void* controller, const float* point) {
     ++geometryOriginalCalls;
     phaseFrameSeen = g_originalPhaseFrame;
@@ -390,7 +392,7 @@ bool CatchObservedUpdateException(void* controller, const float* point) {
     return false;
 }
 const void* __fastcall GeometryLookup(std::int32_t id) { return id == 302 ? geometryObject : nullptr; }
-bool GeometryCopy(float* out, uintptr_t, std::uint64_t, kh2coop::activationseats::SeatPoints*) {
+bool GeometryCopy(float* out, uintptr_t, std::uint64_t, kh2coop::activationseats::Choices*) {
     ++geometryCopies;
     if (gateDuringCopy) ObserveEventGate(g_exeBase + EVENT_GATE_RETURN_RVA);
     if (nestedUpdateDuringCopy) {
@@ -2257,7 +2259,7 @@ bool MixedReplay(std::uint32_t key,std::uint16_t header,float* out) {
     const auto* e=emissionLedger.Pending(key,header);
     if(!e)return false;std::copy(e->point.begin(),e->point.end(),out);return true;
 }
-bool MixedCopy(float* out,uintptr_t,std::uint64_t,kh2coop::activationseats::SeatPoints*) {
+bool MixedCopy(float* out,uintptr_t,std::uint64_t,kh2coop::activationseats::Choices*) {
     ++emissionCopyCalls;std::copy(emissionTrigger.begin(),emissionTrigger.end(),out);return true;
 }
 PVOID WINAPI EmissionBadFls(DWORD) { return reinterpret_cast<void*>(1); }
@@ -2454,40 +2456,61 @@ void EmissionControls(std::uint8_t* image) {
 }
 
 // VUH-2864: either living player starts a wave. The real host and client RunUpdate paths over a
-// test-owned qualified controller with BOX, CYLINDER and INFINITY region nodes.
+// test-owned qualified controller with BOX, CYLINDER and INFINITY region nodes, and the host's
+// recorded decision carried to the client through the real Codec and ActivationLease.
 namespace seattest {
+namespace AS = kh2coop::activationseats;
 std::uint8_t role = 1;
 unsigned originals = 0, captures = 0, seatCalls = 0;
 std::array<float, 4> passed {}, captured {}, leasedHost {};
 const float* passedPointer = nullptr;
-kh2coop::activationseats::SeatPoints source {}, capturedSeats {}, leasedSeats {};
-bool sourceOk = true, copyOk = true;
+AS::SeatPoints source {};
+AS::Choices recorded {}, leasedChoices {};
+std::array<std::uintptr_t, AS::kMaxChoices> owners {};
+bool sourceOk = true, copyOk = true, capturedChoice = false;
+AS::Choice lastChoice {};
 const void* object = nullptr;
+kh2coop::ActivationLease* lease = nullptr;
+std::uint64_t leaseNow = 0;
+bool replayOn = false;
+std::array<float, 4> replayPoint {};
 std::uint8_t Role() { return role; }
 const void* __fastcall Lookup(std::int32_t) { return object; }
 void __fastcall Original(void*, const float* point) { ++originals; passedPointer = point; std::copy_n(point, 4, passed.begin()); }
-void Capture(const float* point, const kh2coop::activationseats::SeatPoints& seats) {
-    ++captures; std::copy_n(point, 4, captured.begin()); capturedSeats = seats;
+void Capture(const float* point, const AS::Choice* choice, uintptr_t controller) {
+    ++captures; std::copy_n(point, 4, captured.begin());
+    capturedChoice = choice != nullptr;
+    if (choice) { lastChoice = *choice; AS::Record(recorded, owners, controller, *choice); }
 }
-bool Copy(float* out, uintptr_t, std::uint64_t, kh2coop::activationseats::SeatPoints* seats) {
+bool Copy(float* out, uintptr_t, std::uint64_t, AS::Choices* choices) {
+    if (lease) return lease->Copy(leaseNow, out, choices);
     std::copy(leasedHost.begin(), leasedHost.end(), out);
-    if (seats) *seats = leasedSeats;
+    if (choices) *choices = leasedChoices;
     return copyOk;
 }
-bool Seats(kh2coop::activationseats::SeatPoints& out) { ++seatCalls; out = source; return sourceOk; }
-struct SeatArg { int slot; kh2coop::activationseats::Point point; };
-kh2coop::activationseats::SeatPoints Make(std::initializer_list<SeatArg> seats) {
-    kh2coop::activationseats::SeatPoints s;
+bool Replay(std::uint32_t, std::uint16_t, float* out) {
+    if (!replayOn) return false;
+    std::copy(replayPoint.begin(), replayPoint.end(), out); return true;
+}
+bool Seats(AS::SeatPoints& out) { ++seatCalls; out = source; return sourceOk; }
+struct SeatArg { int slot; AS::Point point; };
+AS::SeatPoints Make(std::initializer_list<SeatArg> seats) {
+    AS::SeatPoints s;
     for (const auto& [slot, point] : seats) {
         s.slots[s.count] = static_cast<std::uint8_t>(slot); s.points[s.count] = point; ++s.count;
     }
     return s;
 }
+AS::Choices Rows(std::initializer_list<AS::Choice> rows, bool truncated = false) {
+    AS::Choices c;
+    for (const auto& r : rows) c.rows[c.count++] = r;
+    c.truncated = truncated ? 1 : 0;
+    return c;
+}
 } // namespace seattest
 
 void SeatActivationControls(std::uint8_t* image) {
     using namespace seattest;
-    namespace AS = kh2coop::activationseats;
     auto put = [](void* to, const auto& v) { std::memcpy(to, &v, sizeof(v)); };
     // Pure rules first.
     const AS::Region box {AS::RegionKind::Box, {1,0,0,0, 0,1,0,0, 0,0,1,0, -100,0,0,1}, {10, 10, 10}};
@@ -2507,7 +2530,7 @@ void SeatActivationControls(std::uint8_t* image) {
     Check(AS::Select(pair, true, outside, Make({{1, inBox}, {2, inCylinder}})) == 1, "seat order breaks a tie");
     Check(AS::Select(pair, false, outside, Make({{1, inBox}})) == 0 && AS::Select({}, true, outside, Make({{1, inBox}})) == 0,
           "unreadable or empty regions keep the host's point");
-    Check(AS::WellFormed(Make({{1, inBox}, {2, inCylinder}})) && AS::WellFormed({}), "ordered finite seats with w = 1 are well formed");
+    Check(AS::WellFormed(Make({{1, inBox}, {2, inCylinder}})) && AS::WellFormed(AS::SeatPoints {}), "ordered finite seats with w = 1 are well formed");
     Check(!AS::WellFormed(Make({{2, inBox}, {1, inCylinder}})) && !AS::WellFormed(Make({{1, inBox}, {1, inCylinder}})) &&
           !AS::WellFormed(Make({{0, inBox}})) && !AS::WellFormed(Make({{3, inBox}})) &&
           !AS::WellFormed(Make({{1, {105, 0, 0, 0.5f}}})) &&
@@ -2515,6 +2538,39 @@ void SeatActivationControls(std::uint8_t* image) {
           "unordered, duplicate, out-of-range, w != 1 and nonfinite seats are malformed");
     auto unusedJunk = Make({{1, inBox}}); unusedJunk.points[1] = inBox;
     Check(!AS::WellFormed(unusedJunk), "unused seat entries must be zero");
+
+    // The decision table: recording, conflicts and the client's resolution.
+    {
+        AS::Choices c; std::array<std::uintptr_t, AS::kMaxChoices> o {};
+        AS::Record(c, o, 0x1000, {7, 73, 1, inBox});
+        AS::Record(c, o, 0x1000, {7, 73, 0, outside});
+        Check(c.count == 1 && c.rows[0].seat == 0 && c.rows[0].point == outside, "the same controller's newer tick replaces its row");
+        AS::Record(c, o, 0x2000, {7, 73, 0, outside});
+        Check(c.rows[0].seat == 0, "another controller with the same identity and decision is no conflict");
+        AS::Record(c, o, 0x2000, {7, 73, 2, inCylinder});
+        Check(c.rows[0].seat == AS::kSeatConflict && c.rows[0].point == AS::Point {} && AS::WellFormed(c),
+              "two controllers deciding differently under one identity is a conflict");
+        AS::Record(c, o, 0x1000, {7, 73, 0, outside});
+        Check(c.rows[0].seat == AS::kSeatConflict, "a conflict stays until the window ends");
+        AS::Choices full; std::array<std::uintptr_t, AS::kMaxChoices> fo {};
+        for (std::uint32_t k = 0; k <= AS::kMaxChoices; ++k) AS::Record(full, fo, 0x100 + k, {k, 1, 0, outside});
+        Check(full.count == AS::kMaxChoices && full.truncated == 1, "a row past the cap marks the table truncated");
+    }
+    Check(AS::Resolve({}, 7, 73).kind == AS::Resolution::Host, "no rows at all: the leased host point");
+    Check(AS::Resolve(Rows({{7, 73, 1, inBox}}), 7, 73).kind == AS::Resolution::Row &&
+          AS::Resolve(Rows({{7, 73, 1, inBox}}), 7, 73).point == inBox, "the host's row is applied exactly");
+    Check(AS::Resolve(Rows({{7, 73, 0, outside}}), 8, 1).kind == AS::Resolution::Host,
+          "a controller the host did not tick while it used no seat keeps the host point");
+    Check(AS::Resolve(Rows({{7, 73, 1, inBox}}), 8, 1).kind == AS::Resolution::Hold,
+          "a controller missing from a window in which the host used a seat holds");
+    Check(AS::Resolve(Rows({{7, 73, 0, outside}}, true), 8, 1).kind == AS::Resolution::Hold &&
+          AS::Resolve(Rows({{7, 73, AS::kSeatConflict, {}}}), 7, 73).kind == AS::Resolution::Hold,
+          "a truncated table or a conflicting row holds");
+    Check(!AS::WellFormed(Rows({{7, 73, 3, inBox}})) && !AS::WellFormed(Rows({{7, 73, AS::kSeatConflict, inBox}})) &&
+          !AS::WellFormed(Rows({{7, 73, 0, inBox}, {7, 73, 1, inBox}})) &&
+          !AS::WellFormed(Rows({{7, 73, 0, {std::numeric_limits<float>::infinity(), 0, 0, 1}}})),
+          "bad seats, a conflict with a point, duplicate identities and nonfinite points are malformed");
+
     const std::uint8_t fnvInput[] = {'a'};
     Check(Fnv1a(fnvInput, 1) == 0xaf63dc4c8601ec8cULL, "predicate pin hash is FNV-1a 64");
     Check(!VerifyRegionPredicates(g_exeBase), "an image without the pinned predicate bodies refuses seat activation");
@@ -2552,6 +2608,7 @@ void SeatActivationControls(std::uint8_t* image) {
         }
         controller->regionHead = nodes[0]; controller->regionTail = nodes[count - 1];
     };
+    auto breakRegions = [&] { put(reinterpret_cast<std::uint8_t*>(nodes[2]), g_exeBase + 0x5D4FE0); };
     link(3);
     put(image + CONTROLLER_COUNT, std::int32_t {1});
     put(image + CONTROLLER_TABLE, TableEntry {controller->key, 0, reinterpret_cast<uintptr_t>(controller)});
@@ -2568,78 +2625,142 @@ void SeatActivationControls(std::uint8_t* image) {
           "the production walk reads every pinned region node to the tail");
     alignas(16) float host[4] {0, 0, 0, 1};
     auto tick = [&] { originals = 0; passedPointer = nullptr; RunUpdate(controller, host, g_exeBase + RETURN_RVA); };
+    auto hostTick = [&] { recorded = {}; owners = {}; capturedChoice = false; tick(); };
+    const AS::Point hostPoint {0, 0, 0, 1};
 
     role = 1; source = {}; captures = 0; seatCalls = 0;
-    tick();
-    Check(originals == 1 && passedPointer == host && captures == 1 && capturedSeats.count == 0,
-          "host with no remote seat: the native point passes through unchanged");
+    hostTick();
+    Check(originals == 1 && passedPointer == host && captures == 1 && capturedChoice && lastChoice.seat == 0 &&
+          lastChoice.point == hostPoint && lastChoice.key == controller->key && lastChoice.header == 73,
+          "host with no remote seat: the native point passes through and the host records seat 0");
     source = Make({{1, inCylinder}});
     const auto choicesBefore = g_seatChoices;
-    tick();
-    Check(originals == 1 && passed == inCylinder && captured == AS::Point {0, 0, 0, 1} && capturedSeats == source &&
-          g_seatChoices == choicesBefore + 1,
-          "host outside every region, seat 1 in the cylinder: the tick uses seat 1's point and leases both");
+    hostTick();
+    Check(originals == 1 && passed == inCylinder && captured == hostPoint && lastChoice.seat == 1 &&
+          lastChoice.point == inCylinder && recorded.count == 1 && g_seatChoices == choicesBefore + 1,
+          "host outside every region, seat 1 in the cylinder: the tick and the recorded row use seat 1's point");
     host[0] = 105;
-    tick();
-    Check(passedPointer == host && passed == inBox, "host inside a region keeps its own point although seat 1 is in another");
+    hostTick();
+    Check(passedPointer == host && passed == inBox && lastChoice.seat == 0 && lastChoice.point == inBox,
+          "host inside a region keeps its own point although seat 1 is in another");
     host[0] = 0;
     source = Make({{1, outside}, {2, inBox}});
-    tick();
-    Check(passed == inBox, "seat 2 starts it when seat 1 and the host are in none");
-    sourceOk = false; tick(); sourceOk = true;
-    Check(passedPointer == host && capturedSeats.count == 0, "an unavailable seat source is no candidates");
+    hostTick();
+    Check(passed == inBox && lastChoice.seat == 2, "seat 2 starts it when seat 1 and the host are in none");
+    sourceOk = false; hostTick(); sourceOk = true;
+    Check(passedPointer == host && capturedChoice && lastChoice.seat == 0, "an unavailable seat source is no candidates");
     source = Make({{2, inBox}, {1, outside}});
-    tick();
-    Check(passedPointer == host && capturedSeats.count == 0, "a malformed seat set is dropped before capture");
+    hostTick();
+    Check(passedPointer == host && lastChoice.seat == 0, "a malformed seat set is dropped before the choice");
     source = Make({{1, inCylinder}});
-    g_seatRequested = false; seatCalls = 0; tick(); g_seatRequested = true;
-    Check(passedPointer == host && seatCalls == 0 && capturedSeats.count == 0, "KH2COOP_SEAT_ACTIVATION=0 never asks for seats");
-    g_seatPredicatesVerified = false; seatCalls = 0; tick(); g_seatPredicatesVerified = true;
-    Check(passedPointer == host && seatCalls == 0, "unverified predicates never ask for seats");
+    g_seatRequested = false; seatCalls = 0; hostTick(); g_seatRequested = true;
+    Check(passedPointer == host && seatCalls == 0 && !capturedChoice, "KH2COOP_SEAT_ACTIVATION=0 never asks for seats or records a row");
+    g_seatPredicatesVerified = false; seatCalls = 0; hostTick(); g_seatPredicatesVerified = true;
+    Check(passedPointer == host && seatCalls == 0 && !capturedChoice, "unverified predicates never ask for seats");
     const auto unavailableBefore = g_seatRegionsUnavailable;
-    put(reinterpret_cast<std::uint8_t*>(nodes[2]), g_exeBase + 0x5D4FE0);
-    tick();
-    Check(passedPointer == host && g_seatRegionsUnavailable == unavailableBefore + 1,
-          "an unknown region class anywhere in the list keeps the host's point");
+    breakRegions();
+    hostTick();
+    Check(passedPointer == host && g_seatRegionsUnavailable == unavailableBefore + 1 && lastChoice.seat == 0 &&
+          lastChoice.point == hostPoint, "an unknown region class keeps the host's point, recorded as the host's decision");
     link(3);
     put(reinterpret_cast<std::uint8_t*>(nodes[2]) + 0x58, static_cast<std::uint32_t>(nodes[0] & 0x1FFFFFF));
     put(image + HANDLE_REGIONS_RVA, nodes[0] & ~uintptr_t {0x1FFFFFF});
-    tick();
+    hostTick();
     Check(passedPointer == host, "a cyclic region list is unavailable");
     link(3);
     controller->regionTail = nodes[1];
-    tick();
+    hostTick();
     Check(passedPointer == host, "a list that does not end at the tail is unavailable");
     link(3);
     put(reinterpret_cast<std::uint8_t*>(nodes[1]) + 0x68, controller->regionArray + 3 * 64);
-    tick();
+    hostTick();
     Check(passedPointer == host, "a descriptor outside the controller's own array is unavailable");
     link(3);
     put(reinterpret_cast<std::uint8_t*>(nodes[1]) + 0x48, std::numeric_limits<float>::infinity());
-    tick();
+    hostTick();
     Check(passedPointer == host, "a nonfinite extent is unavailable");
     link(3);
 
-    // Client: the leased candidates, chosen the same way over the client's own regions.
+    // Client: the host's row, never a second local choice.
     role = 2; leasedHost = {0, 0, 0, 1};
-    leasedSeats = Make({{1, inCylinder}});
+    leasedChoices = Rows({{controller->key, 73, 1, inCylinder}});
     tick();
-    Check(originals == 1 && passed == inCylinder, "client ticks with the leased seat the host would choose");
-    leasedSeats = {};
+    Check(originals == 1 && passed == inCylinder, "client ticks with the host's recorded seat point");
+    breakRegions();
     tick();
-    Check(originals == 1 && passed == leasedHost, "client with no leased seats ticks with the host's point");
-    leasedHost = {105, 0, 0, 1}; leasedSeats = Make({{1, inCylinder}});
-    tick();
-    Check(passed == leasedHost, "client keeps the host's point when a region holds it");
-    leasedHost = {0, 0, 0, 1};
-    put(reinterpret_cast<std::uint8_t*>(nodes[2]), g_exeBase + 0x5D4FE0);
-    tick();
-    Check(passed == leasedHost, "client region list unavailable: the host's point");
+    Check(originals == 1 && passed == inCylinder, "client applies the host's row even when its own regions are unreadable");
     link(3);
+    leasedChoices = Rows({{controller->key, 73, 0, {3, 4, 5, 1}}});
+    tick();
+    Check(originals == 1 && passed == AS::Point {3, 4, 5, 1}, "a seat-0 row passes the host's exact recorded point");
+    leasedChoices = {};
+    tick();
+    Check(originals == 1 && passed == leasedHost, "client with no rows ticks with the leased host point");
+    leasedChoices = Rows({{1, 1, 0, outside}});
+    tick();
+    Check(originals == 1 && passed == leasedHost, "a controller the host did not tick, in a window without seats, keeps the host point");
+    const auto seatHoldsBefore = g_seatHolds;
+    leasedChoices = Rows({{1, 1, 2, inBox}});
+    tick();
+    Check(originals == 0 && g_seatHolds == seatHoldsBefore + 1, "a missing row in a window in which the host used a seat holds the whole tick");
+    leasedChoices = Rows({{controller->key, 73, AS::kSeatConflict, {}}});
+    tick();
+    Check(originals == 0, "a conflicting row holds");
+    leasedChoices = Rows({{1, 1, 0, outside}}, true);
+    tick();
+    Check(originals == 0, "a truncated table holds a controller it does not name");
+    leasedChoices = Rows({{controller->key, 73, AS::kSeatConflict, {}}});
+    g_replay = &Replay; replayOn = true; replayPoint = {7, 8, 9, 1};
+    tick();
+    Check(originals == 1 && passed == replayPoint, "a replayed host emission keeps its own trigger point");
+    replayOn = false; g_replay = nullptr;
+    leasedChoices = {};
     copyOk = false; tick(); copyOk = true;
     Check(originals == 0, "no lease still holds the whole tick");
 
-    role = 1; source = {}; leasedSeats = {};
+    // Paired actual round trip: host RunUpdate -> recorded row -> Codec -> ActivationLease ->
+    // client RunUpdate, with the region read failing on one side, the other, both or neither.
+    // A failure is the region read (unknown class) or, with pins, the predicate verification.
+    auto roundTrip = [&](bool hostFails, bool clientFails, bool pins, AS::Point& hostPassed, AS::Point& clientPassed) {
+        role = 1; source = Make({{1, inBox}}); host[0] = 0;
+        if (hostFails) { if (pins) g_seatPredicatesVerified = false; else breakRegions(); }
+        hostTick();
+        hostPassed = passed;
+        link(3); g_seatPredicatesVerified = true;
+        kh2coop::ActivationLease clientLease;
+        kh2coop::RoomTransition location; location.epoch = 4; location.worldId = 2; location.roomId = 33;
+        const auto request = clientLease.Request(location, {11, 13}, 1, 1000);
+        kh2coop::HostActivationPoint response {*request, 1, {host[0], host[1], host[2], host[3]}};
+        response.choices = recorded;
+        const auto bytes = kh2coop::encode(response);
+        const std::uint8_t* payload = nullptr; std::size_t size = 0;
+        kh2coop::decodePacketHeader(bytes.data(), bytes.size(), payload, size);
+        kh2coop::HostActivationPoint decoded; kh2coop::ByteReader reader(payload, size); kh2coop::read(reader, decoded);
+        const bool accepted = clientLease.Accept(decoded, 1001);
+        lease = &clientLease; leaseNow = 1002;
+        role = 2;
+        if (clientFails) { if (pins) g_seatPredicatesVerified = false; else breakRegions(); }
+        tick();
+        clientPassed = originals == 1 ? AS::Point {passed[0], passed[1], passed[2], passed[3]} : AS::Point {-1, -1, -1, -1};
+        link(3); g_seatPredicatesVerified = true;
+        lease = nullptr;
+        return accepted;
+    };
+    for (const auto [hostFails, clientFails, pins, label] : {
+             std::tuple {false, false, false, "both read their regions"},
+             std::tuple {false, true, false, "only the client's region read fails"},
+             std::tuple {true, false, false, "only the host's region read fails"},
+             std::tuple {true, true, false, "both region reads fail"},
+             std::tuple {false, true, true, "only the client's predicate pins fail"},
+             std::tuple {true, false, true, "only the host's predicate pins fail"}}) {
+        AS::Point h {}, c {};
+        const bool accepted = roundTrip(hostFails, clientFails, pins, h, c);
+        const AS::Point expected = hostFails ? hostPoint : inBox;
+        std::string what = std::string("round trip, ") + label + ": host and client pass the same activation point";
+        Check(accepted && h == expected && c == expected, what.c_str());
+    }
+
+    role = 1; source = {}; leasedChoices = {};
     g_role = savedRole; g_original = savedOriginal; g_lookup = savedLookup; g_emission = savedEmission; g_replay = savedReplay;
     g_capture = nullptr; g_copy = nullptr; g_seats = nullptr; g_seatPredicatesVerified = false;
     put(image + CONTROLLER_COUNT, std::int32_t {0});

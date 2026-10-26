@@ -17,9 +17,9 @@ namespace kh2coop {
 inline constexpr std::uint16_t PROTOCOL_VERSION = 38;
 
 // ===========================================================================
-// Protocol v38 (VUH-2864): HostActivationPoint carries the remote seats' native positions on the host
-// (count, then two float4 and two slots; 100 bytes), so a client ticks each spawn controller with the same
-// point the host chose: the host's own when a region holds it, else the first seat a region holds.
+// Protocol v38 (VUH-2864): HostActivationPoint carries the host's actual spawn-controller decisions since its
+// last flush: per controller key/header, the seat whose point it passed (0 host, 1..2 a remote slot, 255 conflict)
+// and that point (count, truncated, then 23 bytes a row, at most 24; 67..619 bytes). Clients apply the host's row.
 // Protocol v37 (VUH-2605): ScriptCall carries normalized actor_birth/actor_birth_end (255/15, 255/16): the
 // host announces a script-born child (Twilight Thorn's Creepers) with its parent, occurrence and child netId.
 // Protocol v36 (VUH-2679): RoomReplayRequest (56). A client whose current room was built in the two-player clone
@@ -225,7 +225,7 @@ struct HostActivationPoint {
     ActivationRequest request {};
     std::uint64_t sourceSeq {0}; // host-native capture sequence, not bridge writes
     std::array<float, 4> position {}; // exact native argument, including w
-    activationseats::SeatPoints seats {}; // remote seats on the host at this capture (VUH-2864)
+    activationseats::Choices choices {}; // the host's per-controller decisions (VUH-2864)
 };
 
 struct TransitionAck {

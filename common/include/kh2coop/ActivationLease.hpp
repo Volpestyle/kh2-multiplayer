@@ -67,14 +67,14 @@ public:
         if (response.sourceSeq == 0 || response.sourceSeq <= sourceSeq_ ||
             !std::all_of(response.position.begin(), response.position.end(),
                          [](float value) { return std::isfinite(value); }) ||
-            !activationseats::WellFormed(response.seats)) return false;
+            !activationseats::WellFormed(response.choices)) return false;
         for (auto& pending : requests_) {
             if (!pending || !sameActivationRequest(pending->request, response.request)) continue;
             if (now < pending->issued || now >= pending->expires) {
                 pending.reset();
                 return false;
             }
-            point_ = Point {response.position, response.seats, pending->issued, pending->expires};
+            point_ = Point {response.position, response.choices, pending->issued, pending->expires};
             sourceSeq_ = response.sourceSeq;
             pending.reset();
             return true;
@@ -82,11 +82,11 @@ public:
         return false;
     }
 
-    // The host's point and the remote seat candidates captured with it (VUH-2864).
-    bool Copy(std::uint64_t now, float* destination, activationseats::SeatPoints* seats = nullptr) const {
+    // The host's point and its per-controller seat decisions captured with it (VUH-2864).
+    bool Copy(std::uint64_t now, float* destination, activationseats::Choices* choices = nullptr) const {
         if (!destination || !point_ || now < point_->issued || now >= point_->expires) return false;
         std::copy(point_->position.begin(), point_->position.end(), destination);
-        if (seats) *seats = point_->seats;
+        if (choices) *choices = point_->choices;
         return true;
     }
 
@@ -99,7 +99,7 @@ private:
     };
     struct Point {
         std::array<float, 4> position;
-        activationseats::SeatPoints seats;
+        activationseats::Choices choices;
         std::uint64_t issued = 0, expires = 0;
     };
     std::array<std::optional<Pending>, kMaxOutstanding> requests_ {};

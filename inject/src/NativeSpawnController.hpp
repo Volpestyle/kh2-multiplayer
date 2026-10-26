@@ -14,13 +14,14 @@ namespace kh2coop::inject::spawncontroller {
 using LogFn = void (*)(const char* fmt, ...);
 // Game-thread callbacks. Role is current session authority: 0 off, 1 host, 2 client.
 using RoleFn = std::uint8_t (*)();
-// The host's own native point and the remote seat candidates the host tested with it.
-using CaptureFn = void (*)(const float* nativePoint4, const activationseats::SeatPoints& seats);
+// The host's own native point and, while seat activation is active, its actual decision for
+// this controller (the row clients apply; VUH-2864). controller is a host-local identity only.
+using CaptureFn = void (*)(const float* nativePoint4, const activationseats::Choice* choice, uintptr_t controller);
 // False holds a qualified client controller, including its native cooldown.
 // The owner validates epoch, full location, lifecycle, session and lease expiry.
-// seats receives the host's candidates leased with that point (none for a historical replay).
+// choices receives the host's decisions leased with that point (none for a historical replay).
 using CopyFn = bool (*)(float* output4, uintptr_t controller, std::uint64_t updateSequence,
-                        activationseats::SeatPoints* seats);
+                        activationseats::Choices* choices);
 // VUH-2864, host only: the remote humans' native positions on the host, in seat order.
 using SeatsFn = bool (*)(activationseats::SeatPoints& out);
 enum class EmissionPhase : std::uint8_t { Reserve, Birth, Cancel, Abandon };

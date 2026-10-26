@@ -1595,15 +1595,30 @@ matrix or extent keeps the host's point.
 A seat's point is its clone's native position on the host (`+0x670`, the accessor's no-parent
 case; w = 1). Seats are eligible by EnemyTargetRemote's target rule (`CloneCandidate`): an
 active player-class clone with its own status, alive, a fresh unheld pose from the same room,
-and neither downed nor in a cutscene. The host captures the seats with its point, and
-HostActivationPoint carries them to the requester (count, two float4, two slots: 100 bytes).
-The client makes the same choice over its own copy of the authored regions. A replayed host
-emission already carries the chosen trigger point, and a historical or population replay is
-the host's point alone. `KH2COOP_SEAT_ACTIVATION=0` turns the host's candidates off.
-`[spawnctl] seat-activation side=host|client slot=N ...` lines (at most one a second) log the
-choices and a count of unavailable region lists. Tests: `kh2coop_spawntrace_test` drives the
-real host and client `RunUpdate` over test-owned controllers and region nodes;
-`kh2coop_world_test` and `kh2coop_activation_test` cover the wire and the lease.
+and neither downed nor in a cutscene.
+
+The host's actual decision is authoritative; a client never chooses again. Each static host
+tick records a row (group key, header ID, the seat whose point it passed, 0 for its own, and
+that exact point), including the fallback to its own point when its region read or predicate
+pins fail. HostActivationPoint carries every row recorded since the last response flush
+(count, truncated flag, 23-byte rows, at most 24). A client applies its controller's row
+exactly. With no row it keeps the leased host point only when that window used no seat at all.
+It holds the whole tick, as for a missing lease, on a conflicting row (two controllers deciding
+differently under one identity), on a truncated table, or on a missing row in a window in which
+the host passed a seat point. Review found that an earlier draft let each side choose from its
+own region reads, so a read that failed on one side alone gave the two games different points
+(the VUH-2864 review, comment c471a6fd).
+
+A replayed host emission already carries the chosen trigger point, and a historical or
+population replay is the host's point alone. `KH2COOP_SEAT_ACTIVATION=0` (or unverified pins)
+turns the host's candidates off and records no rows, so every client tick keeps the leased host
+point. `[spawnctl] seat-activation side=host|client slot=N ...` lines (at most one a second) log
+the choices, unavailable region lists and client holds. Tests: `kh2coop_spawntrace_test` drives
+the real host and client `RunUpdate` over test-owned controllers and region nodes. It also runs
+a paired round trip (host tick, recorded row, the real Codec and ActivationLease, client tick)
+with the region read or the predicate pins failing on the host only, the client only, both or
+neither, and the two points always match. `kh2coop_world_test` and `kh2coop_activation_test`
+cover the wire and the lease.
 
 Limits: a type-6 controller's per-region filter and the type-4 area controllers are untouched
 (type 4 already tests every actor). The friend's point is a position latency behind it, the
