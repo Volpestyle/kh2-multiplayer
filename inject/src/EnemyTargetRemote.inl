@@ -589,6 +589,50 @@ static void Install() {
     if (g.requested && !g.allMirrored) enemysync::SetRemoteHitApply(&OwnerApplyRemoteHit);
 }
 
+// VUH-2864: the remote humans' native positions on the host, for spawn activation. The same
+// eligibility as a target candidate (R::CloneCandidate: live, fresh unheld pose, same room, not
+// downed or in a cutscene), independent of whether targeting itself is on. The point is the one
+// the native accessor 0x3B5B40 returns for an actor with no parent (+0x6A0 == 0): +0x670, w = 1.
+static bool ActivationSeatPoints(activationseats::SeatPoints& out) noexcept {
+    out = {};
+    if (!GameThread() || enemysync::ActivationRole() != 1) return false;
+    std::uint8_t loc[2] {};
+    uintptr_t player = 0, soraStatus = 0;
+    if (!ReadHitTraceMemory(g_exeBase + RVA_LOCATION, loc, sizeof(loc)) || !Canonical(player) ||
+        !ReadHitTrace(player + OFF_STATUS, soraStatus) || !soraStatus) return false;
+    struct Seat { std::uint8_t slot; activationseats::Point point; };
+    Seat seats[2] {};
+    unsigned count = 0;
+    for (int i = 0; i < 2; ++i) {
+        const uintptr_t actor = PuppetTarget(i);
+        const auto& d = g_puppets[i];
+        uintptr_t status = 0;
+        R::CloneFacts f {};
+        f.puppetActive = actor && IsPuppetActive(i);
+        f.playerClass = actor && IsPlayerClassActor(actor) && actor != g_soraActor;
+        f.actorLive = actor && ReadLive(actor, status);
+        f.distinctStatus = f.actorLive && status && status != soraStatus;
+        f.poseFresh = d.have && g_frameCounter - d.poseFrame <= POSE_FRESH_FRAMES;
+        f.held = (d.pose.pose.flags & kh2coop::AvatarHeld) != 0;
+        f.sameRoom = d.pose.pose.worldId == loc[0] && d.pose.pose.roomId == loc[1];
+        f.downed = (d.pose.pose.flags & kh2coop::AvatarDowned) != 0;
+        f.inCutscene = (d.pose.pose.flags & kh2coop::AvatarInCutscene) != 0;
+        f.ownerSlot = static_cast<std::uint8_t>(d.pose.pose.ownerSlot);
+        if (!R::CloneCandidate(f)) continue;
+        std::uint32_t parent = 0;
+        float p[3] {};
+        if (!ReadHitTrace(actor + 0x6A0, parent) || parent != 0 ||
+            !ReadHitTraceMemory(actor + offsets::actor::ENTITY_TRANSFORM + offsets::entity::POS_X, p, sizeof(p)) ||
+            !std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) continue;
+        if (std::any_of(seats, seats + count, [&](const Seat& s) { return s.slot == f.ownerSlot; })) return false;
+        seats[count++] = {f.ownerSlot, {p[0], p[1], p[2], 1.0f}};
+    }
+    if (count == 2 && seats[1].slot < seats[0].slot) std::swap(seats[0], seats[1]);
+    out.count = static_cast<std::uint8_t>(count);
+    for (unsigned i = 0; i < count; ++i) { out.slots[i] = seats[i].slot; out.points[i] = seats[i].point; }
+    return activationseats::WellFormed(out);
+}
+
 static void Shutdown() {
     if (!g.requested) return;
     // Our handles may stay in live enemies' slots: once the clone handle stops resolving, 0x4319D0

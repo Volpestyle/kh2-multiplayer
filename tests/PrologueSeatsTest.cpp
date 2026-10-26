@@ -33,7 +33,7 @@ void codec() {
     const auto bytes = encode(m);
     const std::uint8_t* p = nullptr; std::size_t n = 0;
     check(decodePacketHeader(bytes.data(), bytes.size(), p, n) == PacketType::SeatState && n == SEAT_STATE_BYTES &&
-          static_cast<unsigned>(PacketType::SeatState) == 53 && PROTOCOL_VERSION == 37, "SeatState is type 53, 72 bytes, protocol 37");
+          static_cast<unsigned>(PacketType::SeatState) == 53 && PROTOCOL_VERSION == 38, "SeatState is type 53, 72 bytes, protocol 38");
     ByteReader r(p, n); SeatState back; read(r, back);
     check(r.atEnd() && encode(back) == bytes && back.roster == m.roster && back.seq == 7 && back.profile == 0x5A &&
           back.latched == m.latched && back.phase == SeatPhase::Bound && back.ownerSlot == 1 && back.roomId == 7 &&

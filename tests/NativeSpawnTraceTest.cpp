@@ -370,7 +370,7 @@ std::uint8_t PhaseRole() {
     ++phaseRoleIndex;
     return phaseRoles[index];
 }
-void PhaseCapture(const float*) { ++phaseCaptureCalls; }
+void PhaseCapture(const float*, const kh2coop::activationseats::SeatPoints&) { ++phaseCaptureCalls; }
 void __fastcall PhasePassOriginal(void* controller, const float* point) {
     ++geometryOriginalCalls;
     phaseFrameSeen = g_originalPhaseFrame;
@@ -390,7 +390,7 @@ bool CatchObservedUpdateException(void* controller, const float* point) {
     return false;
 }
 const void* __fastcall GeometryLookup(std::int32_t id) { return id == 302 ? geometryObject : nullptr; }
-bool GeometryCopy(float* out, uintptr_t, std::uint64_t) {
+bool GeometryCopy(float* out, uintptr_t, std::uint64_t, kh2coop::activationseats::SeatPoints*) {
     ++geometryCopies;
     if (gateDuringCopy) ObserveEventGate(g_exeBase + EVENT_GATE_RETURN_RVA);
     if (nestedUpdateDuringCopy) {
@@ -2257,7 +2257,7 @@ bool MixedReplay(std::uint32_t key,std::uint16_t header,float* out) {
     const auto* e=emissionLedger.Pending(key,header);
     if(!e)return false;std::copy(e->point.begin(),e->point.end(),out);return true;
 }
-bool MixedCopy(float* out,uintptr_t,std::uint64_t) {
+bool MixedCopy(float* out,uintptr_t,std::uint64_t,kh2coop::activationseats::SeatPoints*) {
     ++emissionCopyCalls;std::copy(emissionTrigger.begin(),emissionTrigger.end(),out);return true;
 }
 PVOID WINAPI EmissionBadFls(DWORD) { return reinterpret_cast<void*>(1); }
@@ -2451,6 +2451,198 @@ void EmissionControls(std::uint8_t* image) {
           "nonnull return after Same(update) failure passes actor/group through Abandon and spends current grant");
     g_emission=nullptr;g_replay=nullptr;g_lookup=nullptr;
 }
+}
+
+// VUH-2864: either living player starts a wave. The real host and client RunUpdate paths over a
+// test-owned qualified controller with BOX, CYLINDER and INFINITY region nodes.
+namespace seattest {
+std::uint8_t role = 1;
+unsigned originals = 0, captures = 0, seatCalls = 0;
+std::array<float, 4> passed {}, captured {}, leasedHost {};
+const float* passedPointer = nullptr;
+kh2coop::activationseats::SeatPoints source {}, capturedSeats {}, leasedSeats {};
+bool sourceOk = true, copyOk = true;
+const void* object = nullptr;
+std::uint8_t Role() { return role; }
+const void* __fastcall Lookup(std::int32_t) { return object; }
+void __fastcall Original(void*, const float* point) { ++originals; passedPointer = point; std::copy_n(point, 4, passed.begin()); }
+void Capture(const float* point, const kh2coop::activationseats::SeatPoints& seats) {
+    ++captures; std::copy_n(point, 4, captured.begin()); capturedSeats = seats;
+}
+bool Copy(float* out, uintptr_t, std::uint64_t, kh2coop::activationseats::SeatPoints* seats) {
+    std::copy(leasedHost.begin(), leasedHost.end(), out);
+    if (seats) *seats = leasedSeats;
+    return copyOk;
+}
+bool Seats(kh2coop::activationseats::SeatPoints& out) { ++seatCalls; out = source; return sourceOk; }
+struct SeatArg { int slot; kh2coop::activationseats::Point point; };
+kh2coop::activationseats::SeatPoints Make(std::initializer_list<SeatArg> seats) {
+    kh2coop::activationseats::SeatPoints s;
+    for (const auto& [slot, point] : seats) {
+        s.slots[s.count] = static_cast<std::uint8_t>(slot); s.points[s.count] = point; ++s.count;
+    }
+    return s;
+}
+} // namespace seattest
+
+void SeatActivationControls(std::uint8_t* image) {
+    using namespace seattest;
+    namespace AS = kh2coop::activationseats;
+    auto put = [](void* to, const auto& v) { std::memcpy(to, &v, sizeof(v)); };
+    // Pure rules first.
+    const AS::Region box {AS::RegionKind::Box, {1,0,0,0, 0,1,0,0, 0,0,1,0, -100,0,0,1}, {10, 10, 10}};
+    const AS::Region cylinder {AS::RegionKind::Cylinder, {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,-500,1}, {20, 5, 20}};
+    const AS::Region infinity {AS::RegionKind::Infinity, {}, {}};
+    Check(AS::Contains(box, {110, 10, -10, 1}) && !AS::Contains(box, {110.01f, 0, 0, 1}) && !AS::Contains(box, {100, -10.5f, 0, 1}),
+          "BOX is inclusive -extent <= inverse-transformed point <= extent");
+    Check(AS::Contains(cylinder, {20, 5, 500, 1}) && AS::Contains(cylinder, {12, 0, 512, 1}) &&
+          !AS::Contains(cylinder, {15, 0, 515, 1}) && !AS::Contains(cylinder, {0, 5.5f, 500, 1}),
+          "CYLINDER is inclusive Y bounds, then (x/ex)^2 + (z/ez)^2 <= 1");
+    Check(AS::Contains(infinity, {1e30f, -1e30f, 0, 1}), "INFINITY always contains");
+    const AS::Region pair[] = {box, cylinder};
+    const AS::Point outside {0, 0, 0, 1}, inBox {105, 0, 0, 1}, inCylinder {0, 0, 505, 1};
+    Check(AS::Select(pair, true, inBox, Make({{1, inCylinder}})) == 0, "the host's own point wins whenever a region holds it");
+    Check(AS::Select(pair, true, outside, Make({{1, inCylinder}})) == 1, "a seat in a region starts it when the host is in none");
+    Check(AS::Select(pair, true, outside, Make({{1, outside}, {2, inBox}})) == 2, "the first seat a region holds, in seat order");
+    Check(AS::Select(pair, true, outside, Make({{1, inBox}, {2, inCylinder}})) == 1, "seat order breaks a tie");
+    Check(AS::Select(pair, false, outside, Make({{1, inBox}})) == 0 && AS::Select({}, true, outside, Make({{1, inBox}})) == 0,
+          "unreadable or empty regions keep the host's point");
+    Check(AS::WellFormed(Make({{1, inBox}, {2, inCylinder}})) && AS::WellFormed({}), "ordered finite seats with w = 1 are well formed");
+    Check(!AS::WellFormed(Make({{2, inBox}, {1, inCylinder}})) && !AS::WellFormed(Make({{1, inBox}, {1, inCylinder}})) &&
+          !AS::WellFormed(Make({{0, inBox}})) && !AS::WellFormed(Make({{3, inBox}})) &&
+          !AS::WellFormed(Make({{1, {105, 0, 0, 0.5f}}})) &&
+          !AS::WellFormed(Make({{1, {std::numeric_limits<float>::quiet_NaN(), 0, 0, 1}}})),
+          "unordered, duplicate, out-of-range, w != 1 and nonfinite seats are malformed");
+    auto unusedJunk = Make({{1, inBox}}); unusedJunk.points[1] = inBox;
+    Check(!AS::WellFormed(unusedJunk), "unused seat entries must be zero");
+    const std::uint8_t fnvInput[] = {'a'};
+    Check(Fnv1a(fnvInput, 1) == 0xaf63dc4c8601ec8cULL, "predicate pin hash is FNV-1a 64");
+    Check(!VerifyRegionPredicates(g_exeBase), "an image without the pinned predicate bodies refuses seat activation");
+
+    // A qualified static combat controller with three regions: BOX, CYLINDER, BOX.
+    std::array<std::uint8_t, 8 + 0x60> objects {};
+    put(objects.data() + 4, std::int32_t {1}); put(objects.data() + 8, std::uint32_t {2405}); objects[12] = 4; objects[16] = 'M';
+    object = objects.data() + 8;
+    put(image + OBJECT_TABLES, reinterpret_cast<uintptr_t>(objects.data()));
+    put(image + OBJECT_TABLES + 8, uintptr_t {0}); put(image + OBJECT_TABLES + 16, uintptr_t {0});
+    auto* definition = image + 0x40000;
+    std::memset(definition, 0, 0x400);
+    definition[0] = 2; put(definition + 2, std::uint16_t {73}); put(definition + 4, std::uint16_t {1}); put(definition + 6, std::uint16_t {3});
+    put(definition + 44, std::uint32_t {2405}); definition[44 + 0x1C] = 2;
+    auto* controller = reinterpret_cast<Controller*>(image + 0x41000);
+    *controller = {};
+    controller->key = 808476514; controller->header = reinterpret_cast<uintptr_t>(definition);
+    controller->spawnArray = controller->header + 44; controller->regionArray = controller->spawnArray + 64;
+    std::array<uintptr_t, 3> nodes {};
+    const AS::Region layout[] = {box, cylinder, {AS::RegionKind::Box, {1,0,0,0, 0,1,0,0, 0,0,1,0, -5000,0,0,1}, {1, 1, 1}}};
+    const uintptr_t vtables[] = {0x5D4F98, 0x5D4FB0, 0x5D4F98};
+    for (unsigned i = 0; i < 3; ++i) nodes[i] = reinterpret_cast<uintptr_t>(image + 0x42000 + i * 0x80);
+    auto link = [&](unsigned count) {
+        for (unsigned i = 0; i < 3; ++i) {
+            auto* node = reinterpret_cast<std::uint8_t*>(nodes[i]);
+            std::memset(node, 0, 0x80);
+            put(node, g_exeBase + vtables[i]);
+            std::memcpy(node + 8, layout[i].inverse.data(), 64);
+            std::memcpy(node + 0x48, layout[i].extent.data(), 12);
+            put(node + 0x68, controller->regionArray + i * 64);
+            if (i + 1 < count) {
+                put(image + HANDLE_REGIONS_RVA, nodes[i + 1] & ~uintptr_t {0x1FFFFFF});
+                put(node + 0x58, static_cast<std::uint32_t>(nodes[i + 1] & 0x1FFFFFF));
+            }
+        }
+        controller->regionHead = nodes[0]; controller->regionTail = nodes[count - 1];
+    };
+    link(3);
+    put(image + CONTROLLER_COUNT, std::int32_t {1});
+    put(image + CONTROLLER_TABLE, TableEntry {controller->key, 0, reinterpret_cast<uintptr_t>(controller)});
+    const auto savedRole = g_role; const auto savedOriginal = g_original; const auto savedLookup = g_lookup;
+    const auto savedEmission = g_emission; const auto savedReplay = g_replay;
+    g_role = &Role; g_original = &Original; g_lookup = &Lookup; g_emission = nullptr; g_replay = nullptr;
+    g_capture = &Capture; g_copy = &Copy; g_seats = &Seats;
+    g_seatRequested = true; g_seatPredicatesVerified = true;
+    g_hostEmissionConfigured = false;
+    Check(Qualify(reinterpret_cast<uintptr_t>(controller)).scope == Scope::Qualified, "seat fixture qualifies as a static combat controller");
+    RegionList regions {}; std::size_t count = 0;
+    Check(ReadActivationRegions(reinterpret_cast<uintptr_t>(controller), regions, count) && count == 3 &&
+          regions[1].kind == AS::RegionKind::Cylinder && regions[0].extent[0] == 10,
+          "the production walk reads every pinned region node to the tail");
+    alignas(16) float host[4] {0, 0, 0, 1};
+    auto tick = [&] { originals = 0; passedPointer = nullptr; RunUpdate(controller, host, g_exeBase + RETURN_RVA); };
+
+    role = 1; source = {}; captures = 0; seatCalls = 0;
+    tick();
+    Check(originals == 1 && passedPointer == host && captures == 1 && capturedSeats.count == 0,
+          "host with no remote seat: the native point passes through unchanged");
+    source = Make({{1, inCylinder}});
+    const auto choicesBefore = g_seatChoices;
+    tick();
+    Check(originals == 1 && passed == inCylinder && captured == AS::Point {0, 0, 0, 1} && capturedSeats == source &&
+          g_seatChoices == choicesBefore + 1,
+          "host outside every region, seat 1 in the cylinder: the tick uses seat 1's point and leases both");
+    host[0] = 105;
+    tick();
+    Check(passedPointer == host && passed == inBox, "host inside a region keeps its own point although seat 1 is in another");
+    host[0] = 0;
+    source = Make({{1, outside}, {2, inBox}});
+    tick();
+    Check(passed == inBox, "seat 2 starts it when seat 1 and the host are in none");
+    sourceOk = false; tick(); sourceOk = true;
+    Check(passedPointer == host && capturedSeats.count == 0, "an unavailable seat source is no candidates");
+    source = Make({{2, inBox}, {1, outside}});
+    tick();
+    Check(passedPointer == host && capturedSeats.count == 0, "a malformed seat set is dropped before capture");
+    source = Make({{1, inCylinder}});
+    g_seatRequested = false; seatCalls = 0; tick(); g_seatRequested = true;
+    Check(passedPointer == host && seatCalls == 0 && capturedSeats.count == 0, "KH2COOP_SEAT_ACTIVATION=0 never asks for seats");
+    g_seatPredicatesVerified = false; seatCalls = 0; tick(); g_seatPredicatesVerified = true;
+    Check(passedPointer == host && seatCalls == 0, "unverified predicates never ask for seats");
+    const auto unavailableBefore = g_seatRegionsUnavailable;
+    put(reinterpret_cast<std::uint8_t*>(nodes[2]), g_exeBase + 0x5D4FE0);
+    tick();
+    Check(passedPointer == host && g_seatRegionsUnavailable == unavailableBefore + 1,
+          "an unknown region class anywhere in the list keeps the host's point");
+    link(3);
+    put(reinterpret_cast<std::uint8_t*>(nodes[2]) + 0x58, static_cast<std::uint32_t>(nodes[0] & 0x1FFFFFF));
+    put(image + HANDLE_REGIONS_RVA, nodes[0] & ~uintptr_t {0x1FFFFFF});
+    tick();
+    Check(passedPointer == host, "a cyclic region list is unavailable");
+    link(3);
+    controller->regionTail = nodes[1];
+    tick();
+    Check(passedPointer == host, "a list that does not end at the tail is unavailable");
+    link(3);
+    put(reinterpret_cast<std::uint8_t*>(nodes[1]) + 0x68, controller->regionArray + 3 * 64);
+    tick();
+    Check(passedPointer == host, "a descriptor outside the controller's own array is unavailable");
+    link(3);
+    put(reinterpret_cast<std::uint8_t*>(nodes[1]) + 0x48, std::numeric_limits<float>::infinity());
+    tick();
+    Check(passedPointer == host, "a nonfinite extent is unavailable");
+    link(3);
+
+    // Client: the leased candidates, chosen the same way over the client's own regions.
+    role = 2; leasedHost = {0, 0, 0, 1};
+    leasedSeats = Make({{1, inCylinder}});
+    tick();
+    Check(originals == 1 && passed == inCylinder, "client ticks with the leased seat the host would choose");
+    leasedSeats = {};
+    tick();
+    Check(originals == 1 && passed == leasedHost, "client with no leased seats ticks with the host's point");
+    leasedHost = {105, 0, 0, 1}; leasedSeats = Make({{1, inCylinder}});
+    tick();
+    Check(passed == leasedHost, "client keeps the host's point when a region holds it");
+    leasedHost = {0, 0, 0, 1};
+    put(reinterpret_cast<std::uint8_t*>(nodes[2]), g_exeBase + 0x5D4FE0);
+    tick();
+    Check(passed == leasedHost, "client region list unavailable: the host's point");
+    link(3);
+    copyOk = false; tick(); copyOk = true;
+    Check(originals == 0, "no lease still holds the whole tick");
+
+    role = 1; source = {}; leasedSeats = {};
+    g_role = savedRole; g_original = savedOriginal; g_lookup = savedLookup; g_emission = savedEmission; g_replay = savedReplay;
+    g_capture = nullptr; g_copy = nullptr; g_seats = nullptr; g_seatPredicatesVerified = false;
+    put(image + CONTROLLER_COUNT, std::int32_t {0});
 }
 
 int main() {
@@ -2881,6 +3073,7 @@ int main() {
     SelectedOccupancyControls(image);
     ConstructionLineageControls(image);
     EmissionControls(image);
+    SeatActivationControls(image);
 
     g_original = nullptr;
     g_originalWrapper = nullptr;

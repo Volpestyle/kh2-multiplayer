@@ -34,6 +34,7 @@
 #include "kh2coop/DownedState.hpp" // Types + WorldContext only; safe beside HitChannel
 #include "EnemyMirrorPose.hpp" // VUH-1515: Pose only (no Protocol.hpp beside HitChannel)
 #include "EnemyPopulation.hpp" // VUH-1788: pure planner/cull decision (Types.hpp only)
+#include "kh2coop/ActivationSeats.hpp" // VUH-2864: std-only seat candidates
 #include <array>
 
 namespace kh2coop {
@@ -257,10 +258,11 @@ bool SpawnPickContext(SpawnPickInputs& out, const char*& reason);
 void NoteSpawnPickOp(bool shared, std::uint64_t salt);
 // Review F1: whether the spawn-pick detour is live (spawnpick::Install's result); the host stamps the bit only then.
 void SetSpawnPickLive(bool live);
-void CaptureHostActivation(const float* position4);
+void CaptureHostActivation(const float* position4, const activationseats::SeatPoints& seats);
 bool SpawnEmissionPolicy(std::uint32_t key, std::uint16_t header, std::uint16_t record, const float* trigger, spawncontroller::EmissionPhase phase, spawncontroller::EmissionPermit& permit, const spawncontroller::EmissionBirth* birth);
 bool CopySpawnEmissionPoint(std::uint32_t key, std::uint16_t header, float* output);
-bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t updateSequence);
+bool CopyHostActivation(float* position4, uintptr_t controller, std::uint64_t updateSequence,
+                        activationseats::SeatPoints* seats);
 // VUH-2466: the Struggle orb hooks (StruggleOrbsHook.hpp), on the game thread. The host books each orb
 // and queues its birth and collection as SpawnEmission rows; the client shows the host's orbs.
 bool OrbHostLive();

@@ -541,7 +541,7 @@ std::vector<std::uint8_t> encode(const DesyncCaptureDone& m){ByteWriter w;write(
 
 namespace {
 constexpr std::size_t kActivationRequestBytes = 41;
-constexpr std::size_t kHostActivationPointBytes = 65;
+constexpr std::size_t kHostActivationPointBytes = 100; // v38: + seat count, two float4, two slots
 
 void validateActivationRequest(const ActivationRequest& m) {
     if (m.location.epoch == 0 || m.requestSeq == 0 ||
@@ -565,6 +565,8 @@ void validateHostActivationPoint(const HostActivationPoint& m) {
     for (float value : m.position) {
         if (!std::isfinite(value)) throw std::runtime_error("HostActivationPoint: nonfinite position");
     }
+    if (!activationseats::WellFormed(m.seats))
+        throw std::runtime_error("HostActivationPoint: malformed seat points");
 }
 } // namespace
 
@@ -764,6 +766,10 @@ void write(ByteWriter& w, const HostActivationPoint& m) {
     write(w, m.request);
     w.writeU64(m.sourceSeq);
     for (float value : m.position) w.writeF32(value);
+    w.writeU8(m.seats.count);
+    for (const auto& point : m.seats.points)
+        for (float value : point) w.writeF32(value);
+    for (auto slot : m.seats.slots) w.writeU8(slot);
 }
 
 void write(ByteWriter& w, const EventHold& m) {
@@ -1547,6 +1553,10 @@ void read(ByteReader& r, HostActivationPoint& m) {
     readActivationRequestFields(r, m.request);
     m.sourceSeq = r.readU64();
     for (float& value : m.position) value = r.readF32();
+    m.seats.count = r.readU8();
+    for (auto& point : m.seats.points)
+        for (float& value : point) value = r.readF32();
+    for (auto& slot : m.seats.slots) slot = r.readU8();
     validateHostActivationPoint(m);
 }
 

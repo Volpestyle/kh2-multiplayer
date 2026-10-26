@@ -1,0 +1,34 @@
+{
+  "name": "seat_activation_first_group",
+  "description": "VUH-2864: the friend alone walks the Station of Calling path from the real-door landing to the first Dusk group's anchor (tt33.ard b_00), while the host stays on the platform. Points are twilight_thorn_calling_path.json's first three.",
+  "retries": 0,
+  "steps": [
+    {
+      "do": "walk",
+      "to": [
+        2020,
+        160
+      ],
+      "tol": 20,
+      "timeoutSec": 15
+    },
+    {
+      "do": "walk",
+      "to": [
+        2020,
+        -500
+      ],
+      "tol": 20,
+      "timeoutSec": 10
+    },
+    {
+      "do": "walk",
+      "to": [
+        2000,
+        -1350
+      ],
+      "tol": 120,
+      "timeoutSec": 25
+    }
+  ]
+}

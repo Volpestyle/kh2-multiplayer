@@ -1571,6 +1571,44 @@ change has not established nonempty wave convergence. Creation, removal and
 controller bookkeeping need correlated native evidence. Supported nonempty
 activation and those new diagnostics are prepared offline, pending live runs.
 
+**Either living player starts a wave (VUH-2864, protocol 38).** Native code ticks every
+controller with one point: `FUN_1403a4f90` passes the position of the activation actor
+`0x2A10420` (accessor `0x3B5B40`) to `0x3FF000`, and only while that actor's `+0x9B8` bit 2 is
+clear. A type-2 controller dispatches its delayed records when any of its regions contains the
+point; the dispatcher (`0x3FE320` case 1) ignores which region accepted. So a friend who walks
+into a group's region while the host stays behind starts nothing on either game, and a downed
+host (logically downed, VUH-2465, so the bit stays clear) still starts groups only at its own
+feet.
+
+For each qualified host controller, `NativeSpawnController` now passes the host's own point when
+one of the controller's regions holds it, otherwise the first remote seat (slot order) whose
+point a region holds, otherwise the host's point. That is "any living human in any region" for
+type 2, with one original call per tick, so no cooldown or timer runs twice. The rules are
+`common/include/kh2coop/ActivationSeats.hpp`: BOX, CYLINDER and INFINITY containment as the native
+predicates compute it (`docs/pointer_map_v1.md`, "Runtime region nodes"). Before using them the
+DLL checks each predicate's vtable slot and an FNV-1a hash of its whole body, and the two
+constants the predicates read; any mismatch leaves every tick native. The region walk follows
+the controller's own list (head `+0x10`, encoded next `+0x58`, tail `+0x18`). An unknown class, a
+descriptor outside the controller's array, a cycle, a list that misses the tail or a nonfinite
+matrix or extent keeps the host's point.
+
+A seat's point is its clone's native position on the host (`+0x670`, the accessor's no-parent
+case; w = 1). Seats are eligible by EnemyTargetRemote's target rule (`CloneCandidate`): an
+active player-class clone with its own status, alive, a fresh unheld pose from the same room,
+and neither downed nor in a cutscene. The host captures the seats with its point, and
+HostActivationPoint carries them to the requester (count, two float4, two slots: 100 bytes).
+The client makes the same choice over its own copy of the authored regions. A replayed host
+emission already carries the chosen trigger point, and a historical or population replay is
+the host's point alone. `KH2COOP_SEAT_ACTIVATION=0` turns the host's candidates off.
+`[spawnctl] seat-activation side=host|client slot=N ...` lines (at most one a second) log the
+choices and a count of unavailable region lists. Tests: `kh2coop_spawntrace_test` drives the
+real host and client `RunUpdate` over test-owned controllers and region nodes;
+`kh2coop_world_test` and `kh2coop_activation_test` cover the wire and the lease.
+
+Limits: a type-6 controller's per-region filter and the type-4 area controllers are untouched
+(type 4 already tests every actor). The friend's point is a position latency behind it, the
+same as the host-world hits on its clone.
+
 **Historical offline creation and lifecycle diagnostics.** The following records
 the earlier TLS profile, not the current PREPARE=0 FLS profile described above.
 Its dispatcher/script/tick associations are not certified by the current build.

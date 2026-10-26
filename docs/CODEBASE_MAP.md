@@ -203,6 +203,7 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 | `include/kh2coop/WorldBridge.hpp` | Shared world rings, immediate session generation and generation-bound ordered reset |
 | `include/kh2coop/WorldPump.hpp` | Reliable world backlog and expendable activation-lease forwarding |
 | `include/kh2coop/ActivationLease.hpp` | Bounded challenge state; fixed original-request expiry and replay rejection on a client-local clock |
+| `include/kh2coop/ActivationSeats.hpp` | VUH-2864 pure rules: native BOX/CYLINDER/INFINITY containment and the host-then-seat activation point choice |
 | `include/kh2coop/ProgressMirror.hpp` | Host story-flag diff/snapshot; client allow-list accept + re-assert |
 | `include/kh2coop/ProgressAllowList.hpp` | Verified 8108-byte SAVE progress selection and boundary bit masks; personal data excluded |
 | `include/kh2coop/InputMailbox.hpp` | Cross-process shared memory IPC (seqlock, 3 slots) |

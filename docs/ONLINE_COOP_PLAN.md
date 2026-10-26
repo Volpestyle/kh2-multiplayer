@@ -282,7 +282,8 @@ shared HP/deaths and mission mirror (`docs/ROUTE_SPAWNS.md`,
 wave, awards no independent mission result and does not clear a fight just
 because the living count is briefly zero. Follow host wave completion and end
 signals. Host-owned spatial spawn triggers must consider either living human,
-so a stationary/downed host cannot starve the friend of encounters. Preserve
+so a stationary/downed host cannot starve the friend of encounters (VUH-2864:
+`docs/ENEMY_PARITY.md`, "Either living player starts a wave"). Preserve
 authored counts and tutorial counters; reuse the existing
 room-locked two-player HP factor, recording any specific native-HP exception
 needed by a scripted threshold rather than multiplying wave counts.

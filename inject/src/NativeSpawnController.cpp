@@ -68,6 +68,18 @@ constexpr std::uint8_t kEventGateBytes[] = {
 constexpr std::uint8_t kEventGateCallBytes[] = {0xE8,0x9B,0xCB,0xFA,0xFF,0x84,0xC0,0x75,0x6E};
 static_assert(sizeof(kEventGateBytes) == 65);
 constexpr uintptr_t BOX_VTABLE_RVA = 0x5D4F98, HANDLE_REGIONS_RVA = 0x2B0D720;
+// VUH-2864: the region predicates activationseats::Contains re-evaluates, pinned by vtable slot 1
+// and an FNV-1a 64 of the whole body (rel32/RIP-relative only, so relocation leaves it unchanged),
+// plus the two constants they read: 1.0f (cylinder bound) and the sign mask (negated extents).
+struct RegionPredicatePin {
+    uintptr_t vtable, body; std::size_t size; std::uint64_t fnv; activationseats::RegionKind kind;
+};
+constexpr RegionPredicatePin kRegionPredicates[] = {
+    {0x5D4F98, 0x421180, 199, 0xc39fe4c58c9b227fULL, activationseats::RegionKind::Box},
+    {0x5D4FB0, 0x421250, 202, 0xe3611fecdc574c0fULL, activationseats::RegionKind::Cylinder},
+    {0x5D4FC8, 0x421320, 3, 0xa3703b1a918cfbebULL, activationseats::RegionKind::Infinity},
+};
+constexpr uintptr_t PREDICATE_ONE_RVA = 0x623A80, PREDICATE_SIGN_RVA = 0x623EB0;
 // Complete instructions through the 18-byte prefix; no RIP-relative operand.
 constexpr std::uint8_t kBoxBytes[] = {
     0x40,0x53,0x48,0x83,0xEC,0x50,0x48,0x8B,0xD9,0x48,0xC7,0x44,0x24,0x24,0,0,0,0};
@@ -167,6 +179,9 @@ LogFn g_log = nullptr;
 RoleFn g_role = nullptr;
 CaptureFn g_capture = nullptr;
 CopyFn g_copy = nullptr;
+SeatsFn g_seats = nullptr;
+bool g_seatPredicatesVerified = false, g_seatRequested = true;
+std::uint64_t g_seatChoices = 0, g_seatRegionsUnavailable = 0;
 EmissionFn g_emission = nullptr;
 ReplayFn g_replay = nullptr;
 struct EmissionUpdate {
@@ -333,7 +348,7 @@ thread_local ClientOriginalReturns g_clientOriginalReturn;
 static_assert(std::is_trivially_copyable_v<ClientOriginalReturns>);
 static_assert(std::is_trivially_copyable_v<HostFirstEmission>);
 std::uint64_t g_captures = 0, g_applies = 0, g_holds = 0, g_unsupported = 0, g_unavailable = 0;
-std::array<std::uint64_t, 5> g_lastReport {};
+std::array<std::uint64_t, 6> g_lastReport {};
 
 void SaturatingIncrement(std::atomic<std::uint64_t>& counter) {
     auto value = counter.load(std::memory_order_relaxed);
@@ -2168,6 +2183,104 @@ void CallEmissionUpdate(void* controller, const float* point) {
     __finally { if (scope && g_emissionStorage.Same(scope)) *scope = previous; }
 }
 
+std::uint64_t Fnv1a(const std::uint8_t* bytes, std::size_t size) {
+    std::uint64_t hash = 0xcbf29ce484222325ULL;
+    for (std::size_t i = 0; i < size; ++i) { hash ^= bytes[i]; hash *= 0x100000001b3ULL; }
+    return hash;
+}
+
+bool VerifyRegionPredicates(uintptr_t exeBase) {
+    for (const auto& pin : kRegionPredicates) {
+        uintptr_t slot = 0;
+        std::array<std::uint8_t, 256> body {};
+        if (!ReadNative(exeBase + pin.vtable + 8, slot) || slot != exeBase + pin.body ||
+            pin.size > body.size() || !CopyNative(exeBase + pin.body, body.data(), pin.size) ||
+            Fnv1a(body.data(), pin.size) != pin.fnv) return false;
+    }
+    std::uint32_t one = 0, sign = 0;
+    return ReadNative(exeBase + PREDICATE_ONE_RVA, one) && one == 0x3F800000U &&
+           ReadNative(exeBase + PREDICATE_SIGN_RVA, sign) && sign == 0x80000000U;
+}
+
+// VUH-2864. One qualified controller's runtime region list (0x3FF000 walks the same nodes):
+// head +0x10, next encoded handle +0x58, tail +0x18. Each node must be a pinned predicate
+// class whose descriptor lies in the controller's own descriptor array. Anything else is
+// unavailable, and the tick keeps the host's point.
+using RegionList = std::array<activationseats::Region, activationseats::kMaxRegions>;
+bool ReadActivationRegions(uintptr_t address, RegionList& out, std::size_t& count) {
+    count = 0;
+    Controller native {};
+    std::array<std::uint8_t, 0x2C> header {};
+    if (!g_seatPredicatesVerified || !ReadNative(address, native) ||
+        !CopyNative(native.header, header.data(), header.size())) return false;
+    const auto records = Field<std::uint16_t>(header.data(), 4);
+    const auto descriptors = static_cast<uintptr_t>(Field<std::uint16_t>(header.data(), 6)) * 0x40;
+    if (native.spawnArray != native.header + header.size() ||
+        native.regionArray != native.spawnArray + static_cast<uintptr_t>(records) * 0x40) return false;
+    std::array<uintptr_t, activationseats::kMaxRegions> seen {};
+    uintptr_t node = native.regionHead, last = 0;
+    while (node) {
+        if (count == out.size()) return false;
+        for (std::size_t i = 0; i < count; ++i) if (seen[i] == node) return false;
+        std::array<std::uint8_t, 0x70> bytes {};
+        if (!CopyNative(node, bytes.data(), bytes.size())) return false;
+        const auto vtable = Field<uintptr_t>(bytes.data(), 0);
+        const auto* pin = std::find_if(std::begin(kRegionPredicates), std::end(kRegionPredicates),
+            [&](const RegionPredicatePin& p) { return g_exeBase + p.vtable == vtable; });
+        const auto descriptor = Field<uintptr_t>(bytes.data(), 0x68);
+        if (pin == std::end(kRegionPredicates) || descriptor < native.regionArray ||
+            descriptor - native.regionArray >= descriptors || (descriptor - native.regionArray) % 0x40) return false;
+        auto& region = out[count];
+        region.kind = pin->kind;
+        std::memcpy(region.inverse.data(), bytes.data() + 8, sizeof(region.inverse));
+        std::memcpy(region.extent.data(), bytes.data() + 0x48, sizeof(region.extent));
+        if (!std::all_of(region.inverse.begin(), region.inverse.end(), [](float v) { return std::isfinite(v); }) ||
+            !std::all_of(region.extent.begin(), region.extent.end(), [](float v) { return std::isfinite(v); }))
+            return false;
+        seen[count++] = node;
+        last = node;
+        const auto rawHandle = Field<std::uint32_t>(bytes.data(), 0x58);
+        const auto handle = rawHandle & 0x7FFFFFFFU;
+        if (!rawHandle) { node = 0; continue; }
+        uintptr_t table = 0;
+        if (!ReadNative(g_exeBase + HANDLE_REGIONS_RVA + (handle >> 25) * 8, table) ||
+            !table || table == UINTPTR_MAX || (table & 0x1FFFFFFU)) return false;
+        node = table | (handle & 0x1FFFFFFU);
+    }
+    return count ? native.regionTail == last : native.regionTail == 0;
+}
+
+// Its own line: the [spawnctl] action= format is parsed by rig tools and stays unchanged.
+void ReportSeat(const char* side, std::uint8_t slot, const Qualification& q, const float* point) {
+    if (!g_log) return;
+    const auto now = GetTickCount64();
+    if (g_lastReport[5] && now - g_lastReport[5] < 1000) return;
+    g_lastReport[5] = now;
+    g_log("[spawnctl] seat-activation side=%s slot=%u controller=%llX key=%u headerId=%u room=%02X/%02X choices=%llu regionsUnavailable=%llu point=(%.3f,%.3f,%.3f)",
+          side, slot, static_cast<unsigned long long>(q.controller), q.key, q.headerId,
+          q.stamp.location[0], q.stamp.location[1], static_cast<unsigned long long>(g_seatChoices),
+          static_cast<unsigned long long>(g_seatRegionsUnavailable), point[0], point[1], point[2]);
+}
+
+// Writes the chosen point to out4 and returns its seat (0 = the host's own point). The host
+// and the client run this over the same candidates and the same authored regions.
+std::size_t ChooseActivationPoint(uintptr_t controller, const float* host4,
+                                  const activationseats::SeatPoints& seats, float* out4) {
+    std::copy_n(host4, 4, out4);
+    if (!seats.count) return 0;
+    RegionList regions {};
+    std::size_t count = 0;
+    const bool available = ReadActivationRegions(controller, regions, count);
+    if (!available) ++g_seatRegionsUnavailable;
+    const activationseats::Point host {host4[0], host4[1], host4[2], host4[3]};
+    const auto seat = activationseats::Select(std::span(regions.data(), count), available, host, seats);
+    if (seat) {
+        std::copy_n(seats.points[seat - 1].data(), 4, out4);
+        ++g_seatChoices;
+    }
+    return seat;
+}
+
 void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddress) {
     const auto role = g_role();
     if (g_traceTick.active && g_traceTick.stampAvailable && !g_traceNestedDepth && IsDiagnosticGameThread())
@@ -2196,18 +2309,28 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
     }
     alignas(16) float point[4] {};
     if (role == 1) {
+        // VUH-2864: the remote seats are tested only when the host's own point is in no region.
+        activationseats::SeatPoints seats {};
+        if (!g_seatRequested || !g_seatPredicatesVerified || !g_seats || !g_seats(seats) ||
+            !activationseats::WellFormed(seats)) seats = {};
+        alignas(16) float chosen[4] {};
+        const float* tick = nativePoint;
         if (CopyNative(reinterpret_cast<uintptr_t>(nativePoint), point, sizeof(point)) &&
             FinitePoint(point) && SameStamp(q.stamp) && g_role() == 1) {
             if(!q.mixedEmission && !q.generatedEmission) {
-                g_capture(point);++g_captures;Report(0,"capture",q,point);
+                g_capture(point, seats);++g_captures;Report(0,"capture",q,point);
             } else Report(0,"emission-host",q,point);
+            if (const auto seat = ChooseActivationPoint(reinterpret_cast<uintptr_t>(controller), point, seats, chosen)) {
+                tick = chosen;
+                ReportSeat("host", seats.slots[seat - 1], q, chosen);
+            }
         } else {
             q.reason = "host point/lifecycle unavailable";
             ++g_unavailable;
             Report(3, "unavailable", q);
         }
-        BeginHostEmission(reinterpret_cast<uintptr_t>(controller), nativePoint);
-        OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::HostPassThrough, nativePoint, CallEmissionUpdate(controller, nativePoint));
+        BeginHostEmission(reinterpret_cast<uintptr_t>(controller), tick);
+        OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::HostPassThrough, tick, CallEmissionUpdate(controller, tick));
         FinishHostEmission();
         return;
     }
@@ -2222,7 +2345,8 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
     BeginGeometry(q, role); // All diagnostic native reads precede both lease copies.
     const auto clientReturnMutation = AcquireKnownMutationTicket();
     const bool replay = g_replay && g_replay(q.key, q.headerId, point);
-    const bool havePoint = replay || (!q.mixedEmission && !q.generatedEmission && g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence));
+    activationseats::SeatPoints seats {};
+    const bool havePoint = replay || (!q.mixedEmission && !q.generatedEmission && g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence, &seats));
     if (g_role() != 2) {
         OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::RoleChangedAfterFirstCopy, nativePoint, g_original(controller, nativePoint));
         return;
@@ -2239,7 +2363,7 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
     // The role check above can observe a new session generation and invalidate
     // the first copy while still returning Client. Refresh after that check;
     // no role query or telemetry may invalidate/delay this final copied lease.
-    if (!(replay ? g_replay(q.key, q.headerId, point) : g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence)) || !FinitePoint(point) || !SameStamp(q.stamp)) {
+    if (!(replay ? g_replay(q.key, q.headerId, point) : g_copy(point, reinterpret_cast<uintptr_t>(controller), g_traceTick.sequence, &seats)) || !FinitePoint(point) || !SameStamp(q.stamp)) {
         q.reason = "final host lease unavailable; native tick paused";
         ++g_holds;
         Report(1, "hold", q);
@@ -2247,7 +2371,16 @@ void RunUpdate(void* controller, const float* nativePoint, uintptr_t returnAddre
             g_geometryScope->geometry.originalPhase.hold = OriginalHold::FinalLeaseOrLifecycle;
         return;
     }
+    // VUH-2864: the host's leased seat candidates, chosen the way the host chose. A replayed
+    // emission already carries the host's chosen trigger point.
+    std::size_t seat = 0;
+    if (!replay && seats.count) {
+        alignas(16) float chosen[4] {};
+        seat = ChooseActivationPoint(reinterpret_cast<uintptr_t>(controller), point, seats, chosen);
+        if (seat) std::copy_n(chosen, 4, point);
+    }
     OBSERVE_ORIGINAL_UPDATE(OriginalCallSource::ClientLeaseApply, point, CallEmissionUpdate(controller, point));
+    if (seat) ReportSeat("client", seats.slots[seat - 1], q, point);
     if (g_traceInstalled.load() && g_traceTick.active && !g_traceNestedDepth &&
         g_traceTick.controller == reinterpret_cast<uintptr_t>(controller) &&
         g_traceTick.sequence && g_traceTick.sequence != UINT64_MAX && IsDiagnosticGameThread() &&
@@ -2561,6 +2694,8 @@ void InstallEventGateObserver(bool trace) {
 }
 
 } // namespace
+
+void SetActivationSeats(SeatsFn seats) { g_seats = seats; }
 
 bool EmissionBirthCurrent(const EmissionBirth& birth) noexcept {
     if(!birth.available || !IsDiagnosticGameThread())return false;
@@ -3584,6 +3719,14 @@ bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyF
     g_role = role;
     g_capture = capture;
     g_copy = copy;
+    {
+        char setting[4] {};
+        g_seatRequested = !(GetEnvironmentVariableA("KH2COOP_SEAT_ACTIVATION", setting, sizeof(setting)) == 1 &&
+                            setting[0] == '0');
+        g_seatPredicatesVerified = VerifyRegionPredicates(exeBase);
+        if (g_log) g_log("[spawnctl] seat-activation requested=%u predicates=%u (VUH-2864)",
+                         g_seatRequested ? 1U : 0U, g_seatPredicatesVerified ? 1U : 0U);
+    }
     g_emission = nullptr; g_replay = nullptr; // publish only after both wrapper gates are live
     if (emission && !g_emissionStorage.Init(reinterpret_cast<const void*>(&Install))) {
         if (g_log) g_log("[spawn-emission] unavailable: FLS storage");
@@ -3865,6 +4008,9 @@ void Shutdown() {
     g_role = nullptr;
     g_capture = nullptr;
     g_copy = nullptr;
+    g_seats = nullptr;
+    g_seatPredicatesVerified = false;
+    g_seatChoices = g_seatRegionsUnavailable = 0;
     g_emission = nullptr; g_replay = nullptr;
     g_lastReport = {};
     g_captures = g_applies = g_holds = g_unsupported = g_unavailable = 0;

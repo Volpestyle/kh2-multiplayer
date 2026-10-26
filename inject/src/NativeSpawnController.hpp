@@ -7,16 +7,22 @@
 #include "kh2coop/NativeRecordContentTypes.hpp"
 #include "kh2coop/KnownControllerMutation.hpp"
 #include "kh2coop/RouteSpawnPolicy.hpp"
+#include "kh2coop/ActivationSeats.hpp"
 
 namespace kh2coop::inject::spawncontroller {
 
 using LogFn = void (*)(const char* fmt, ...);
 // Game-thread callbacks. Role is current session authority: 0 off, 1 host, 2 client.
 using RoleFn = std::uint8_t (*)();
-using CaptureFn = void (*)(const float* nativePoint4);
+// The host's own native point and the remote seat candidates the host tested with it.
+using CaptureFn = void (*)(const float* nativePoint4, const activationseats::SeatPoints& seats);
 // False holds a qualified client controller, including its native cooldown.
 // The owner validates epoch, full location, lifecycle, session and lease expiry.
-using CopyFn = bool (*)(float* output4, uintptr_t controller, std::uint64_t updateSequence);
+// seats receives the host's candidates leased with that point (none for a historical replay).
+using CopyFn = bool (*)(float* output4, uintptr_t controller, std::uint64_t updateSequence,
+                        activationseats::SeatPoints* seats);
+// VUH-2864, host only: the remote humans' native positions on the host, in seat order.
+using SeatsFn = bool (*)(activationseats::SeatPoints& out);
 enum class EmissionPhase : std::uint8_t { Reserve, Birth, Cancel, Abandon };
 struct EmissionPermit {
     std::uint64_t sequence{},hostConnection{},hostDelivery{},writerDelivery{};
@@ -523,6 +529,9 @@ TraceStats GetTraceStats();
 bool Install(uintptr_t exeBase, LogFn log, RoleFn role, CaptureFn capture, CopyFn copy,
                bool trace = false, EmissionFn emission = nullptr, ReplayFn replay = nullptr);
 void Shutdown();
+// VUH-2864: either living player starts a wave. Default on; KH2COOP_SEAT_ACTIVATION=0 turns the
+// host's seat candidates off (each controller then ticks with the host's point, as native).
+void SetActivationSeats(SeatsFn seats);
 
 // VUH-2569: exact resident M_EX880 native adapter. This is readiness only;
 // EnemySync owns authenticated source/manifest authority, reservations, child

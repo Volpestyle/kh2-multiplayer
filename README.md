@@ -41,7 +41,7 @@ Hollow Bastion and Land of Dragons first visits via native doors.
 
 ## What works today
 
-**Current source: protocol 37, AvatarBridge 4, WorldBridge 13.** Use matching
+**Current source: protocol 38, AvatarBridge 4, WorldBridge 13.** Use matching
 DLL, runtime and relay products; older preview ZIPs keep their original
 versions and feature limits. The checked-in package validator/pins still target
 protocol 18, so current protocol-36 packaging is blocked until they are refreshed
