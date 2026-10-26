@@ -1,0 +1,218 @@
+{
+ "name": "net_prologue_mansion_hall_friend_down",
+ "description": "VUH-2866 downed variant of net_prologue_mansion_hall.json: after the four wave-1 Dusks die, the friend is downed through the DownedSpike fixture channel's Kill (KH2COOP_DOWNED_SPIKE_FIXTURE=1, a test channel product play never maps; the downing itself is the product's logical downing). Wave 2 must still appear and die on both seats while the other seat fights alone; the downed seat is revived or returned; both load Axel I's room. Rehearsal save. No save.",
+ "playerDefaults": true,
+ "protect": [],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "slotMoves": -1,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+    "KH2COOP_DOWNED_SPIKE_FIXTURE": "1"
+   }
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "slotMoves": -1,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+    "KH2COOP_DOWNED_SPIKE_FIXTURE": "1"
+   }
+  },
+  {
+   "do": "assert",
+   "expr": "room(0)[0] == 2 and room(1)[0] == 2",
+   "message": "the rehearsal save must load Twilight Town on both seats"
+  },
+  {
+   "do": "relay",
+   "port": 27845,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[enemysync] client arrived epoch=', 1) > 0",
+   "timeoutMs": 60000
+  },
+  {
+   "do": "hang_check",
+   "instance": 0,
+   "on": false
+  },
+  {
+   "do": "hang_check",
+   "instance": 1,
+   "on": false
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[prologue] unpinned start', 0) > 0 and log_count('[prologue] unpinned start', 1) > 0",
+   "timeoutMs": 60000,
+   "pollMs": 500
+  },
+  {
+   "do": "pilot",
+   "instance": 0,
+   "route": "tools/rig/route_pilot/routes/fm02_computer_to_hall.json",
+   "seconds": 120,
+   "name": "host_hall",
+   "input": "pad",
+   "allowStuck": true
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('control released at=02/13 evt=134 site=tt19-134', 0) > 0 and log_count('control released at=02/13 evt=134 site=tt19-134', 1) > 0",
+   "timeoutMs": 90000,
+   "pollMs": 500
+  },
+  {
+   "do": "assert",
+   "expr": "all(len([a for a in actors(i) if a['name']=='P_EX110']) == 2 for i in (0, 1))",
+   "message": "both seats must hold both Roxases at tt19-134"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "released_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "released_friend"
+  },
+  {
+   "do": "save",
+   "as": "deaths_before",
+   "expr": "log_count('[enemysync] host death epoch', 0)"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1
+   ],
+   "seconds": 150,
+   "reach": 250,
+   "as": "wave1",
+   "until": "log_count('[enemysync] host death epoch', 0) >= saved['deaths_before'] + 4",
+   "clips": [
+    {
+     "instance": 0,
+     "seconds": 30,
+     "fps": 30,
+     "name": "wave1_host"
+    },
+    {
+     "instance": 1,
+     "seconds": 30,
+     "fps": 30,
+     "name": "wave1_friend"
+    }
+   ]
+  },
+  {
+   "do": "assert",
+   "expr": "log_count('[enemysync] host death epoch', 0) >= saved['deaths_before'] + 4",
+   "message": "wave 1 must finish before the downing"
+  },
+  {
+   "do": "downed_kill",
+   "instance": 1
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[downed] gate intercept', 1) >= 1",
+   "timeoutMs": 5000,
+   "pollMs": 100
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0
+   ],
+   "seconds": 180,
+   "reach": 250,
+   "as": "wave2",
+   "until": "log_count('[enemysync] host death epoch', 0) >= saved['deaths_before'] + 6",
+   "clips": [
+    {
+     "instance": 0,
+     "seconds": 30,
+     "fps": 30,
+     "name": "wave2_host"
+    },
+    {
+     "instance": 1,
+     "seconds": 30,
+     "fps": 30,
+     "name": "wave2_friend"
+    }
+   ]
+  },
+  {
+   "do": "save",
+   "as": "combat",
+   "expr": "{'hostDeaths': log_count('[enemysync] host death epoch', 0) - saved['deaths_before'], 'deathWithoutBinding': log_count('death-without-continuous-binding', 1), 'unmatched': [m['u'] for m in log_matches(r'\\[statehash\\] role=client .* unmatched=(?P<u>\\d+)', 1)][-1:], 'downed': [m['l'] for m in log_matches(r'(?P<l>\\[downed\\] (?:gate intercept|logical hold ended|revive returned|return|owed return).*)', 1)][-6:], 'fullPartyDown': log_count('[downed] full party down', 0)}"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['combat']['hostDeaths'] >= 6 and saved['combat']['deathWithoutBinding'] == 0",
+   "message": "wave 2 must appear and die on both seats while the friend is down"
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[downed] logical hold ended reason', 1) >= 1",
+   "timeoutMs": 60000,
+   "pollMs": 500
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)[:2] == [2, 20] and location(1)[:2] == [2, 20]",
+   "timeoutMs": 90000,
+   "pollMs": 500
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "axel_room_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "axel_room_friend"
+  },
+  {
+   "do": "save",
+   "as": "ends",
+   "expr": "[log_count('[mission-mirror] host end trap=', 0), log_count('client end like the host', 1) + log_count('client fail like the host', 1)]"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['ends'][0] == 1 and saved['ends'][1] <= 1 and saved['combat']['fullPartyDown'] == 0",
+   "message": "one host mission end, followed at most once, and never a full-party down"
+  },
+  {
+   "do": "coop_verdict",
+   "as": "verdict",
+   "require": true
+  }
+ ]
+}

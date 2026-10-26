@@ -1777,6 +1777,65 @@ def step_revive_guard(ctx: Context, step: dict) -> dict:
     return {"events": guard.events, "keepAwaySteps": guard.keepAwaySteps, "openError": guard.openError}
 
 
+DOWNED_CHANNEL_MAGIC, DOWNED_CHANNEL_VERSION, DOWNED_CHANNEL_SIZE = 0x4E574448, 7, 360
+DOWNED_RESULTS = ("Pending", "Ok", "Off", "NotReady", "NotCanonical", "InEvent", "WrongState", "Unsafe",
+                  "Fault", "Unverified", "BadCommand", "Incomplete", "Branch")
+
+
+def step_downed_kill(ctx: Context, step: dict) -> dict:
+    """VUH-2866: down one seat through the DownedSpike fixture channel's Kill (native
+    ApplyStatDelta to 0 HP, then the product's own logical downing). Opt-in: the channel
+    exists only in a game booted with KH2COOP_DOWNED_SPIKE_FIXTURE=1; product play never
+    maps it. Layout: inject/src/DownedSpikeState.hpp (Channel v7)."""
+    inst = ctx.inst(step.get("instance", 0))
+    from ctypes import wintypes as wt
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenFileMappingW.argtypes = [wt.DWORD, wt.BOOL, wt.LPCWSTR]
+    k32.OpenFileMappingW.restype = wt.HANDLE
+    k32.MapViewOfFile.argtypes = [wt.HANDLE, wt.DWORD, wt.DWORD, wt.DWORD, ctypes.c_size_t]
+    k32.MapViewOfFile.restype = ctypes.c_void_p
+    k32.UnmapViewOfFile.argtypes = [ctypes.c_void_p]
+    k32.CloseHandle.argtypes = [wt.HANDLE]
+    FILE_MAP_WRITE, FILE_MAP_READ = 2, 4
+    # Open only: never create a mapping the DLL did not, or the command would go nowhere.
+    handle = k32.OpenFileMappingW(FILE_MAP_WRITE | FILE_MAP_READ, False, f"Local\\kh2coop_downed_{inst.pid}")
+    if not handle:
+        raise StepFailed(f"no downed fixture channel on instance {inst.index}: boot it with "
+                         "KH2COOP_DOWNED_SPIKE_FIXTURE=1 (and the downed feature on)")
+    view = k32.MapViewOfFile(handle, FILE_MAP_WRITE | FILE_MAP_READ, 0, 0, DOWNED_CHANNEL_SIZE)
+    try:
+        if not view:
+            raise StepFailed("downed fixture channel did not map")
+        magic, version, request, done = struct.unpack("<IIii", ctypes.string_at(view, 16))
+        if magic != DOWNED_CHANNEL_MAGIC or version != DOWNED_CHANNEL_VERSION:
+            raise StepFailed(f"downed fixture channel magic/version {magic:#x}/{version}, want "
+                             f"{DOWNED_CHANNEL_MAGIC:#x}/{DOWNED_CHANNEL_VERSION}")
+        if request != done:
+            raise StepFailed(f"downed fixture channel busy: requestSeq={request} doneSeq={done}")
+        seq = request + 1
+        # The DLL reads command after it sees requestSeq move; write the command first.
+        ctypes.memmove(view + 16, struct.pack("<I", 1), 4)  # Command::Kill
+        ctypes.memmove(view + 8, struct.pack("<i", seq), 4)
+        deadline = time.monotonic() + step.get("timeoutMs", 5000) / 1000
+        while True:
+            done, = struct.unpack("<i", ctypes.string_at(view + 12, 4))
+            if done == seq:
+                break
+            if time.monotonic() >= deadline:
+                raise StepFailed(f"downed Kill seq={seq} not handled in time (gameplay frames stopped?)")
+            ctx.check_all()
+            time.sleep(0.05)
+        code, = struct.unpack("<i", ctypes.string_at(view + 20, 4))
+    finally:
+        if view:
+            k32.UnmapViewOfFile(view)
+        k32.CloseHandle(handle)
+    result = DOWNED_RESULTS[code] if 0 <= code < len(DOWNED_RESULTS) else str(code)
+    if result != "Ok" and step.get("require", True):
+        raise StepFailed(f"downed Kill on instance {inst.index} returned {result}")
+    return {"instance": inst.index, "seq": seq, "result": result}
+
+
 def step_relay(ctx: Context, step: dict) -> dict:
     """Start the relay (kh2coop_server) on loopback for this run."""
     port = str(step.get("port", 7782))
@@ -5218,7 +5277,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "press": step_press, "wait": step_wait, "wait_until": step_wait_until, "checkpoint": step_checkpoint,
          "fight": step_fight,
          "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check, "coop_verdict": step_coop_verdict,
-         "revive_guard": step_revive_guard,
+         "revive_guard": step_revive_guard, "downed_kill": step_downed_kill,
          "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "pilot_wait": step_pilot_wait, "pilot_until": step_pilot_until, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,

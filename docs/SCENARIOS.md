@@ -3359,6 +3359,20 @@ for any natural downing; no downing leaves revival unqualified. Its two-screen
 30-second clip blocks explicitly disclose startup/encoder gaps and still need
 caption assembly and visual review before being used as kill evidence.
 
+### Forcing a downing: `downed_kill` (VUH-2866)
+
+`{"do": "downed_kill", "instance": i}` downs seat i on cue. It sends the
+DownedSpike fixture channel's Kill (`docs/DOWNED_REVIVE.md`, "Test channel"):
+native ApplyStatDelta to 0 HP, after which the product's own logical downing
+takes over. The channel exists only in a game booted with
+`KH2COOP_DOWNED_SPIKE_FIXTURE=1` in that boot step's `env`; product play never
+maps it. The step opens the mapping and never creates it, checks magic and
+version 7, and waits up to `timeoutMs` (5000) for the DLL to handle the
+request. It fails unless the result is `Ok`; `"require": false` records the
+refusal instead (`WrongState` when already downed, `InEvent`, `Branch`...).
+`net_prologue_mansion_hall_{host,friend}_down.json` use it between the Basement
+Hall's two waves. Test: `tests/test_downed_kill_step.py`.
+
 
 Thorn fight routes may opt into `blockedThornProbe`: after one second with less
 than15 units of canonical movement just outside melee reach, a selected live307
