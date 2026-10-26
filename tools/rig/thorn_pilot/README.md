@@ -182,10 +182,30 @@ gate, the engagement bound and the cooldown are described in the review packet's
 - **Logs.** `coop_tether` / `coop_tether_end` per episode, with end reasons `released`, `yield`, `creeper`, `core` and
   `off`; `partner_tether_summary` per fight.
 
+## Committing to the grounded head in the volley (lead #355)
+
+`thorn_headcommit.py` sits over `thorn_tether.py` and is run with `run_headcommit.py` and the `_creeper_headcommit`
+scenario.
+
+- **Why.** Thorn's second dazed opening starts only at ≤ ~175 HP. That was 155–175 in all 7 runs that got one, and all 7
+  then killed or nearly killed. Runs stall at 199–260 in the 202 → 222 → 152/153 → 0 loop.
+  - During 202 the head lies grounded ~1700 from Thorn's root (87% of samples), and the seats' hits land there.
+  - `thorn_head.head_turn` caps an approach at 3 s, and 54 of 198 friend approaches to the grounded head stopped about
+    700 short.
+- **What.** It's opt-in per fight step: `"headCommit202": true`. While Thorn is in motion 202 with its head grounded
+  (`headPos` y > −300), each head turn's own head read refreshes the approach clock, so the 3 s cap never runs out.
+  - With the head raised, or outside 202, the cap is as before.
+  - When Thorn leaves 202 after such a commitment, the clock is cleared, so the next approach gets its own 3 s.
+  - Head reads outside the head turn (Creeper-first, the hold-off, the tether) never touch it.
+  - `head_action`'s yields (RC, under 40% HP, a downed seat, an unknown head) and every higher layer still win.
+- **Logs.** `head_commit_202`, once per 202 occurrence, with the head position and gap; `head_commit_summary` per fight
+  (occurrences, refreshes, exits).
+
 ## Checks and analysis
 
 - `tests/test_thorn_creeper.py`, `tests/test_thorn_rescue.py`, `tests/test_thorn_orbhold.py`,
-  `tests/test_thorn_protect.py`, `tests/test_thorn_potion.py` and `tests/test_thorn_tether.py`: offline controls (ctest
+  `tests/test_thorn_protect.py`, `tests/test_thorn_potion.py`, `tests/test_thorn_tether.py` and
+  `tests/test_thorn_headcommit.py`: offline controls (ctest
   `kh2coop_py_test_thorn_*`).
 - `creeper_report.py RUN_DIR...`: per run, the kill, Thorn's end HP, Creeper kills, atk-400 host downs, revive
   exposures and Creeper turns.
