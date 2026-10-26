@@ -142,16 +142,17 @@
    "message": "the host must log that seat 1's point started a group"
   },
   {
-   "do": "clip_wait"
-  },
-  {
    "do": "pilot",
    "instance": 1,
    "route": "tools/rig/route_pilot/routes/twilight_thorn_calling_path.json",
    "name": "friend_calling_path",
    "seconds": 420,
    "input": "pad",
-   "background": true
+   "background": true,
+   "externalEvidence": true
+  },
+  {
+   "do": "clip_wait"
   },
   {
    "do": "clip",
