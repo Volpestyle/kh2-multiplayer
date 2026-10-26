@@ -3370,8 +3370,26 @@ maps it. The step opens the mapping and never creates it, checks magic and
 version 7, and waits up to `timeoutMs` (5000) for the DLL to handle the
 request. It fails unless the result is `Ok`; `"require": false` records the
 refusal instead (`WrongState` when already downed, `InEvent`, `Branch`...).
-`net_prologue_mansion_hall_{host,friend}_down.json` use it between the Basement
-Hall's two waves. Test: `tests/test_downed_kill_step.py`.
+`net_prologue_mansion_hall_{host,friend}_down.json` use it in the Basement Hall.
+Test: `tests/test_downed_kill_step.py`.
+
+A downing proves "down before the wave" only if it came first. Review found
+(VUH-2869) that the first draft of those variants forced the downing after
+wave 1 and accepted a wave 2 that had already begun. The expression helper
+`downed_wave_order(downed, marker[, wave_object=309])`
+(`tools/scenario/downed_order.py`) orders each seat's own log after `marker`:
+- the one `[downed] kill actor=` line and the fresh episode its intercept
+  names;
+- the line where each seat first names that episode;
+- each seat's first line about the wave's object;
+- the downed seat's later hold end, revive or return for that episode.
+
+It returns `ok`/`why`, `episodeSeen`, `waveStarted` and `ended`. The variants
+stop wave 1 at two of its four deaths, refuse to continue if wave 2 has started,
+down the seat, and wait until both seats name the episode. Only then does the
+other seat finish both waves. The end requires `ok`. Test:
+`tests/test_downed_wave_order.py`, which covers the checker and the variants'
+own steps through the runner's Context.
 
 
 Thorn fight routes may opt into `blockedThornProbe`: after one second with less

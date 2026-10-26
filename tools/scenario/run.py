@@ -375,6 +375,9 @@ class Context:
                 "location": location, "log_matches": log_matches, "mission": mission,
                 "range": range, "round": round, "int": int, "str": str, "sorted": sorted, "set": set, "sum": sum,
                 "chests": lambda index=0: chest_records(self, index),
+                "downed_wave_order": lambda downed, marker, wave_object=309: _downed_order.wave_order(
+                    [(LOGS / f"kh2coop_inject_{self.inst(i).pid}.log").read_text(errors="replace") for i in (0, 1)],
+                    downed, marker, wave_object),
                 "exists": lambda path: (ROOT / path).exists()}
 
     def eval(self, expr: str):
@@ -5302,6 +5305,12 @@ _coop_verdict_spec = _importlib_util.spec_from_file_location(
     "kh2coop_coop_verdict", Path(__file__).with_name("coop_verdict.py"))
 _coop_verdict = _importlib_util.module_from_spec(_coop_verdict_spec)
 _coop_verdict_spec.loader.exec_module(_coop_verdict)
+
+# VUH-2869: the forced-downing/wave ordering checker (pure, over the seats' logs).
+_downed_order_spec = _importlib_util.spec_from_file_location(
+    "kh2coop_downed_order", Path(__file__).with_name("downed_order.py"))
+_downed_order = _importlib_util.module_from_spec(_downed_order_spec)
+_downed_order_spec.loader.exec_module(_downed_order)
 
 _resync_spec = _importlib_util.spec_from_file_location(
     "kh2coop_resync_evidence", Path(__file__).with_name("resync_evidence.py"))

@@ -1,6 +1,6 @@
 {
  "name": "net_prologue_mansion_hall_friend_down",
- "description": "VUH-2866 downed variant of net_prologue_mansion_hall.json: after the four wave-1 Dusks die, the friend is downed through the DownedSpike fixture channel's Kill (KH2COOP_DOWNED_SPIKE_FIXTURE=1, a test channel product play never maps; the downing itself is the product's logical downing). Wave 2 must still appear and die on both seats while the other seat fights alone; the downed seat is revived or returned; both load Axel I's room. Rehearsal save. No save.",
+ "description": "VUH-2866 downed variant of net_prologue_mansion_hall.json (ordering: VUH-2869). Both seats fight wave 1 until two of its four Dusks are dead, so wave 2 cannot have started. Then the friend is downed through the DownedSpike fixture channel's Kill (KH2COOP_DOWNED_SPIKE_FIXTURE=1, a test channel product play never maps; the downing itself is the product's logical downing), and the run waits until both seats name that fresh episode. Only then does the other seat finish wave 1 and fight wave 2 alone. downed_wave_order (tools/scenario/downed_order.py) must show, in each seat's own log, the episode before the first wave-2 (309) line, and the downed seat's hold end, revive or return for that episode. Both seats then load Axel I's room. Rehearsal save. No save.",
  "playerDefaults": true,
  "protect": [],
  "steps": [
@@ -111,27 +111,18 @@
    ],
    "seconds": 150,
    "reach": 250,
-   "as": "wave1",
-   "until": "log_count('[enemysync] host death epoch', 0) >= saved['deaths_before'] + 4",
-   "clips": [
-    {
-     "instance": 0,
-     "seconds": 30,
-     "fps": 30,
-     "name": "wave1_host"
-    },
-    {
-     "instance": 1,
-     "seconds": 30,
-     "fps": 30,
-     "name": "wave1_friend"
-    }
-   ]
+   "as": "wave1_first_half",
+   "until": "log_count('[enemysync] host death epoch', 0) >= saved['deaths_before'] + 2"
+  },
+  {
+   "do": "save",
+   "as": "before_down",
+   "expr": "downed_wave_order(1, 'control released at=02/13 evt=134 site=tt19-134')"
   },
   {
    "do": "assert",
-   "expr": "log_count('[enemysync] host death epoch', 0) >= saved['deaths_before'] + 4",
-   "message": "wave 1 must finish before the downing"
+   "expr": "not any(saved['before_down']['waveStarted']) and log_count('[enemysync] host death epoch', 0) - saved['deaths_before'] < 4",
+   "message": "wave 2 had already started, or wave 1 was over, before the forced downing: this run cannot prove the variant"
   },
   {
    "do": "downed_kill",
@@ -139,16 +130,26 @@
   },
   {
    "do": "wait_until",
-   "expr": "log_count('[downed] gate intercept', 1) >= 1",
+   "expr": "downed_wave_order(1, 'control released at=02/13 evt=134 site=tt19-134')['episodeSeen'] == [True, True]",
    "timeoutMs": 5000,
    "pollMs": 100
+  },
+  {
+   "do": "save",
+   "as": "down_seen",
+   "expr": "downed_wave_order(1, 'control released at=02/13 evt=134 site=tt19-134')"
+  },
+  {
+   "do": "assert",
+   "expr": "not any(saved['down_seen']['waveStarted'])",
+   "message": "wave 2 started before both seats knew the forced episode"
   },
   {
    "do": "fight",
    "instances": [
     0
    ],
-   "seconds": 180,
+   "seconds": 240,
    "reach": 250,
    "as": "wave2",
    "until": "log_count('[enemysync] host death epoch', 0) >= saved['deaths_before'] + 6",
@@ -170,18 +171,28 @@
   {
    "do": "save",
    "as": "combat",
-   "expr": "{'hostDeaths': log_count('[enemysync] host death epoch', 0) - saved['deaths_before'], 'deathWithoutBinding': log_count('death-without-continuous-binding', 1), 'unmatched': [m['u'] for m in log_matches(r'\\[statehash\\] role=client .* unmatched=(?P<u>\\d+)', 1)][-1:], 'downed': [m['l'] for m in log_matches(r'(?P<l>\\[downed\\] (?:gate intercept|logical hold ended|revive returned|return|owed return).*)', 1)][-6:], 'fullPartyDown': log_count('[downed] full party down', 0)}"
+   "expr": "{'hostDeaths': log_count('[enemysync] host death epoch', 0) - saved['deaths_before'], 'deathWithoutBinding': log_count('death-without-continuous-binding', 1), 'unmatched': [m['u'] for m in log_matches(r'\\[statehash\\] role=client .* unmatched=(?P<u>\\d+)', 1)][-1:], 'fullPartyDown': log_count('[downed] full party down', 0)}"
   },
   {
    "do": "assert",
-   "expr": "saved['combat']['hostDeaths'] >= 6 and saved['combat']['deathWithoutBinding'] == 0",
+   "expr": "saved['combat']['hostDeaths'] >= 6 and saved['combat']['deathWithoutBinding'] == 0 and saved['combat']['unmatched'][-1:] in ([], ['0'])",
    "message": "wave 2 must appear and die on both seats while the friend is down"
   },
   {
    "do": "wait_until",
-   "expr": "log_count('[downed] logical hold ended reason', 1) >= 1",
+   "expr": "downed_wave_order(1, 'control released at=02/13 evt=134 site=tt19-134')['ended']",
    "timeoutMs": 60000,
    "pollMs": 500
+  },
+  {
+   "do": "save",
+   "as": "order",
+   "expr": "downed_wave_order(1, 'control released at=02/13 evt=134 site=tt19-134')"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['order']['ok'] and saved['order']['episode'] == saved['down_seen']['episode']",
+   "message": "the forced episode must precede wave 2 on both seats and end on the downed seat (see saved order.why)"
   },
   {
    "do": "wait_until",
