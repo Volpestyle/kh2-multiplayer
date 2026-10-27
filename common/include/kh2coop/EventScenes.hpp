@@ -36,12 +36,13 @@ inline constexpr std::array<Scene, 15> Scenes {{
     // event-only load started by the previous one's native start; the friend's own 315 exit is the first.
     // Logged in hex (rooms) as 02/00 51 -> 02/04 83 -> 02/02 67 -> 02/06 168 -> 02/02 167 -> 02/15 142;
     // programs are logged decimal. Room 0x15 is 21.
-    // VUH-2918, run 20261027-114125 (VUH-2763 qualification): after 02/15 142 the host plays the me4
-    // movie and loads 02/01 54, then 02/01 59, each event-only (the gameplay gate stays closed and
-    // field play lasts only the frame of the next native start), then 02/03 door 50 map 2 evt 2. With
-    // neither 02/01 load announced, the friend waited at its own blocked exit to 02/01 54 for the rest
-    // of the run. 02/03 door 50 is the field arrival (a door-50 load, battle 0) and stays unqualified:
-    // it is announced from field play like any room.
+    // VUH-2918, run 20261027-114125 (VUH-2763 qualification): after 02/15 142 the host loads 02/01 54,
+    // where it plays the me4 movie, then 02/01 59, each event-only (the gameplay gate stays closed and
+    // field play lasts only the frame of the next native start). With neither 02/01 load announced, the
+    // friend waited at its own blocked exit to 02/01 54 for the rest of the run. After them the host
+    // plays two more event loads, 02/03 door 50 map 2 evt 2 and 02/05 evt 1, left unqualified here, and
+    // reaches field play at 02/05 door 50 evt 2; the friend skips the two, its blocked exit to 02/03
+    // taking that field announcement (run 20261027-125601).
     {2, 0, 0, 51, 51, 51, "tt00-after-thorn"},
     {2, 4, 0, 83, 83, 83, "tt04-after-thorn"},
     {2, 2, 0, 67, 67, 67, "tt02-after-thorn-67"},

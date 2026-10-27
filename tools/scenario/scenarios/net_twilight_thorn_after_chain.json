@@ -1,6 +1,6 @@
 {
   "name": "net_twilight_thorn_after_chain",
-  "description": "VUH-2918: the movie qualification route through an assisted Thorn kill, then both seats through the post-Thorn chain (02/15 142, me4 in 02/01 54, 02/01 59) to the same 02/03 field, with Cross pressed for 02/03's opening dialog.",
+  "description": "VUH-2918: the movie qualification route through an assisted Thorn kill, then both seats through the post-Thorn chain (02/15 142, me4 in 02/01 54, 02/01 59) to the same 02/05 field (door 50 evt 2), with Cross pressed for the host's 02/03 opening dialog.",
   "testOnly": [
     "enemy_hp_write"
   ],
@@ -352,126 +352,12 @@
     },
     {
       "do": "wait_until",
-      "expr": "location(1)==location(0)==[2,3,50,2,0,2]",
+      "expr": "location(1)==location(0)==[2,5,50,0,0,2]",
       "timeoutMs": 300000
     },
     {
-      "do": "press",
-      "instance": 1,
-      "button": "cross",
-      "ms": 120,
-      "times": 4,
-      "gapMs": 1000
-    },
-    {
-      "do": "press",
-      "instance": 0,
-      "button": "cross",
-      "ms": 120,
-      "times": 1
-    },
-    {
-      "do": "wait",
-      "ms": 2000
-    },
-    {
-      "do": "press",
-      "instance": 1,
-      "button": "cross",
-      "ms": 120,
-      "times": 4,
-      "gapMs": 1000
-    },
-    {
-      "do": "press",
-      "instance": 0,
-      "button": "cross",
-      "ms": 120,
-      "times": 1
-    },
-    {
-      "do": "wait",
-      "ms": 2000
-    },
-    {
-      "do": "press",
-      "instance": 1,
-      "button": "cross",
-      "ms": 120,
-      "times": 4,
-      "gapMs": 1000
-    },
-    {
-      "do": "press",
-      "instance": 0,
-      "button": "cross",
-      "ms": 120,
-      "times": 1
-    },
-    {
-      "do": "wait",
-      "ms": 2000
-    },
-    {
-      "do": "press",
-      "instance": 1,
-      "button": "cross",
-      "ms": 120,
-      "times": 4,
-      "gapMs": 1000
-    },
-    {
-      "do": "press",
-      "instance": 0,
-      "button": "cross",
-      "ms": 120,
-      "times": 1
-    },
-    {
-      "do": "wait",
-      "ms": 2000
-    },
-    {
-      "do": "press",
-      "instance": 1,
-      "button": "cross",
-      "ms": 120,
-      "times": 4,
-      "gapMs": 1000
-    },
-    {
-      "do": "press",
-      "instance": 0,
-      "button": "cross",
-      "ms": 120,
-      "times": 1
-    },
-    {
-      "do": "wait",
-      "ms": 2000
-    },
-    {
-      "do": "press",
-      "instance": 1,
-      "button": "cross",
-      "ms": 120,
-      "times": 4,
-      "gapMs": 1000
-    },
-    {
-      "do": "press",
-      "instance": 0,
-      "button": "cross",
-      "ms": 120,
-      "times": 1
-    },
-    {
-      "do": "wait",
-      "ms": 2000
-    },
-    {
       "do": "wait_until",
-      "expr": "location(0)==location(1)==[2,3,50,2,0,2] and peek('0xB65210','u32',0)==0 and peek('0x2A11478','u32',0)==0 and peek('0xB65210','u32',1)==0 and peek('0x2A11478','u32',1)==0",
+      "expr": "location(0)==location(1)==[2,5,50,0,0,2] and peek('0xB65210','u32',0)==0 and peek('0x2A11478','u32',0)==0 and peek('0xB65210','u32',1)==0 and peek('0x2A11478','u32',1)==0",
       "timeoutMs": 120000
     },
     {
@@ -492,12 +378,12 @@
     {
       "do": "capture",
       "instance": 0,
-      "name": "host_tt03_field"
+      "name": "host_tt05_field"
     },
     {
       "do": "capture",
       "instance": 1,
-      "name": "friend_tt03_field"
+      "name": "friend_tt05_field"
     }
   ]
 }

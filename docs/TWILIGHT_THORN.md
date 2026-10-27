@@ -499,14 +499,18 @@ host announced none of them, and the friend waited at its own blocked native exi
 02/00 51 (the authored exit above). The first six are now qualified scenes (`EventScenes.hpp`): the host
 announces each at its load and the friend loads and plays it natively, as in the prologue's post-Axel
 chain. The chain's end was observed in the VUH-2763 qualification (run `20261027-114125`, VUH-2918):
-after 02/15 142 the host plays the me4 movie (Roxas to Sora), loads 02/01 54 and 02/01 59, both
-event-only (the gameplay gate stays closed; field play lasts only the frame of the next native start),
-then 02/03 door 50 map 2 evt 2, the field arrival. With 02/01 54 unqualified the friend waited at its own
-blocked exit to it for the rest of that run and never played the movie. 02/01 54 and 59 are now
-qualified scenes too, so the chain is qualified through 02/01 59; 02/03 door 50 is announced from field
-play. The host sat in 02/03's opening event (`cutscene=2 event=1`) for the rest of that run with no
-input after the fight pilots ended, so a proof run advances it. The friend's arrival past the chain
-is not yet proven live.
+after 02/15 142 the host loads 02/01 54, where it plays the me4 movie (Roxas to Sora), then 02/01 59,
+both event-only (the gameplay gate stays closed; field play lasts only the frame of the next native
+start). With 02/01 54 unqualified the friend waited at its own blocked exit to it for the rest of that
+run and never played the movie. 02/01 54 and 59 are now qualified scenes too, so the chain is qualified
+through 02/01 59. After it the host plays two more event loads, 02/03 door 50 map 2 evt 2 (an opening
+dialog that waits for input) and 02/05 evt 1, and reaches field play at 02/05 door 50 evt 2, which it
+announces. Proof run `20261027-125601` (VUH-2918, accepted from receipts; its scenario runner was red
+because it expected the field at 02/03): the host announced 02/01 54 and 59 (epochs 10/11), the friend
+loaded both from its own blocked exits and played its own me4 through its SaveGuard twin, and both seats
+ended in 02/05 door 50 evt 2 with field play and no event. The friend currently skips 02/03 door 50 and
+02/05 evt 1: its blocked exit to 02/03 takes the host's 02/05 field announcement instead. Whether they
+should be qualified scenes is a follow-up under VUH-2569.
 A returning seat's recovery capture is refused in a qualified scene (it waits, epoch unspent, for a later
 field), so post-Thorn recovery now waits past this chain too; its convergence after the chain is unproven.
 
