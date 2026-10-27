@@ -18,6 +18,7 @@
 
 #include "Warp.hpp"
 #include "AxelBoundaryTrace.hpp"
+#include "CombatAdmissionNative.hpp"
 #include "EnemySync.hpp"
 #include "ProgressSync.hpp"
 #include "PrologueParty.hpp"
@@ -294,6 +295,14 @@ void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t 
         return;
     }
     BeginTransition();
+    {   // VUH-2897: release a held admission while the old room's native identity still matches,
+        // then arm only the exact Mansion -> Axel request. Never forwards the request later.
+        const auto from = ReadLocation();
+        combatadmission::NoteHostRequest({from.worldId, from.roomId, from.door, from.mapProgram, from.battleProgram,
+                                          from.eventProgram},
+                                         {to->world, to->room, to->door, to->map, to->battle, to->event},
+                                         g_transitionSerial);
+    }
     const bool travel = TravelWorld(to->world) && !g_travelRequested;
     if (TravelWorld(to->world)) g_travelRequested = true;
     if (travel && g_log) g_log("[travel] native request target=%02X/%02X door=%u from=%02X/%02X",
@@ -313,6 +322,7 @@ void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t 
 void CompleteLoad() {
     ++g_loadSerial;
     axeltrace::Point("load-finalizers-returned", g_loadSerial);
+    combatadmission::NoteLoad(g_loadSerial, g_transitionSerial); // binds an armed request; retires an old lease
     const bool hostIssued = g_hostCause.issued && g_transitionPending && LoadCauseCurrent(g_hostCause) &&
         g_hostCause.issueTransition == g_transitionSerial && g_hostCause.loadBefore != UINT32_MAX &&
         g_loadSerial == g_hostCause.loadBefore + 1;

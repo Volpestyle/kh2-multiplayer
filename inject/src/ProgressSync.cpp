@@ -1,6 +1,7 @@
 #include "ProgressSync.hpp"
 #include "EnemySync.hpp"
 #include "Warp.hpp"
+#include "CombatAdmissionNative.hpp"
 #include "kh2coop/KH2Offsets.hpp"
 #include "kh2coop/ProgressAllowList.hpp"
 
@@ -237,7 +238,9 @@ void Tick(std::uint32_t frame, bool host, bool client) {
         g_role = role;
     }
     g_hostSampleReady = false;
-    if (role != Role::Host || !SafeGameplay()) return;
+    // VUH-2897 (S3): the barrier's own retained intro freeze admits this sample (progress precedes
+    // the room publication it gates); no other progress gate is relaxed.
+    if (role != Role::Host || (!SafeGameplay() && !combatadmission::PublicationHoldQualifies())) return;
     Save live {};
     if (!ReadSave(live)) return;
     if (!FlushHostPacket()) return;

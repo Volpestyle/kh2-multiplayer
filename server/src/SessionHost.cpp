@@ -1046,6 +1046,36 @@ void SessionHost::onReceive(TransportPeer* peer, const std::uint8_t* data,
                 rcdiag::Note(rcdiag::Stage::RelayCompletion,forwarded?"forward-true":"forward-false","sendTo-returned-not-delivery",entered,[&](const char* line){log(std::string(line));});
                 break;
             }
+            case PacketType::CombatAdmissionAck: {
+                // VUH-2897: a friend's arrival receipt for the host's combat-admission barrier. Admitted
+                // from a verified, unquarantined client through its own envelope, for the admitted room's
+                // epoch and full destination; the sequence is consumed first. The host alone receives it,
+                // owner-stamped; the host's lease binds the challenge, seat and delivery.
+                CombatAdmissionAck m; read(reader, m);
+                auto* host = hostPeer(); const char* why = "unknown";
+                if (rcdiag::Reject(!reader.atEnd(), "trailing-bytes", why) ||
+                    rcdiag::Reject(ps->status != PeerStatus::Verified, "peer-unverified", why) ||
+                    rcdiag::Reject(fromHost(*ps), "host-author", why) || rcdiag::Reject(ps->worldQuarantined, "quarantined", why) ||
+                    rcdiag::Reject(!admittedScope, "envelope-missing", why) ||
+                    rcdiag::Reject(admittedScope && admittedScope->sourceConnectionId != ps->connectionId, "envelope-source", why) ||
+                    rcdiag::Reject(!room_, "room-missing", why) || rcdiag::Reject(room_ && !room_->epoch, "room-epoch-zero", why) ||
+                    rcdiag::Reject(!host, "host-missing", why) || rcdiag::Reject(host && !host->transportPeer, "host-transport-missing", why) ||
+                    rcdiag::Reject(m.ownerSlot != 0xFF, "wire-owner-not-ff", why) ||
+                    rcdiag::Reject(m.seq <= ps->lastCombatAdmissionAckSeq, "sequence-floor", why) ||
+                    rcdiag::Reject(m.requesterConnectionId != ps->connectionId, "requester-peer", why) ||
+                    rcdiag::Reject(!sameResyncRoom(m.location, *room_), "room", why) ||
+                    rcdiag::Reject(!room_->admissionChallenge || m.challenge != room_->admissionChallenge, "challenge", why)) {
+                    log(std::string("CombatAdmissionAck refused peer=") + ps->peerId + " reason=" + why);
+                    ++rejectedWorld_;
+                    return;
+                }
+                ps->lastCombatAdmissionAckSeq = m.seq;
+                m.ownerSlot = static_cast<std::uint8_t>(ps->assignedSlot);
+                const bool forwarded = sendTo(host->transportPeer, encode(m), true);
+                log("CombatAdmissionAck owner=" + std::to_string(m.ownerSlot) + " seq=" + std::to_string(m.seq) +
+                    " epoch=" + std::to_string(m.location.epoch) + " forwarded=" + std::to_string(forwarded ? 1 : 0));
+                break;
+            }
             case PacketType::StageEnd: {
                 // VUH-2555: a friend's own script ended a host-led prologue stage. Admitted only from a
                 // verified client at the host's admitted room; stamped and broadcast to every verified

@@ -464,6 +464,16 @@ if(WIN32)
         target_compile_options(kh2coop_axel_boundary_trace_test PRIVATE /W4 /WX)
     endif()
 
+    # VUH-2897: combat-admission adapter over an owned executable image; real teardown
+    # call-site and 3BF2C0 bytes run, MinHook is stubbed.
+    add_executable(kh2coop_combat_admission_native_test tests/CombatAdmissionNativeTest.cpp)
+    target_include_directories(kh2coop_combat_admission_native_test PRIVATE runtime/include
+        $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(kh2coop_combat_admission_native_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_combat_admission_native_test PRIVATE /W4 /WX)
+    endif()
+
     # VUH-2881: actual orb detours and thread logging, no native hooks installed.
     add_executable(kh2coop_struggle_orbs_hook_test tests/StruggleOrbsHookTest.cpp)
     target_include_directories(kh2coop_struggle_orbs_hook_test PRIVATE common/include
@@ -832,6 +842,22 @@ if(MSVC)
     target_compile_options(kh2coop_downed_return_test PRIVATE /W4 /WX)
 else()
     target_compile_options(kh2coop_downed_return_test PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+# VUH-2897: CombatAdmissionAck framing and relay admission over loopback ENet.
+add_executable(kh2coop_combat_admission_net_test tests/CombatAdmissionNetTest.cpp)
+target_link_libraries(kh2coop_combat_admission_net_test PRIVATE kh2coop_server_core kh2coop_common)
+if(MSVC)
+    target_compile_options(kh2coop_combat_admission_net_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_combat_admission_net_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+# VUH-2897: combat-admission lease (inject/src/CombatAdmission.hpp), std-only.
+add_executable(kh2coop_combat_admission_test tests/CombatAdmissionTest.cpp)
+target_include_directories(kh2coop_combat_admission_test PRIVATE inject/src)
+if(MSVC)
+    target_compile_options(kh2coop_combat_admission_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_combat_admission_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 # VUH-2617 (a): which updating actor the default-off Thorn hit trace may read.
 add_executable(kh2coop_thorn_hit_trace_test tests/ThornHitTraceTest.cpp)

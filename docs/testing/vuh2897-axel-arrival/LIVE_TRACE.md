@@ -181,3 +181,32 @@ reviewed for private content and the excerpt passed strict decoding. The full
 source host recording emitted a decoder warning during overview extraction;
 the original is retained, and no clean-full-video claim is made. There is no
 Axel transition video in this fixture. Logs establish the hit/arrival ordering.
+
+## Live checks for the barrier
+
+The behavior change is described in [BARRIER.md](BARRIER.md). It is offline-qualified
+only. These checks need a lead-scheduled run of the Mansion → Axel fixture on the barrier
+build, with the trace flag on both seats. Judge from the raw `[combat-admission]` and
+`[axel-boundary]` rows.
+
+1. **Admission.** The host logs `deferred group=0` and `deferred group=1`, `owned=18`
+   (groups 3 and 4), `published`, the friend's `client ack queued`, then `ack … accepted`
+   and `released admitted`. The host's first canonical-player HP loss comes after
+   `admission-release`. Both seats' arrivals precede the first Axel hit, and both native
+   intros complete.
+2. **No damage during the hold.** Neither Axel nor any projectile changes the host's HP
+   between `admission-defer` and `admission-release`, and no `hp-loss-during-hold` row
+   appears. The hold freezes BOSS/ZAKO groups 3/4 through the native setter; frozen actors
+   skip only their control slot, and collision/damage under the freeze is unproven offline.
+3. **Normal start after release.** Axel's AI starts normally on both seats: first action
+   and hits after release, no stuck idle. The HUD and battle music come up normally (S4).
+4. **Timeout path, once.** A run with `KH2COOP_COMBAT_ADMISSION_ACK=0` on the friend
+   logs `outcome=deadline failed=1 missingSeats=2` about 15 s after the first deferral.
+   Then it logs `released failed-barrier native-fallback`, and play continues natively.
+   The gap between `admission-decided` and `admission-release` shows the owner service
+   bound (expected ≤250 ms). Repeat with the pause menu open across expiry, if the rig can
+   hold it there.
+5. **Saves.** Saves and install are unchanged (the standard closure).
+
+Downing, Continue, disconnect and reload exits are covered offline and need no dedicated
+run, unless one happens naturally.

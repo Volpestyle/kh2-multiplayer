@@ -38,6 +38,7 @@ struct PeerState {
     std::uint64_t hostSourceFloor{0};
     std::uint32_t lastHitClaimSeq{0}; // accepted claims, connection-wide (not room-wide)
     std::uint64_t lastScriptReactionCompletionSeq{};
+    std::uint64_t lastCombatAdmissionAckSeq{}; // VUH-2897: connection-wide floor
     std::uint32_t lastStageEndSeq{0}; // VUH-2555: accepted stage-end reports, connection-wide
     std::uint32_t lastRoomReplaySeq{0}, roomReplayEpoch{0}; // VUH-2679: accepted replay requests; one per epoch
 

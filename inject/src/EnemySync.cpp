@@ -16,6 +16,7 @@
 
 #include "EnemySync.hpp"
 #include "AxelBoundaryTrace.hpp"
+#include "CombatAdmissionNative.hpp"
 #include "CombatCausalTrace.hpp"
 #include "CausalDisappearance.hpp"
 #include "OrdinaryEnemyBinding.hpp"
@@ -348,11 +349,14 @@ struct HostRoom {
     std::uint16_t world = 0xFFFF, room = 0xFFFF, btl = 0;
     bool arrived = false;
     bool ackSent = false;
+    std::uint64_t admissionChallenge = 0; // VUH-2897: the host's barrier challenge for this epoch, 0 = none
+    bool admissionAckSent = false;
     bool manifestComplete = false; // only fully framed replace or checked bootstrap
     bool holdActive = false;       // VUH-2679: the host's EventHold for this epoch is active
     std::map<std::uint16_t, HostEnemy> enemies;  // by netId
 };
 HostRoom g_host;
+std::uint64_t g_admissionAckSeq = 0; // VUH-2897: strictly increasing per process (relay floor is per connection)
 // VUH-2679: this client's pending rebuild of a room built in the two-player clone layout (playerkit::StepCloneRebuild).
 playerkit::RebuildMachine g_cloneRebuild;
 unsigned g_cloneRebuildLogs = 0;
@@ -2125,11 +2129,18 @@ bool HostBeginInstance() {
     // there, so it is announced from its load without either. The friend plays it on its own progress
     // (equal to the host's up to this event); the host's full progress still precedes the next room.
     const auto* scene = eventscenes::Qualified(g_pendingHostRoom);
-    if (!scene && (!SafeNativeGameplay() || !progresssync::HostReady())) return false;
+    // VUH-2897 (S3): the combat-admission barrier's own retained intro freeze is the only mask this
+    // publication tolerates; every other mask==0 gate (combat, spawn, recovery) stays closed.
+    const bool safe = SafeNativeGameplay();
+    const bool admissionHold = !scene && !safe && combatadmission::PublicationHoldQualifies();
+    if (!scene && ((!safe && !admissionHold) || !progresssync::HostReady())) return false;
+    g_pendingHostRoom.admissionChallenge = admissionHold ? combatadmission::PublicationChallenge() : 0;
+    if (admissionHold && !g_pendingHostRoom.admissionChallenge) return false;
     // Keep the exact room and candidate epoch across ring-pressure retries.
     // Progress Tick ran first, so its complete snapshot precedes this packet.
     if (!SendCapturedWorld(encode(g_pendingHostRoom), g_pendingHostRoomContext)) return false;
     const RoomTransition& t = g_pendingHostRoom;
+    if (t.admissionChallenge) combatadmission::NotePublished(t.epoch, t.admissionChallenge);
     ClearPendingHits(); // claims captured for the previous epoch never migrate
     g_epoch = t.epoch;
     g_hostAnnouncedRoom = t;
@@ -4180,6 +4191,29 @@ void AckEventControl() {
 // the source is a current roster peer other than us, at its published delivery
 // serial; a host source also passes the client cut, a client source carries no
 // host serial and (on the host) its requester delivery floor.
+// VUH-2897: a friend's relay-stamped arrival receipt for this host's combat-admission barrier.
+// The envelope source must be the stamped slot's current connection and delivery; the lease binds
+// the challenge, epoch, full destination and the seat recorded at deferral. Refusals are no-ops.
+void AdmitCombatAdmissionAck(const WorldScope& scope, const std::uint8_t* payload, std::size_t size) {
+    ByteReader r(payload, size);
+    CombatAdmissionAck m;
+    read(r, m);
+    const char* why = "unknown";
+    if (rcdiag::Reject(!r.atEnd(), "trailing-bytes", why) ||
+        rcdiag::Reject(CurrentRole() != Role::Host, "receiver-role", why) ||
+        rcdiag::Reject(m.ownerSlot < 1 || m.ownerSlot > 2, "stamped-owner", why) ||
+        rcdiag::Reject(scope.sourceConnectionId != m.requesterConnectionId, "source-requester", why) ||
+        !RequesterCurrent(m.ownerSlot, m.requesterConnectionId, scope.sourceDeliverySerial, &why)) {
+        if (g_log) g_log("[combat-admission] ack refused slot=%u epoch=%u why=%s", static_cast<unsigned>(m.ownerSlot),
+                         m.location.epoch, why);
+        return;
+    }
+    const combatadmission::Destination room {m.location.worldId, m.location.roomId, m.location.door,
+                                             m.location.mapProgram, m.location.battleProgram, m.location.eventProgram};
+    (void)combatadmission::Ack(m.ownerSlot, m.requesterConnectionId, scope.sourceDeliverySerial, m.location.epoch,
+                               room, m.challenge);
+}
+
 void AdmitReviveRequest(const WorldScope& scope, const std::uint8_t* payload, std::size_t size) {
     ++g_reviveStats.seen;
     if (ReviveLogAllowed())
@@ -4386,6 +4420,7 @@ bool ReceiveWorldPackets() {
                     ObserveCombatConsumerOutcome(packet,combatcausal::Reason::RejectFraming);continue;
                 }
                 if (type == PacketType::ReviveRequest) { AdmitReviveRequest(*scope, payload, size); continue; }
+                if (type == PacketType::CombatAdmissionAck) { AdmitCombatAdmissionAck(*scope, payload, size); continue; }
                 if (type == PacketType::SeatState) { ReceiveSeatState(*scope, payload, size); continue; }
                 if(type==PacketType::ScriptReactionCompletion) {
                     ByteReader r(payload,size);ScriptReactionCompletion m;read(r,m);
@@ -4630,6 +4665,7 @@ bool ReceiveWorldPackets() {
                     g_host.world = t.worldId;
                     g_host.room = t.roomId;
                     g_host.btl = t.battleProgram;
+                    g_host.admissionChallenge = t.admissionChallenge;
                     // No old-room pointer can survive even a same-room reload.
                     g_inst.spawns.clear();
                     g_inst.byActor.clear();
@@ -6122,6 +6158,7 @@ void OnFrameStart(std::uint32_t frame) {
     spawncontroller::RegisterDiagnosticGameThread();
     nativehittrace::RegisterOwnerThread();
     g_hitTraceFrame = frame;
+    combatadmission::Service(); // VUH-2897: before any early return, so retirement/disconnect release here
     if (axeltrace::Enabled()) {
         const auto traceError = GetLastError();
         RoomTransition observed;
@@ -6290,6 +6327,33 @@ void OnFrameStart(std::uint32_t frame) {
                 if (g_log) g_log("[enemysync] client arrived epoch=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u",
                                  ack.epoch, location.worldId, location.roomId, location.door,
                                  location.mapProgram, location.battleProgram, location.eventProgram);
+            }
+        }
+        // VUH-2897: the host holds Axel's combat for this arrival. Echo its challenge only after
+        // this seat's own issued load and native intro passed HostTransitionArrived above.
+        // KH2COOP_COMBAT_ADMISSION_ACK=0 (live qualification only) withholds it, so the host's
+        // 15 s failed-barrier path can be exercised on purpose.
+        static const bool withholdAck = [] {
+            char value[2] {};
+            return GetEnvironmentVariableA("KH2COOP_COMBAT_ADMISSION_ACK", value, sizeof(value)) == 1 && value[0] == '0';
+        }();
+        if (withholdAck && g_host.arrived && g_host.admissionChallenge && !g_host.admissionAckSent && g_inst.live) {
+            g_host.admissionAckSent = true;
+            if (g_log) g_log("[combat-admission] client ack withheld epoch=%u (KH2COOP_COMBAT_ADMISSION_ACK=0)", g_host.epoch);
+        }
+        if (g_host.arrived && g_host.admissionChallenge && !g_host.admissionAckSent && g_inst.live) {
+            CombatAdmissionAck ack;
+            ack.location = location;
+            ack.location.epoch = g_host.epoch;
+            ack.challenge = g_host.admissionChallenge;
+            ack.seq = ++g_admissionAckSeq;
+            ack.requesterConnectionId = g_bridge.ConnectionId(g_bridge.LocalSlot());
+            if (ack.requesterConnectionId && Send(encode(ack))) {
+                g_host.admissionAckSent = true;
+                axeltrace::Point("client-admission-ack-queued", ack.location.epoch);
+                if (g_log) g_log("[combat-admission] client ack queued epoch=%u seq=%llu room=%02X/%02X btl=%u",
+                                 ack.location.epoch, static_cast<unsigned long long>(ack.seq), location.worldId,
+                                 location.roomId, location.battleProgram);
             }
         }
         TickCloneRebuild(location);
@@ -7368,7 +7432,24 @@ bool CaptureDownedScope(DownedScope& out) noexcept {
     }
 }
 
-void NoteLocalDownedState(const LocalDownedState& state) noexcept { g_localDowned = state; }
+void NoteLocalDownedState(const LocalDownedState& state) noexcept {
+    g_localDowned = state;
+    if (state.downed) combatadmission::Service(); // VUH-2897: a host downing ends the hold on this frame
+}
+
+bool CombatAdmissionSession(combatadmission::SessionView& out) noexcept {
+    out = {};
+    out.host = g_role == Role::Host && g_bridge.IsOpen() && g_bridge.LocalSlot() == 0;
+    out.generation = WorldSessionGeneration();
+    out.hostDelivery = g_bridge.DeliverySerial();
+    for (std::uint8_t slot = 1; slot < combatadmission::MaxSlots; ++slot) {
+        out.connection[slot] = g_bridge.ConnectionId(slot);
+        out.delivery[slot] = g_bridge.PeerDeliverySerial(slot);
+    }
+    out.publicationPending = g_hostBeginPending && g_inst.live;
+    out.hostDowned = g_localDowned.downed;
+    return true;
+}
 std::uint8_t SessionNativeDifficulty() noexcept {
     if (CurrentRole() == Role::Client) return g_lastRoomPacket ? g_lastRoomPacket->nativeDifficulty : 0xFF;
     std::uint32_t magic = 0;

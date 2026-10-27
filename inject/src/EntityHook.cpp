@@ -32,6 +32,7 @@
 
 #include "EntityHook.hpp"
 #include "AxelBoundaryTrace.hpp"
+#include "CombatAdmissionNative.hpp"
 #include "PatternScan.hpp"
 #include "RenderHook.hpp"
 #include "CrownInputs.hpp"
@@ -589,6 +590,7 @@ static int ApplyStatDeltaBody(void* actor, int delta, int idx, int reactFlag) {
     const auto boundary = idx == 0 && delta < 0 ? axeltrace::BeginHp(reinterpret_cast<uintptr_t>(actor), delta) : 0;
     const int result = g_origApplyStatDelta(actor, delta, idx, reactFlag);
     axeltrace::EndHp(boundary, reinterpret_cast<uintptr_t>(actor), result);
+    if (idx == 0 && delta < 0) combatadmission::NoteHpLoss(reinterpret_cast<uintptr_t>(actor), delta, result);
     if (idx == 0 && delta < 0 && g_hpDamageLogged < HP_DAMAGE_LOG_LIMIT) {
         ++g_hpDamageLogged;
         __try {
@@ -3581,6 +3583,7 @@ static void TraceInputCallback() {
 
 static void __fastcall HookedInputCollector(void* inputStruct) {
     axeltrace::Input();
+    combatadmission::Service(); // VUH-2897: the deadline's owner service; this callback also runs during native pause
     TraceInputCallback();
     const bool control = eventholdnative::EnterInput();
     __try {
@@ -3991,6 +3994,33 @@ static void UninitializeMinHookUnlessRetained() {
 
 static bool PuppetCommandsRestricted() { return g_anyPuppetActive; }
 
+// VUH-2897: combat-admission providers. A fresh downed pose from a puppet in this room is a peer
+// downing; the game thread is the one that registered itself from the entity-head frame.
+static bool AdmissionPeerDowned() {
+    std::uint8_t world = 0, room = 0;
+    __try {
+        world = *reinterpret_cast<const volatile std::uint8_t*>(g_exeBase + offsets::WORLD_ID);
+        room = *reinterpret_cast<const volatile std::uint8_t*>(g_exeBase + offsets::ROOM_ID);
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    for (const auto& d : g_puppets) {
+        const auto& a = d.pose.pose;
+        if (d.have && g_frameCounter - d.poseFrame <= 30 && (a.flags & kh2coop::AvatarDowned) && a.downedEpisode &&
+            a.worldId == world && a.roomId == room) return true;
+    }
+    return false;
+}
+static bool AdmissionSession(combatadmission::SessionView& s) {
+    if (!enemysync::CombatAdmissionSession(s)) return false;
+    s.peerDowned = AdmissionPeerDowned();
+    return true;
+}
+static bool AdmissionIdentity(std::uint32_t& load, std::uint32_t& transition, bool& pending) {
+    load = warp::LoadSerial();
+    transition = warp::TransitionSerial();
+    pending = warp::TransitionPending();
+    return true;
+}
+
 bool Initialize(uintptr_t exeBase) {
     // Terminal installation/retirement refusal precedes log, MinHook and every other mutation.
     if (limitadmission::RejectReinitialization()) return false;
@@ -4298,6 +4328,13 @@ bool Initialize(uintptr_t exeBase) {
     render::Install(exeBase, &Log);
     warp::Install(exeBase, &Log);
     axeltrace::Install(exeBase, &Log);
+    {   // VUH-2897: owns the 3BF2E0 detour; the Axel trace observes through it.
+        combatadmission::Providers providers;
+        providers.ownerThread = &spawncontroller::IsDiagnosticGameThread;
+        providers.identity = &AdmissionIdentity;
+        providers.session = &AdmissionSession;
+        combatadmission::Install(exeBase, &Log, providers);
+    }
     warp::SetTransitionObserver(&PublishLocalForTransition);
     downedspike::Install(exeBase);
     downedspectate::Install();
@@ -4436,6 +4473,7 @@ bool Initialize(uintptr_t exeBase) {
 }
 
 void Shutdown() {
+    combatadmission::Shutdown(); // VUH-2897: signal the owner to release a held lease, bounded
     axeltrace::Shutdown();
     nativehud::Retire();
     // Drain spectate before clearing ANY restoration/lifetime authority.

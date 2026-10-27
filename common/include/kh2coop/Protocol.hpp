@@ -14,9 +14,12 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 38;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 39;
 
 // ===========================================================================
+// Protocol v39 (VUH-2897): the RoomTransition packet carries the host's combat-admission challenge
+// (u64 trailer, zero when the host holds no barrier), and CombatAdmissionAck (57) echoes it from a
+// friend that has finished its own issued load and native intro: client -> relay -> verified host only.
 // Protocol v38 (VUH-2864): HostActivationPoint carries the host's actual spawn-controller decisions since its
 // last flush: per controller key/header, the seat whose point it passed (0 host, 1..2 a remote slot, 255 conflict)
 // and that point (count, truncated, then 23 bytes a row, at most 24; 67..619 bytes). Clients apply the host's row.
@@ -174,6 +177,9 @@ struct RoomTransition {
     // Packet-only (VUH-2632, D17): the host's native difficulty, its save's difficulty byte (0 Beginner,
     // 1 Standard, 2 Proud, 3 Critical; 0xFF unknown). Every seat's revive rule follows it.
     std::uint8_t nativeDifficulty {0xFF};
+    // Packet-only (VUH-2897): the host's fresh combat-admission challenge for this announcement, or 0
+    // when it holds no admission barrier. A friend echoes it in CombatAdmissionAck after it arrives.
+    std::uint64_t admissionChallenge {0};
 };
 
 enum class SpawnEmissionKind : std::uint8_t { Controller = 0, OrbBirth = 1, OrbCollect = 2 };
@@ -434,6 +440,20 @@ struct ScriptReactionCompletion {
     std::uint8_t ownerSlot{0xFF}; // relay stamps it, like StageEnd
 };
 inline constexpr std::size_t SCRIPT_REACTION_COMPLETION_BYTES = 53;
+
+// VUH-2897: a friend's arrival receipt for the host's combat-admission barrier. Sent once per host
+// announcement that carried a nonzero challenge, only after this friend's own issued load and native intro
+// pass warp::HostTransitionArrived. The relay admits it from a verified, unquarantined client for the
+// admitted room (epoch and full destination), consumes seq (strictly increasing per author connection),
+// stamps ownerSlot and forwards it to the verified host alone. The host binds the challenge to its lease.
+struct CombatAdmissionAck {
+    RoomTransition location{};          // admitted epoch and full destination (generic 16-byte form)
+    std::uint64_t challenge{0};
+    std::uint64_t seq{0};
+    std::uint64_t requesterConnectionId{0};
+    std::uint8_t ownerSlot{0xFF};       // relay stamps it, like ScriptReactionCompletion
+};
+inline constexpr std::size_t COMBAT_ADMISSION_ACK_BYTES = 41;
 
 // VUH-2555: reliable, scoped report from a friend's DLL that its own script started a host-led stage
 // end (EventScenes.hpp InFieldEvents rows with hostLed, such as the Day 1 Sandlot duel's stages): the

@@ -1221,6 +1221,7 @@ void NetworkClient::onReceive(const std::uint8_t* data, std::size_t size, bool r
                 break; // raw world delivery only (VUH-1515)
             case PacketType::ScriptReactionCompletion:
             case PacketType::ScriptCall:
+            case PacketType::CombatAdmissionAck: // VUH-2897
                 break; // raw world delivery only (VUH-2252)
             case PacketType::PartyLayout: {
                 PartyLayout m;read(reader,m);if(callbacks_.onPartyLayout)callbacks_.onPartyLayout(m);break;

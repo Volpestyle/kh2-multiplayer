@@ -36,6 +36,7 @@
 #include "EnemyMirrorPose.hpp" // VUH-1515: Pose only (no Protocol.hpp beside HitChannel)
 #include "EnemyPopulation.hpp" // VUH-1788: pure planner/cull decision (Types.hpp only)
 #include "kh2coop/ActivationSeats.hpp" // VUH-2864: std-only seat candidates
+#include "CombatAdmission.hpp" // VUH-2897: std-only barrier state
 #include <array>
 
 namespace kh2coop::inject::struggleorbs { struct Collector; }
@@ -307,6 +308,9 @@ std::uint16_t ActionableNativeReaction(std::uint16_t raw) noexcept;
 // The owner's publication this frame (the same value given to
 // AvatarBridge::SetLocalDownedState); ReviveOwnerGate::Consume judges against it.
 void NoteLocalDownedState(const LocalDownedState& state) noexcept;
+// VUH-2897, game thread: session facts for the combat-admission barrier (CombatAdmission.hpp).
+// peerDowned is left false; EntityHook's puppet poses supply it.
+bool CombatAdmissionSession(combatadmission::SessionView& out) noexcept;
 // VUH-2495, host, game thread: the native stat funnel (0x3D2EB0) left `actor` at `hp`. An announced
 // enemy brought to 0 retains a terminal receipt. Pending deaths drain before mission state even
 // when a fight-end event closes the census gate on the killing frame.

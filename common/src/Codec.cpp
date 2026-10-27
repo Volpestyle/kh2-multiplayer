@@ -259,7 +259,7 @@ PacketType validateScopedWorldPacket(const std::vector<std::uint8_t>& bytes) {
         case PacketType::RoomTransition: {RoomTransition value;readRoomTransitionPacket(r,value);break;}
         RS_INNER(PopulationCut) RS_INNER(EventHold) RS_INNER(EnemyManifest)
         RS_INNER(EnemyHp) RS_INNER(EnemyDeath) RS_INNER(EnemyMotion) RS_INNER(FieldObjects) RS_INNER(MissionState) RS_INNER(ProgressUpdate)
-        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(SeatState) RS_INNER(StageEnd) RS_INNER(RoomReplayRequest) RS_INNER(ScriptReactionCompletion) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
+        RS_INNER(PartyLayout) RS_INNER(PartyReapply) RS_INNER(PartyIntent) RS_INNER(ReviveRequest) RS_INNER(SeatState) RS_INNER(StageEnd) RS_INNER(RoomReplayRequest) RS_INNER(CombatAdmissionAck) RS_INNER(ScriptReactionCompletion) RS_INNER(RemoteHit) RS_INNER(TargetAuthority) RS_INNER(ScriptCall) RS_INNER(SpawnEmission) RS_INNER(HitClaim) RS_INNER(TransitionAck) RS_INNER(StateHash)
         RS_INNER(DesyncNotice) RS_INNER(ActivationRequest) RS_INNER(HostActivationPoint)
         RS_INNER(ActorSnapshot) RS_INNER(EnemySnapshot) RS_INNER(EventMessage)
 #undef RS_INNER
@@ -1098,6 +1098,22 @@ void read(ByteReader& r, ScriptReactionCompletion& out) {
 std::vector<std::uint8_t> encode(const ScriptReactionCompletion& m) {
     ByteWriter w;write(w,m);return encodePacket(PacketType::ScriptReactionCompletion,w.data());
 }
+
+void write(ByteWriter& w, const CombatAdmissionAck& m) {
+    if (!m.location.epoch || !m.challenge || !m.seq || !m.requesterConnectionId || (m.ownerSlot > 2 && m.ownerSlot != 0xFF))
+        throw std::runtime_error("CombatAdmissionAck: invalid identity");
+    write(w, m.location); w.writeU64(m.challenge); w.writeU64(m.seq); w.writeU64(m.requesterConnectionId);
+    w.writeU8(m.ownerSlot);
+}
+void read(ByteReader& r, CombatAdmissionAck& out) {
+    if (r.remaining() != COMBAT_ADMISSION_ACK_BYTES) throw std::runtime_error("CombatAdmissionAck: wrong payload length");
+    CombatAdmissionAck m; read(r, m.location); m.challenge = r.readU64(); m.seq = r.readU64();
+    m.requesterConnectionId = r.readU64(); m.ownerSlot = r.readU8();
+    ByteWriter validate; write(validate, m); out = m;
+}
+std::vector<std::uint8_t> encode(const CombatAdmissionAck& m) {
+    ByteWriter w; write(w, m); return encodePacket(PacketType::CombatAdmissionAck, w.data());
+}
 void write(ByteWriter& w, const StageEnd& m) {
     if (!m.seq || (m.ownerSlot > 2 && m.ownerSlot != 0xFF)) throw std::runtime_error("StageEnd: invalid seq or slot");
     w.writeU32(m.seq); w.writeU16(m.worldId); w.writeU16(m.roomId); w.writeU16(m.eventProgram);
@@ -1519,6 +1535,7 @@ void writeRoomTransitionPacket(ByteWriter& w, const RoomTransition& m) {
     w.writeU8(m.partyRowValid);
     w.writeU32(m.partyRow);
     w.writeU8(m.nativeDifficulty);
+    w.writeU64(m.admissionChallenge);
 }
 
 void readRoomTransitionPacket(ByteReader& r, RoomTransition& m) {
@@ -1538,6 +1555,7 @@ void readRoomTransitionPacket(ByteReader& r, RoomTransition& m) {
     m.nativeDifficulty = r.readU8();
     if (m.nativeDifficulty > 3 && m.nativeDifficulty != 0xFF)
         throw std::runtime_error("RoomTransition: invalid native difficulty");
+    m.admissionChallenge = r.readU64();
 }
 
 void read(ByteReader& r, TransitionAck& m) {
@@ -1926,6 +1944,8 @@ PacketType decodePacketHeader(const std::uint8_t* data, std::size_t size,
         throw std::runtime_error("SeatState: wrong frame length");
     if(type==PacketType::ScriptReactionCompletion && (len!=SCRIPT_REACTION_COMPLETION_BYTES || size!=kHeaderSize+len))
         throw std::runtime_error("ScriptReactionCompletion: wrong frame length");
+    if (type == PacketType::CombatAdmissionAck && (len != COMBAT_ADMISSION_ACK_BYTES || size != kHeaderSize + len))
+        throw std::runtime_error("CombatAdmissionAck: wrong frame length");
     if (type == PacketType::StageEnd && (len != STAGE_END_PAYLOAD_SIZE || size != kHeaderSize + len))
         throw std::runtime_error("StageEnd: wrong frame length");
     if (type == PacketType::RoomReplayRequest && (len != ROOM_REPLAY_REQUEST_PAYLOAD_SIZE || size != kHeaderSize + len))

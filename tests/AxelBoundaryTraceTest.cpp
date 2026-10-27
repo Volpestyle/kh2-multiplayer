@@ -91,10 +91,12 @@ int main() {
     trace::Install(base,Log); Check(creates == 0 && !trace::Enabled(),"mismatched pin refuses all hooks");
     image[0x14FC20] ^= 1;
     failEnable = 2;
-    trace::Install(base,Log); Check(removes == 4 && !trace::Enabled(),"partial enable removes all created hooks");
+    trace::Install(base,Log); Check(removes == 3 && !trace::Enabled(),"partial enable removes all created hooks");
     failEnable = 0;
+    const auto beforeCreates = creates;
     trace::Install(base,Log); Check(trace::Enabled(),"matching pins enable observer");
-    d::dispatch = Native; d::intro = Native; d::unfreeze = Native; d::load = Native;
+    Check(creates == beforeCreates + 3,"trace hooks three natives; 3BF2E0 belongs to the combat-admission detour");
+    d::dispatch = Native; d::intro = Native; d::load = Native;
     auto* now = reinterpret_cast<std::uint16_t*>(image + kh2coop::offsets::NOW);
     now[0] = 0x1302; now[3] = 134;
     const std::uint16_t wrong[] = {2,0x14,0,1,138,0}, target[] = {2,0x14,0,1,137,0};
@@ -113,7 +115,9 @@ int main() {
     d::Dispatch(456); Check(nativeCalls==1 && lastArg==456 && GetLastError()==123,"field callback forwards once and preserves native LastError");
     const auto beforeOther=output.size();
     d::Dispatch(789); Check(nativeCalls==2 && lastArg==789 && output.size()==beforeOther,"other task group forwards once without a trace row");
-    d::Intro(987); d::Unfreeze(1);
+    d::Intro(987);
+    // The barrier's detour reports each group release to the trace observer.
+    const auto release = trace::UnfreezeEnter(1, 0x3ACC0D, 0); Native(1); trace::UnfreezeExit(release, 1, false, 0);
     Check(nativeCalls==4 && lastArg==1 && GetLastError()==123,"intro and group-release forward unchanged");
     Check(Has("field-enter") && Has("field-return") && Has("intro-update-return") && Has("unfreeze-return"),"actual adapters emit paired boundaries");
     d::Load(246);

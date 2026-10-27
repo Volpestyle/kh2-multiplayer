@@ -122,7 +122,7 @@ inline std::uint64_t Emit(const char* site, std::uint64_t call, std::uintptr_t a
     return result;
 }
 using OneFn = void(__fastcall*)(std::uintptr_t);
-inline OneFn dispatch = nullptr, intro = nullptr, unfreeze = nullptr;
+inline OneFn dispatch = nullptr, intro = nullptr;
 inline void __fastcall Dispatch(std::uintptr_t group) {
     // Only the field mode's task group; other groups never take the log lock
     // or count as losses. A copied group is never dereferenced.
@@ -144,14 +144,6 @@ inline void __fastcall Intro(std::uintptr_t task) {
         reinterpret_cast<std::uintptr_t>(_AddressOfReturnAddress()));
     __try { intro(task); }
     __finally { if (call) Emit(AbnormalTermination() ? "intro-update-unwind" : "intro-update-return", call, task, 0,
-                              reinterpret_cast<std::uintptr_t>(_AddressOfReturnAddress())); }
-}
-inline void __fastcall Unfreeze(std::uintptr_t group) {
-    const auto call = Emit("unfreeze-enter", 0, group,
-        reinterpret_cast<std::uintptr_t>(_ReturnAddress()) - base,
-        reinterpret_cast<std::uintptr_t>(_AddressOfReturnAddress()));
-    __try { unfreeze(group); }
-    __finally { if (call) Emit(AbnormalTermination() ? "unfreeze-unwind" : "unfreeze-return", call, group, 0,
                               reinterpret_cast<std::uintptr_t>(_AddressOfReturnAddress())); }
 }
 inline OneFn load = nullptr;
@@ -187,6 +179,14 @@ inline void Publish(Owner value) noexcept {
 }
 inline void Point(const char* site, std::uintptr_t arg = 0) noexcept {
     detail::Emit(site, 0, arg, 0, reinterpret_cast<std::uintptr_t>(_AddressOfReturnAddress()));
+}
+// 3BF2E0 has one detour, owned by the combat-admission barrier
+// (CombatAdmissionNative.hpp); the trace observes the group release through it.
+inline std::uint64_t UnfreezeEnter(std::uintptr_t group, std::uintptr_t callerRva, std::uintptr_t stack) noexcept {
+    return detail::Emit("unfreeze-enter", 0, group, callerRva, stack);
+}
+inline void UnfreezeExit(std::uint64_t call, std::uintptr_t group, bool unwound, std::uintptr_t stack) noexcept {
+    if (call) detail::Emit(unwound ? "unfreeze-unwind" : "unfreeze-return", call, group, 0, stack);
 }
 inline std::uint64_t BeginHp(std::uintptr_t actor, int delta) noexcept {
     return detail::Emit("hp-delta-enter", 0, actor, 0,
@@ -238,7 +238,6 @@ inline void Install(std::uintptr_t base, LogFn log) {
     // Static decompile + qword receipts: .local/ghidra-trace-{boundaries,bytes}.log.
     constexpr std::uint8_t dispatchBytes[] = {0x45,0x33,0xC0,0x33,0xD2,0xE9,0x36,0x01,0x00,0x00};
     constexpr std::uint8_t introBytes[] = {0x40,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xF9,0x48,0x8B,0x0D,0x68,0x54,0x66,0x02};
-    constexpr std::uint8_t unfreezeBytes[] = {0x8B,0xC1,0x48,0x8D,0x15,0xFF,0x7E,0x65,0x02,0x48,0xC1,0xE8,0x05,0x83,0xE1,0x1F};
     // 152990 -> fade/teardown task152A90 -> schedules field-load task152680.
     // Entry is after request-task readiness gates/teardown and NOW commit,
     // before the field-load pipeline. It is not the request/fade-start stamp.
@@ -247,7 +246,6 @@ inline void Install(std::uintptr_t base, LogFn log) {
     const Hook hooks[] = {
         {0x14FC20,dispatchBytes,sizeof(dispatchBytes),detail::Dispatch,&detail::dispatch},
         {0x3AC000,introBytes,sizeof(introBytes),detail::Intro,&detail::intro},
-        {0x3BF2E0,unfreezeBytes,sizeof(unfreezeBytes),detail::Unfreeze,&detail::unfreeze},
         {0x152680,loadBytes,sizeof(loadBytes),detail::Load,&detail::load}};
     constexpr unsigned count = sizeof(hooks) / sizeof(hooks[0]);
     for (const auto& h : hooks) if (std::memcmp(reinterpret_cast<const void*>(base+h.rva),h.bytes,h.count)) {
