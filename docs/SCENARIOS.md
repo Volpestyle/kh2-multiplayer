@@ -1819,7 +1819,11 @@ Three layers:
     the launch acknowledgement, it's capped: it ranks at most 256 sandboxes
     (more than that and it prunes nothing), recurses at most 16 levels, and
     stops after 1024 removals or one second, leaving the rest for a later
-    install. Saved files in those sandboxes stay.
+    install. Saved files in those sandboxes stay. Twins are copies of
+    copyrighted assets: never publish them. A live run deletes its own at
+    closure with `python -B tools/rig/movie_twins.py clean --logs
+    build/rig/logs --pid <owned pid>` and records the JSON in `closure.json`;
+    it refuses a live or unreadable PID and any link in the sandbox path.
   - **Everything else is denied:** copies (`CopyFileA/W/ExW/2`), moves
     (`MoveFileExA/W`, `MoveFileWithProgressW`), `ReplaceFileW`, deletes
     (`DeleteFileA/W`) and `RemoveDirectoryA/W`. Copy goes to NtCreateFile
