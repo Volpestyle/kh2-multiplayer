@@ -199,26 +199,30 @@ int main(int argc,char** argv){
   // VUH-2617 (bot04, run 20261021-192441): after Thorn's victory event 315 the host loaded these
   // event-only locations in order, never reaching field play in any (no census, no progress sample),
   // so none was announced and the friend waited at its own blocked exit to the first, 02/00 program
-  // 51, in 02/34. Each must be a qualified scene, exactly; the last observed load, 02/01 program 54,
-  // was still in its event when the run ended and stays unqualified until its exit is observed.
+  // 51, in 02/34. Each must be a qualified scene, exactly. VUH-2918 (run 20261027-114125) observed the
+  // chain's end: after the me4 movie, 02/01 54 and 02/01 59 (event-only), then the field arrival 02/03
+  // door 50 map 2 evt 2, which stays unqualified (announced from field play).
   // Decoded from the host's `[warp] load complete ... room=%02X/%02X door=%u map=%u btl=%u evt=%u` lines:
   // world and room are hex, programs decimal (02/15 142 is room 0x15 = 21).
   {const std::uint16_t chain[][6]{{0x02,0x00,0,51,51,51},{0x02,0x04,0,83,83,83},{0x02,0x02,0,67,67,67},
-                                  {0x02,0x06,0,168,168,168},{0x02,0x02,0,167,167,167},{0x02,0x15,0,142,142,142}};
+                                  {0x02,0x06,0,168,168,168},{0x02,0x02,0,167,167,167},{0x02,0x15,0,142,142,142},
+                                  {0x02,0x01,0,54,54,54},{0x02,0x01,0,59,59,59}};
    bool all=true;
    for(const auto& r:chain)all=all&&kh2coop::eventscenes::Qualified(r[0],r[1],r[2],r[3],r[4],r[5])!=nullptr;
-   check(all,"the host's post-Thorn chain (logged 02/00 51 to 02/15 142) is announced as scenes");
+   check(all,"the host's post-Thorn chain (logged 02/00 51 to 02/01 59) is announced as scenes");
    check(!kh2coop::eventscenes::Qualified(2,15,0,142,142,142),
          "room 15 decimal (0x0F, never observed) is not the logged 02/15");
-   // Quill's VUH-2617 r1 controls: every one-field near miss of every row (36) refuses.
+   // Quill's VUH-2617 r1 controls: every one-field near miss of every row (48) refuses.
    bool exact=true;
    for(const auto& r:chain)for(unsigned col=0;col<6;++col){
      std::uint16_t miss[6];for(unsigned k=0;k<6;++k)miss[k]=r[k];++miss[col];
      exact=exact&&!kh2coop::eventscenes::Qualified(miss[0],miss[1],miss[2],miss[3],miss[4],miss[5]);}
-   check(exact,"all 36 one-field near misses of the post-Thorn rows refuse");
+   check(exact,"all 48 one-field near misses of the post-Thorn rows refuse");
    check(!kh2coop::eventscenes::Qualified(2,0,1,51,51,51)&&!kh2coop::eventscenes::Qualified(2,0,0,51,51,52)&&
-         !kh2coop::eventscenes::Qualified(2,2,0,67,67,167)&&!kh2coop::eventscenes::Qualified(2,1,0,54,54,54),
-         "the post-Thorn rows are exact; 02/01 54 is not yet qualified");
+         !kh2coop::eventscenes::Qualified(2,2,0,67,67,167)&&!kh2coop::eventscenes::Qualified(2,1,0,54,54,59),
+         "the post-Thorn rows are exact");
+   check(!kh2coop::eventscenes::Qualified(2,3,50,2,0,2),
+         "the field arrival after the chain (02/03 door 50 map 2 evt 2) is not a scene");
    // The friend's blocked native exit after its own 315 is the first of them (3A4BD0/39FBC0 decode).
    check(kh2coop::eventscenes::Qualified(2,0,0,0x33,0x33,0x33)!=nullptr,
          "the friend's blocked post-315 exit (world2 room0 door0 programs 51) is the first post-Thorn scene");}}

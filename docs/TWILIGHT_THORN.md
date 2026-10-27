@@ -498,10 +498,15 @@ census and progress samples never ran. An unqualified room is announced only fro
 host announced none of them, and the friend waited at its own blocked native exit to the first one,
 02/00 51 (the authored exit above). The first six are now qualified scenes (`EventScenes.hpp`): the host
 announces each at its load and the friend loads and plays it natively, as in the prologue's post-Axel
-chain. So the chain is qualified through 02/15 142; 02/01 54 onward is decided live. 02/01 54 was still
-in its event when the run ended, so its exit is unobserved and it stays unqualified; the next live run
-shows whether it is another scene or the field, and whether the friend's dialogs, progress and onward
-movement through the chain hold. The friend's arrival past the chain is not proven offline.
+chain. The chain's end was observed in the VUH-2763 qualification (run `20261027-114125`, VUH-2918):
+after 02/15 142 the host plays the me4 movie (Roxas to Sora), loads 02/01 54 and 02/01 59, both
+event-only (the gameplay gate stays closed; field play lasts only the frame of the next native start),
+then 02/03 door 50 map 2 evt 2, the field arrival. With 02/01 54 unqualified the friend waited at its own
+blocked exit to it for the rest of that run and never played the movie. 02/01 54 and 59 are now
+qualified scenes too, so the chain is qualified through 02/01 59; 02/03 door 50 is announced from field
+play. The host sat in 02/03's opening event (`cutscene=2 event=1`) for the rest of that run with no
+input after the fight pilots ended, so a proof run advances it. The friend's arrival past the chain
+is not yet proven live.
 A returning seat's recovery capture is refused in a qualified scene (it waits, epoch unspent, for a later
 field), so post-Thorn recovery now waits past this chain too; its convergence after the chain is unproven.
 
