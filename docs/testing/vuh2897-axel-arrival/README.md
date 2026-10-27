@@ -358,6 +358,15 @@ The lead schedules that run after independent source approval; none has run here
 action before HP changes, the host's receipt of the ACK, or a pause that never
 occurs. These limits are unchanged by the review delta.
 
+## Approved live trace result
+
+The single lead-authorized run of approved `2aaf1882` passed, with both traces
+complete and loss-free. [Exact timing, safety receipts and the concrete bounded
+barrier proposal](LIVE_TRACE.md) supersede the earlier instrumentation gap:
+the host's first native Axel HP loss precedes the friend's arrival ACK enqueue
+by 1.828 s; arrival lag is 5.656 s. Both native intros take 5.015 s. This measures
+the defect; a behavior barrier and its held-state qualifications remain open.
+
 ## Evidence locations
 
 Juno's four directories are under
