@@ -1,7 +1,8 @@
 # Mansion terminal ordering candidate (VUH-2884)
 
-Base: `bc8d9ad`, branch `vuh2884-mansion-death-race`. This is an offline
-candidate, not a live acceptance result. Juno released the PC; a direct serial,
+Code: `9e6b2e6`, based on `origin/main 9d36a74`, branch
+`vuh2884-mansion-death-race`. Historical source runs used `bc8d9ad`.
+This is an offline candidate, not a live acceptance result. Juno released the PC; a direct serial,
 below-normal-priority CMake build is authorized. No game, desk, Steam, install
 or save action was taken.
 
@@ -55,14 +56,31 @@ Run `194738` exercises drain of an actually observed final funnel kill during
 the hold before mission publication. The base trace deliberately expects only
 four observed native receipts: it never manufactures the two missing kills.
 
+`kh2coop_nativehit_test` exercises the actual `EnemySync` adapter over owned
+memory: positive-HP native terminal capture, changed record/load refusal,
+enqueue refusal and retry, the held owner frame publishing a death before
+mission state, no duplicate publication, client death before clean-census end,
+and a native-local end bound to a retained admitted host completion. An
+independent local end, wrong load and end admitted during travel earn no receipt.
+
 `kh2coop_lifecycletrace_test` exercises the real detour wrapper with synthetic
 native functions: exactly one native invocation, diagnostics off, LastError
 preservation, duplicate notification, changed scope, unregistered caller and
 propagated native exception without completion. It installs no hooks and opens
 no game, bridge or process.
 
-Initial focused Release build and both focused CTest targets passed. The full
-Release build and final offline checks are in progress. Live runs remain the lead's work:
-base, host-down and friend-down must each prove 6/6 actual deaths applied and
-one mission end settled before room exit. Native-notification coverage of the
-base run's two missing deaths is still unverified. No Thorn victory testing.
+## Result
+
+- Full serial Release build passed on `9e6b2e6` / `9d36a74`.
+- Serial CTest: **277/277 passed**, 264.87 seconds, including the actual adapter,
+  detour, log-excerpt controls and the updated wave-order scenario tests.
+- All three Mansion scenarios passed offline structure/expression validation.
+- [Verification receipt](https://uploads.linear.app/75f1d1f0-542b-4095-9967-fd7b27093472/8f4cd219-2a56-449f-8cb9-59eec52dc353/d6dff93f-6b9d-4fb6-b3fb-2335899b3c7f)
+  is attached to VUH-2884. It pins the code, fixture provenance, build/test logs
+  and staged DLL. Local logs: `.local/build-rebased-vuh2884.log`,
+  `.local/ctest-rebased-vuh2884.log`, `.local/scenario-validation-vuh2884.log`.
+
+Independent review and the lead's live reruns remain: base, host-down and
+friend-down must each prove 6/6 actual deaths applied and one mission end settled
+before room exit. Native-notification coverage of the missing historical
+wave-two bodies remains unverified. No live run or Thorn victory testing occurred.
