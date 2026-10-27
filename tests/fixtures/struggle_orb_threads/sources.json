@@ -1,0 +1,37 @@
+{
+  "run": "20261026-192703_net_prologue_struggle_orbs_1",
+  "base": "bc8d9ad",
+  "files": [
+    {
+      "fixture": "host.log",
+      "source": "kh2coop_inject_6536.log",
+      "sha256": "15ad2ff9b1a7a290193999b5a427a34b71db19dfc30cf6d7be1ff021dba7d0d4",
+      "lines": [
+        538,
+        838,
+        1227,
+        1536,
+        1828,
+        2125,
+        2314,
+        2418
+      ]
+    },
+    {
+      "fixture": "friend.log",
+      "source": "kh2coop_inject_219608.log",
+      "sha256": "f7b55e751d34e8b956150d59da48467870207797d330b1b49ca681cd7dec710f",
+      "lines": [
+        521,
+        841,
+        1242,
+        1582,
+        1861,
+        2124,
+        2172,
+        2396,
+        2502
+      ]
+    }
+  ]
+}

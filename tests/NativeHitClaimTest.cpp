@@ -244,6 +244,9 @@ void ApplyStageEnd() noexcept {}
 }
 // VUH-2466: no orb manager in these harnesses (StruggleOrbsTest has the orb rules).
 namespace kh2coop::inject::struggleorbs {
+void Pump(const Scope&) {}
+void ResetContext() {}
+
 std::uintptr_t g_testManager = 0;  // the orb manager the production OrbTick observes
 std::uintptr_t Manager() { return g_testManager; }
 std::uintptr_t CreateDisplay(const CreateRequest&) { return 0; }

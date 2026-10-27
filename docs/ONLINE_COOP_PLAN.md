@@ -293,7 +293,10 @@ room-locked two-player HP factor, recording any specific native-HP exception
 needed by a scripted threshold rather than multiplying wave counts.
 
 Cover the early tutorials/chase, Station of Awakening/Twilight Thorn, required
-Struggle/jobs and Day-6 Mansion ambush on an explicit Day 1–6 encounter checklist.
+Struggle/jobs and Day-6 Mansion ambush on an explicit Day 1–6 encounter checklist. Struggle
+orb receipts cross from native workers to the entity thread through a scoped FIFO
+(VUH-2881; `docs/PROLOGUE_ENCOUNTERS.md`). Nonzero off-thread entries are expected;
+live qualification still requires host collections mirrored as friend flights/fades.
 Story choices and solo minigame outcomes belong to the host; a genuinely solo
 scripted activity may give the friend a labelled observation role until it ends.
 That exception cannot hide a player during a Dusk fight or boss. Two-player

@@ -123,15 +123,28 @@ How the friend sees the host's orbs (protocol 34; `inject/src/StruggleOrbs.hpp`,
   none (an unresolved collector, an enemy with no living copy), fades where it lies through its own life
   timer (`+0x3C`; the resting update `LAB_140413230` is `FUN_140413a80(record, 1)`). An orb already
   collected by the time its birth applies is never shown. At most 64 native calls a frame.
-- The five detours install all or none and act only once all five are applied (one published state)
-  and only on the game thread noted each frame: before that, on any other thread, or after a failed
-  install, each calls its original once and reads nothing. Hooks that were never applied are removed (a
-  failed removal is logged and counted); once the apply has run, a thread may be inside a detour about to
-  call its original, so every hook and trampoline is kept, inactive, for the DLL's lifetime.
+- VUH-2881: hook entries may come from native workers. `OrbTick` publishes copied policy and
+  collector identities from the entity thread. Detours consult that snapshot; host births and pickups
+  copy receipts into one bounded FIFO, and only the entity thread books them into EnemySync. No lock
+  spans a native call or a callback, and the drain never dereferences a captured native address.
+  Session generation, delivery, room epoch, native transition/load, manager and role changes retire
+  queued and in-flight receipts. Client-local drops/picks are suppressed from the copied policy on
+  workers too, after rechecking the current native manager and that the policy is still published.
+- Every detour and `NoteGameThread` logs its actual TID (first 16 changes per site), with periodic
+  per-site entry/foreign counts. `offThread` now counts observations rather than refused entries;
+  nonzero is expected for marshalled workers. Acceptance requires booked/sent/received collections,
+  nonzero friend vanishes and no mailbox overflow. The historical `192703` run proves off-thread
+  refusals and zero collections, but contains no per-hook TIDs; native hook affinity and the clone's
+  brush-past question still need the lead's live rerun. See
+  [VUH-2881 evidence](testing/vuh2881-orb-thread/README.md).
+- The five detours still install all or none. Before installation/context publication, a detour calls
+  its original once without invoking game-state callbacks. Hooks never applied are removed (failed
+  removal is logged/counted); once apply has run, every possibly reachable hook/trampoline stays for
+  the DLL's lifetime. An inactive hook passes straight through.
 - The score itself is untouched: the friend's counters still follow the host's through the mission
   mirror. There is no pickup claim. The friend collects by its clone touching the host's orb on the
-  host, a position latency behind; whether that misses orbs the friend brushes past is for the first live
-  run after the freeze. `KH2COOP_STRUGGLE_ORBS=0` leaves each game its own orbs.
+  host, a position latency behind; whether that misses orbs the friend brushes past remains open
+  because the first live run booked no collections. `KH2COOP_STRUGGLE_ORBS=0` leaves each game its own orbs.
 - `kh2coop_struggle_orbs_test` replays btl84's logged counter sequence as host births and pickups: at
   every 120-frame sample the friend shows exactly the host's orbs on the field (10 at the end).
 

@@ -38,6 +38,8 @@
 #include "kh2coop/ActivationSeats.hpp" // VUH-2864: std-only seat candidates
 #include <array>
 
+namespace kh2coop::inject::struggleorbs { struct Collector; }
+
 namespace kh2coop {
 namespace inject {
 namespace spawncontroller {
@@ -273,7 +275,7 @@ void OrbHostBirth(std::uintptr_t manager, std::uintptr_t record, std::uint8_t ty
 void OrbHostCollect(std::uintptr_t manager, std::uintptr_t record, std::uint8_t collector, std::uint16_t netId);
 // Every frame: the host observes its orb manager; the client also shows the host's orbs.
 void OrbTick();
-std::uint16_t HostCollectorNetId(uintptr_t actor) noexcept;  // a host enemy collector's netId, or 0
+void OrbEnemyCollectors(std::vector<struggleorbs::Collector>& out);
 uintptr_t ClientActorForNetId(std::uint16_t netId) noexcept; // the client's living copy of a host enemy, or 0
 
 void Shutdown();

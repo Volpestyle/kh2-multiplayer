@@ -455,6 +455,16 @@ if(WIN32)
         target_compile_options(kh2coop_lifecycletrace_test PRIVATE /W4 /WX)
     endif()
 
+    # VUH-2881: actual orb detours and thread logging, no native hooks installed.
+    add_executable(kh2coop_struggle_orbs_hook_test tests/StruggleOrbsHookTest.cpp)
+    target_include_directories(kh2coop_struggle_orbs_hook_test PRIVATE common/include
+        $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(kh2coop_struggle_orbs_hook_test PRIVATE minhook_lib kh2coop_common)
+    target_compile_definitions(kh2coop_struggle_orbs_hook_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_struggle_orbs_hook_test PRIVATE /W4 /WX)
+    endif()
+
     # Real hit consumer/publisher and census over owned synthetic native memory;
     # only transport, lifecycle and unrelated diagnostic services are stubbed.
     add_executable(kh2coop_nativehit_test tests/NativeHitClaimTest.cpp inject/src/NativeHitTrace.cpp

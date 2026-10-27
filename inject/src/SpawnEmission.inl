@@ -276,6 +276,7 @@ void ResetSpawnEmissions() {
     ResetScriptChildren(); // VUH-2605
     g_emissionOutbox.clear(); g_emissionLedger.Clear();g_localEmissionBirths.clear();g_moraleBirthCapacityFault=false;
     g_emissionSequence = 0; g_emissionDeniedLogs = 0;
+    struggleorbs::ResetContext(); // VUH-2881: retire queued and in-flight worker receipts
     g_orbBook.Reset(); g_orbDisplay.Reset(); g_orbLogs = 0;
 }
 // VUH-2466: a host orb row joins the same FIFO as controller births. It has no native birth to observe.

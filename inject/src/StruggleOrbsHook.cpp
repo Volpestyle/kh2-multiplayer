@@ -18,6 +18,7 @@
 
 #include <cstring>
 #include <iterator>
+#include <type_traits>
 
 namespace kh2coop::inject::struggleorbs {
 static_assert(kCollectorNone == static_cast<std::uint8_t>(OrbCollector::None) &&
@@ -50,8 +51,7 @@ bool CopyCode(std::uintptr_t address, void* out, std::size_t size) {
 }
 std::uint32_t ThreadNow() { return static_cast<std::uint32_t>(GetCurrentThreadId()); }
 bool ReadNative(std::uintptr_t address, void* out, std::size_t size) {
-    std::memcpy(out, reinterpret_cast<const void*>(address), size);
-    return true;
+    return CopyCode(address, out, size);
 }
 template <class T> T Field(std::uintptr_t address) {
     T v{};
@@ -60,21 +60,51 @@ template <class T> T Field(std::uintptr_t address) {
 }
 bool Active() { return g_gate.active.load(std::memory_order_acquire); }
 
+void TraceThread(adapter::Site site) {
+    const auto error = GetLastError();
+    const auto tid = ThreadNow();
+    if (g_gate.Trace(site, tid) && g_log)
+        g_log("[struggle-orbs] thread site=%s tid=%u gameTid=%u", adapter::kSiteNames[static_cast<std::size_t>(site)],
+              tid, g_gate.gameThread.load(std::memory_order_acquire));
+    SetLastError(error);
+}
+// Preserve the caller's LastError at the native entry and the native result across receipt work.
+struct NativeError {
+    DWORD value = GetLastError();
+    ~NativeError() { SetLastError(value); }
+    template<class F> auto Call(F&& f) {
+        SetLastError(value);
+        if constexpr (std::is_void_v<decltype(f())>) { f(); value = GetLastError(); }
+        else { auto result = f(); value = GetLastError(); return result; }
+    }
+};
+
 std::uintptr_t __fastcall CreateDetour(std::uintptr_t manager, std::uintptr_t descriptor, const float* point) {
-    return adapter::Create(g_gate, g_env, [](std::uintptr_t m, std::uintptr_t d, const float* p) { return g_create(m, d, p); },
+    NativeError error;
+    TraceThread(adapter::Site::Create);
+    return adapter::Create(g_gate, g_env, [&](std::uintptr_t m, std::uintptr_t d, const float* p) {
+                               return error.Call([&] { return g_create(m, d, p); }); },
                            manager, descriptor, point);
 }
 void __fastcall HitDropDetour(void* a, void* b, void* c, void* d) {
-    adapter::Drop(g_gate, g_env, [&] { g_hitDrop(a, b, c, d); });
+    NativeError error;
+    TraceThread(adapter::Site::HitDrop);
+    adapter::Drop(g_gate, g_env, [&] { error.Call([&] { g_hitDrop(a, b, c, d); }); });
 }
 void __fastcall DropDetour(void* a, void* b, void* c, void* d) {
-    adapter::Drop(g_gate, g_env, [&] { g_drop(a, b, c, d); });
+    NativeError error;
+    TraceThread(adapter::Site::Drop);
+    adapter::Drop(g_gate, g_env, [&] { error.Call([&] { g_drop(a, b, c, d); }); });
 }
 void __fastcall PickADetour(void* a, void* b, void* c, void* d) {
-    adapter::Pickup(g_gate, g_env, [&] { g_pickA(a, b, c, d); }, reinterpret_cast<std::uintptr_t>(c));
+    NativeError error;
+    TraceThread(adapter::Site::PickA);
+    adapter::Pickup(g_gate, g_env, [&] { error.Call([&] { g_pickA(a, b, c, d); }); }, reinterpret_cast<std::uintptr_t>(c));
 }
 void __fastcall PickBDetour(void* a, void* b, void* c, void* d) {
-    adapter::Pickup(g_gate, g_env, [&] { g_pickB(a, b, c, d); }, reinterpret_cast<std::uintptr_t>(b));
+    NativeError error;
+    TraceThread(adapter::Site::PickB);
+    adapter::Pickup(g_gate, g_env, [&] { error.Call([&] { g_pickB(a, b, c, d); }); }, reinterpret_cast<std::uintptr_t>(b));
 }
 
 struct Target { std::uintptr_t rva; void* detour; void** original; };
@@ -111,8 +141,8 @@ bool Install(std::uintptr_t exeBase, LogFn log, const Callbacks& callbacks) {
             return false;
         }
     }
-    if (!callbacks.hostLive || !callbacks.clientFollow || !callbacks.hostBirth || !callbacks.hostCollect ||
-        !callbacks.collectorOf || !callbacks.actorFor) {
+    if (!callbacks.hostBirth || !callbacks.hostCollect ||
+        !callbacks.collectors || !callbacks.actorFor) {
         if (log) log("[struggle-orbs] configured=1 hooked=0 reason=callbacks");
         return false;
     }
@@ -143,6 +173,7 @@ bool Installed() { return Active(); }
 
 void NoteGameThread() {
     g_gate.gameThread.store(ThreadNow(), std::memory_order_release);
+    TraceThread(adapter::Site::Frame);
     // A stats line every 600 frames while anything changed (and never when nothing happened).
     static unsigned frames = 0;
     static HookStats logged{};
@@ -150,13 +181,34 @@ void NoteGameThread() {
     frames = 0;
     const HookStats n = Stats();
     if (n.births == logged.births && n.collects == logged.collects && n.dropsSuppressed == logged.dropsSuppressed &&
-        n.picksSuppressed == logged.picksSuppressed && n.offThread == logged.offThread)
+        n.picksSuppressed == logged.picksSuppressed && n.offThread == logged.offThread && n.queued == logged.queued &&
+        n.drained == logged.drained && n.stale == logged.stale && n.overflow == logged.overflow)
         return;
     logged = n;
-    g_log("[struggle-orbs] stats births=%llu collects=%llu unresolved=%llu dropsSuppressed=%llu picksSuppressed=%llu offThread=%llu",
+    g_log("[struggle-orbs] stats births=%llu collects=%llu unresolved=%llu dropsSuppressed=%llu picksSuppressed=%llu offThread=%llu queued=%llu drained=%llu stale=%llu overflow=%llu",
           static_cast<unsigned long long>(n.births), static_cast<unsigned long long>(n.collects),
           static_cast<unsigned long long>(n.unresolved), static_cast<unsigned long long>(n.dropsSuppressed),
-          static_cast<unsigned long long>(n.picksSuppressed), static_cast<unsigned long long>(n.offThread));
+          static_cast<unsigned long long>(n.picksSuppressed), static_cast<unsigned long long>(n.offThread),
+          static_cast<unsigned long long>(n.queued), static_cast<unsigned long long>(n.drained),
+          static_cast<unsigned long long>(n.stale), static_cast<unsigned long long>(n.overflow));
+    for (std::size_t i = 0; i < static_cast<std::size_t>(adapter::Site::Count); ++i) {
+        const auto& t = g_gate.sites[i];
+        if (t.entries.load(std::memory_order_relaxed))
+            g_log("[struggle-orbs] threads site=%s lastTid=%u gameTid=%u entries=%llu foreign=%llu changes=%u",
+                  adapter::kSiteNames[i], t.last.load(std::memory_order_relaxed), g_gate.gameThread.load(std::memory_order_acquire),
+                  static_cast<unsigned long long>(t.entries.load(std::memory_order_relaxed)),
+                  static_cast<unsigned long long>(t.foreign.load(std::memory_order_relaxed)), t.changes.load(std::memory_order_relaxed));
+    }
+}
+
+void ResetContext() { g_gate.Reset(); }
+
+void Pump(const Scope& scope) {
+    if (!Active() || ThreadNow() != g_gate.gameThread.load(std::memory_order_acquire)) return;
+    std::vector<Collector> collectors;
+    if (scope.mode == Mode::Host) g_cb.collectors(collectors);
+    const auto events = g_gate.Publish(ThreadNow(), scope, std::move(collectors));
+    adapter::Drain(g_gate, g_env, events);
 }
 
 std::uintptr_t Manager() { return Active() ? Field<std::uintptr_t>(g_exeBase + kManagerRva) : 0; }
@@ -203,6 +255,10 @@ HookStats Stats() {
     s.picksSuppressed = g_gate.picksSuppressed.load(std::memory_order_relaxed);
     s.offThread = g_gate.offThread.load(std::memory_order_relaxed);
     s.inactive = g_gate.inactive.load(std::memory_order_relaxed);
+    s.queued = g_gate.queued.load(std::memory_order_relaxed);
+    s.drained = g_gate.drained.load(std::memory_order_relaxed);
+    s.stale = g_gate.stale.load(std::memory_order_relaxed);
+    s.overflow = g_gate.overflow.load(std::memory_order_relaxed);
     return s;
 }
 

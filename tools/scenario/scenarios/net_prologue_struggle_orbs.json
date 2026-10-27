@@ -1,6 +1,6 @@
 {
  "name": "net_prologue_struggle_orbs",
- "description": "VUH-2865, PC1 loopback from FM-01 with a host warp to the Day 5 Struggle (02/05 btl84, site tt05-84, Hayner). Shipped defaults: the friend sees and collects the host's orbs (protocol 34, rule A in docs/PROLOGUE_ENCOUNTERS.md). Both seats fight until the host's match ends; the friend must end once, like the host, with its orb mirror on the game thread. Rehearsal warp, not opening-route evidence. No save.",
+ "description": "VUH-2865, PC1 loopback from FM-01 with a host warp to the Day 5 Struggle (02/05 btl84, site tt05-84, Hayner). Shipped defaults: the friend sees and collects the host's orbs (protocol 34, rule A in docs/PROLOGUE_ENCOUNTERS.md). Both seats fight until the host's match ends; the friend must end once, like the host, with worker-hook receipts marshalled to its entity thread. Rehearsal warp, not opening-route evidence. No save.",
  "playerDefaults": true,
  "protect": [],
  "steps": [
@@ -431,8 +431,18 @@
   },
   {
    "do": "assert",
-   "expr": "len(log_matches(r'\\[struggle-orbs\\] stats .*offThread=[1-9]', 1)) == 0 and len(log_matches(r'\\[struggle-orbs\\] stats .*offThread=[1-9]', 0)) == 0",
-   "message": "orb updates must run on the game thread"
+   "expr": "len(log_matches(r'\\[struggle-orbs\\] thread site=NoteGameThread tid=\\d+ gameTid=\\d+', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] thread site=NoteGameThread tid=\\d+ gameTid=\\d+', 1)) > 0 and len(log_matches(r'\\[struggle-orbs\\] thread site=pick-[ab] tid=\\d+ gameTid=\\d+', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] thread site=pick-[ab] tid=\\d+ gameTid=\\d+', 1)) > 0",
+   "message": "orb hook and entity-thread TIDs must be recorded on both seats"
+  },
+  {
+   "do": "assert",
+   "expr": "len(log_matches(r'\\[struggle-orbs\\] stats .*queued=[1-9]\\d* drained=[1-9]\\d* stale=\\d+ overflow=0', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] stats .*overflow=0', 1)) > 0 and len(log_matches(r'\\[struggle-orbs\\] stats .*overflow=[1-9]', 0)) == 0 and len(log_matches(r'\\[struggle-orbs\\] stats .*overflow=[1-9]', 1)) == 0",
+   "message": "worker receipts must reach the entity thread without mailbox overflow; offThread counts are expected observations"
+  },
+  {
+   "do": "assert",
+   "expr": "len(log_matches(r'\\[struggle-orbs\\] stats .*collects=[1-9]', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] sent .* collect orb=', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] received .* collect orb=', 1)) > 0 and len(log_matches(r'\\[struggle-orbs\\] client shown=\\d+ created=\\d+ vanished=[1-9]', 1)) > 0",
+   "message": "host pickups must be booked and sent, then received and flown or faded on the friend"
   },
   {
    "do": "assert",

@@ -14,6 +14,9 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <thread>
+#include <future>
+#include <atomic>
 
 using namespace kh2coop;
 namespace so = kh2coop::inject::struggleorbs;
@@ -438,114 +441,193 @@ void ManagerReplacement() {
     }
 }
 
+// MSVC requires external linkage for the thread-local map destructor.
+} // namespace
+
 // Counting fakes for the detours' environment.
 struct FakeNative {
-    static inline std::uint32_t thread = 0;
-    static inline unsigned reads = 0, live = 0, follows = 0, births = 0, collects = 0, collectorCalls = 0;
-    static inline bool following = false, hosting = true;
-    static inline std::uint8_t collector = so::kCollectorHost;
-    static inline std::uint16_t netId = 0, lastNetId = 0;
+    static inline thread_local std::uint32_t thread = 0;
+    static inline thread_local unsigned reads = 0;
+    static inline thread_local std::function<void()> readStep;
+    static inline unsigned births = 0, collects = 0;
+    static inline std::uint16_t lastNetId = 0;
     static inline std::uint8_t lastCollector = 0;
-    static inline std::map<std::uintptr_t, std::uint64_t> memory;
+    static inline thread_local std::map<std::uintptr_t, std::uint64_t> memory;
+    static inline const std::thread::id ownerThread = std::this_thread::get_id();
+    static inline std::atomic<bool> wrongCallbackThread{false};
     static void Clear() {
-        reads = live = follows = births = collects = collectorCalls = 0; following = false; hosting = true;
-        collector = so::kCollectorHost; netId = lastNetId = 0; lastCollector = 0; memory.clear();
+        wrongCallbackThread = false;
+        reads = births = collects = 0;
+        lastNetId = 0; lastCollector = 0; memory.clear();
     }
     static std::uint32_t Thread() { return thread; }
     static bool Read(std::uintptr_t a, void* out, std::size_t n) {
         ++reads;
+        if (readStep) { auto f = std::move(readStep); f(); }
+        if (n > sizeof(std::uint64_t)) { std::memset(out, 0, n); return true; }
         const auto it = memory.find(a);
         const std::uint64_t v = it == memory.end() ? 0 : it->second;
         std::memcpy(out, &v, n < sizeof(v) ? n : sizeof(v));
         return true;
     }
 };
+
+namespace {
 const so::Callbacks kFakeCallbacks = [] {
     so::Callbacks c;
-    c.hostLive = [] { ++FakeNative::live; return FakeNative::hosting; };
-    c.clientFollow = [] { ++FakeNative::follows; return FakeNative::following; };
-    c.hostBirth = [](std::uintptr_t, std::uintptr_t, std::uint8_t, const float*, const float*) { ++FakeNative::births; };
+    c.hostBirth = [](std::uintptr_t, std::uintptr_t, std::uint8_t, const float*, const float*) {
+        if (std::this_thread::get_id() != FakeNative::ownerThread) FakeNative::wrongCallbackThread = true;
+        ++FakeNative::births; };
     c.hostCollect = [](std::uintptr_t, std::uintptr_t, std::uint8_t who, std::uint16_t id) {
+        if (std::this_thread::get_id() != FakeNative::ownerThread) FakeNative::wrongCallbackThread = true;
         ++FakeNative::collects; FakeNative::lastCollector = who; FakeNative::lastNetId = id;
     };
-    c.collectorOf = [](std::uintptr_t, std::uint16_t& id) { ++FakeNative::collectorCalls; id = FakeNative::netId; return FakeNative::collector; };
     c.actorFor = [](std::uint8_t, std::uint16_t) -> std::uintptr_t { return 0; };
     return c;
 }();
 constexpr std::uintptr_t kBase = 0x140000000, kManager = 0x2AE0000, kRecord = 0x9000;
 
+so::Scope OrbScope(so::Mode mode = so::Mode::Host) {
+    return {11, 2, 3, 4, 55, kManager, mode};
+}
+std::vector<so::Collector> Collectors() {
+    return {{0x111, so::kCollectorHost, 0}, {0x222, so::kCollectorFriend, 0}, {0x333, so::kCollectorEnemy, 3}};
+}
+so::adapter::Env Env() { return {kBase, &FakeNative::Thread, &FakeNative::Read, &kFakeCallbacks}; }
+void Record(std::uintptr_t record = kRecord) {
+    FakeNative::memory[kBase + so::kManagerRva] = kManager;
+    FakeNative::memory[record + so::kRecordManager] = kManager;
+    FakeNative::memory[record + so::kRecordDescriptor] = kBase + so::kDescriptorsRva;
+    FakeNative::memory[record + so::kRecordUpdate] = 1;
+    FakeNative::memory[record + so::kRecordCollector] = 0;
+}
 void AdapterGate() {
     namespace ad = so::adapter;
-    ad::Env env;
-    env.exeBase = kBase; env.thread = &FakeNative::Thread; env.read = &FakeNative::Read; env.cb = &kFakeCallbacks;
+    auto env = Env();
     float point[4] {1, 2, 3, 1};
-    // Every detour body, refused three ways: inactive, no game thread noted yet, a foreign thread.
+    // Inactive, unregistered and no-context entries never touch native memory/callbacks.
     for (int mode = 0; mode < 3; ++mode) {
-        ad::Gate g;
-        g.active.store(mode != 0);
-        g.gameThread.store(mode == 2 ? 7 : 0);
-        FakeNative::Clear(); FakeNative::thread = 9; FakeNative::following = true;
+        ad::Gate g; g.active.store(mode != 0); g.gameThread.store(mode == 2 ? 7 : 0);
+        FakeNative::Clear(); FakeNative::thread = 9;
         unsigned originals = 0;
         const auto r = ad::Create(g, env, [&](std::uintptr_t, std::uintptr_t, const float*) { ++originals; return std::uintptr_t{0x4242}; },
                                   kManager, kBase + so::kDescriptorsRva, point);
-        ad::Drop(g, env, [&] { ++originals; });
-        ad::Drop(g, env, [&] { ++originals; });
-        ad::Pickup(g, env, [&] { ++originals; }, kRecord);
-        ad::Pickup(g, env, [&] { ++originals; }, kRecord);
-        const char* why[] = {"inactive", "unregistered", "foreign-thread"};
-        check(r == 0x4242 && originals == 5 && FakeNative::reads == 0 && FakeNative::live == 0 && FakeNative::follows == 0 &&
-              FakeNative::births == 0 && FakeNative::collects == 0 && g.dropsSuppressed == 0 && g.picksSuppressed == 0,
-              std::string("gate ") + why[mode] + ": each of the five detours calls its original once, reads nothing, calls nothing");
+        ad::Drop(g, env, [&] { ++originals; }); ad::Drop(g, env, [&] { ++originals; });
+        ad::Pickup(g, env, [&] { ++originals; }, kRecord); ad::Pickup(g, env, [&] { ++originals; }, kRecord);
+        check(r == 0x4242 && originals == 5 && FakeNative::reads == 0 && FakeNative::births == 0 && FakeNative::collects == 0,
+              "unpublished: every detour calls native once without reads or callbacks");
         check(mode == 0 ? g.inactive == 5 && g.offThread == 0 : g.offThread == 5 && g.inactive == 0,
-              std::string("gate ") + why[mode] + ": counted once per refused call");
+              "unpublished: inactive/foreign entries counted");
     }
-    ad::Gate g;
-    g.active.store(true); g.gameThread.store(9);
-    FakeNative::Clear(); FakeNative::thread = 9;
-    {   // Friend: drops and pickups are skipped, the allocator still runs.
-        FakeNative::following = true; FakeNative::hosting = false;
-        unsigned originals = 0;
-        ad::Drop(g, env, [&] { ++originals; });
-        ad::Pickup(g, env, [&] { ++originals; }, kRecord);
-        check(originals == 0 && g.dropsSuppressed == 1 && g.picksSuppressed == 1 && FakeNative::reads == 0,
-              "friend: its own drop and pickup are skipped without a native read");
-        const auto r = ad::Create(g, env, [&](std::uintptr_t, std::uintptr_t, const float*) { ++originals; return std::uintptr_t{kRecord}; },
-                                  kManager, kBase + so::kDescriptorsRva, point);
-        check(r == kRecord && originals == 1 && FakeNative::births == 0, "friend: the allocator runs and books nothing");
+    ad::Gate g; g.active = true; g.gameThread = 9;
+    FakeNative::Clear(); FakeNative::thread = 17; Record();
+    (void)g.Publish(9, OrbScope(so::Mode::Follow), {});
+    unsigned originals = 0;
+    ad::Drop(g, env, [&] { ++originals; });
+    ad::Pickup(g, env, [&] { ++originals; }, kRecord);
+    check(originals == 0 && g.dropsSuppressed == 1 && g.picksSuppressed == 1,
+          "friend worker: cached policy suppresses drops/picks without a game-state callback");
+    FakeNative::memory[kBase + so::kManagerRva] = kManager + 1;
+    ad::Drop(g, env, [&] { ++originals; }); ad::Pickup(g, env, [&] { ++originals; }, kRecord);
+    check(originals == 2, "stale manager: suppression never crosses a native manager replacement");
+    Record();
+    FakeNative::readStep = [&] { g.Reset(); };
+    ad::Drop(g, env, [&] { ++originals; });
+    check(originals == 3, "withdrawn during native read: old follow token cannot suppress a drop");
+    (void)g.Publish(9, OrbScope(so::Mode::Follow), {});
+    FakeNative::readStep = [&] { g.Reset(); };
+    ad::Pickup(g, env, [&] { ++originals; }, kRecord);
+    check(originals == 4, "withdrawn during native read: old follow token cannot suppress a pickup");
+    (void)g.Publish(9, OrbScope(), Collectors());
+    const auto create = [&] {
+        return ad::Create(g, env, [&](std::uintptr_t, std::uintptr_t, const float*) { ++originals; return kRecord; },
+                          kManager, kBase + so::kDescriptorsRva, point);
+    };
+    check(create() == kRecord && FakeNative::births == 0 && g.queued == 1,
+          "host worker: birth copies a receipt, no EnemySync callback");
+    ad::Drain(g, env, g.Publish(9, OrbScope(), Collectors()));
+    check(FakeNative::births == 1 && g.births == 1, "owner drain: birth callback once");
+    const auto pick = [&](std::uintptr_t actor, bool switches) {
+        Record();
+        ad::Pickup(g, env, [&] { ++originals; if (switches) {
+            FakeNative::memory[kRecord + so::kRecordUpdate] = 2;
+            FakeNative::memory[kRecord + so::kRecordCollector] = actor;
+        } }, kRecord);
+    };
+    for (const auto actor : {0x111u, 0x222u, 0x333u, 0x444u}) {
+        pick(actor, true);
+        const auto before = FakeNative::collects;
+        ad::Drain(g, env, g.Publish(9, OrbScope(), {})); // refreshed mapping must not rename captured collector
+        check(FakeNative::collects == before + 1 && FakeNative::lastCollector ==
+              (actor == 0x111 ? so::kCollectorHost : actor == 0x222 ? so::kCollectorFriend :
+               actor == 0x333 ? so::kCollectorEnemy : so::kCollectorUnresolved), "pickup: captured collector survives refresh");
+        (void)g.Publish(9, OrbScope(), Collectors());
     }
-    {   // Host: a birth at the current manager is booked; another manager's or a non-orb descriptor's is not.
-        FakeNative::Clear(); FakeNative::thread = 9; FakeNative::memory[kBase + so::kManagerRva] = kManager;
-        const auto create = [&](std::uintptr_t manager, std::uintptr_t descriptor) {
-            return ad::Create(g, env, [](std::uintptr_t, std::uintptr_t, const float*) { return std::uintptr_t{kRecord}; },
-                              manager, descriptor, point);
-        };
-        (void)create(kManager, kBase + so::kDescriptorsRva + 0x10);
-        (void)create(kManager + 8, kBase + so::kDescriptorsRva);
-        (void)create(kManager, kBase + so::kDescriptorsRva + 0x40);
-        check(FakeNative::births == 1, "host: only an orb descriptor at the current manager is a birth");
+    check(FakeNative::lastNetId == 0 && g.unresolved == 1,
+          "unmapped collector fades; worker never calls collectorOf");
+    pick(0x111, false); pick(0, true);
+    check(g.queued == 5, "no switch or no collector: no collection");
+    Record(); FakeNative::memory[kRecord + so::kRecordDescriptor] += 1;
+    ad::Pickup(g, env, [&] { ++originals; FakeNative::memory[kRecord + so::kRecordUpdate] = 2; }, kRecord);
+    check(g.queued == 5, "wrong descriptor: no collection");
+    Record();
+    check(throws([&] { ad::Pickup(g, env, [] { throw std::runtime_error("native unwind"); }, kRecord); }) && g.queued == 5,
+          "native unwind: no receipt, no lock retained");
+
+    // Every scope component fences queued receipts. An in-flight call returning after reset is stale.
+    for (int field = 0; field < 7; ++field) {
+        (void)create(); auto scope = OrbScope();
+        switch(field) { case 0: ++scope.generation; break; case 1: ++scope.epoch; break;
+            case 2: ++scope.transition; break; case 3: ++scope.load; break; case 4: ++scope.delivery; break;
+            case 5: ++scope.manager; break; default: scope.mode = so::Mode::Follow; break; }
+        check(g.Publish(9, scope, {}).empty(), "changed scope retires queued receipts");
+        (void)g.Publish(9, OrbScope(), Collectors());
     }
-    {   // Host pickups: a switch to the flight is a collection, with its collector or Unresolved.
-        const auto pick = [&](std::uint8_t who, std::uint16_t id, bool switches) {
-            FakeNative::Clear(); FakeNative::thread = 9; FakeNative::collector = who; FakeNative::netId = id;
-            FakeNative::memory[kBase + so::kManagerRva] = kManager;
-            FakeNative::memory[kRecord + so::kRecordManager] = kManager;
-            FakeNative::memory[kRecord + so::kRecordUpdate] = 1;
-            FakeNative::memory[kRecord + so::kRecordCollector] = 0x7777;
-            unsigned originals = 0;
-            ad::Pickup(g, env, [&] { ++originals; if (switches) FakeNative::memory[kRecord + so::kRecordUpdate] = 2; }, kRecord);
-            return originals;
-        };
-        check(pick(so::kCollectorFriend, 0, true) == 1 && FakeNative::collects == 1 && FakeNative::lastCollector == so::kCollectorFriend,
-              "host: the friend's clone took it");
-        check(pick(so::kCollectorEnemy, 3, true) == 1 && FakeNative::lastCollector == so::kCollectorEnemy && FakeNative::lastNetId == 3,
-              "host: an enemy took it, by netId");
-        const auto before = g.unresolved.load();
-        check(pick(so::kCollectorNone, 0, true) == 1 && FakeNative::collects == 1 && FakeNative::lastCollector == so::kCollectorUnresolved,
-              "host: a collector it cannot name is still a collection, unresolved");
-        check(pick(so::kCollectorEnemy, 0, true) == 1 && FakeNative::lastCollector == so::kCollectorUnresolved &&
-              FakeNative::lastNetId == 0 && g.unresolved.load() == before + 2, "host: an enemy without a netId is unresolved");
-        check(pick(so::kCollectorHost, 0, false) == 1 && FakeNative::collects == 0, "host: no switch, no collection");
+    auto token = g.Capture(17); g.Reset(); (void)g.Publish(9, OrbScope(), Collectors());
+    check(!g.Submit(token, {}) && g.stale >= 8, "reset fences an in-flight native call even at identical addresses");
+    token = g.Capture(17);
+    for (std::size_t i = 0; i < ad::Gate::kCapacity; ++i) (void)g.Submit(token, {});
+    check(!g.Submit(token, {}) && g.overflow == 1, "bounded mailbox reports overflow");
+    check(g.Publish(17, OrbScope(), {}).empty() && g.Publish(9, OrbScope(), {}).size() == ad::Gate::kCapacity,
+          "worker cannot publish or steal owner receipts");
+    for (std::size_t i = 0; i < static_cast<std::size_t>(ad::Site::Count); ++i) {
+        const auto site = static_cast<ad::Site>(i);
+        check(g.Trace(site, 17) && !g.Trace(site, 17) && g.Trace(site, 9), "each hook and NoteGameThread record TID changes");
     }
+}
+
+// Real native worker threads exercise the production adapter, sharing only Gate. Their fake native
+// records are thread-local. Every callback stays on the owner, even while it publishes concurrently.
+void WorkerMailbox() {
+    namespace ad = so::adapter;
+    ad::Gate g; g.active = true; g.gameThread = 9;
+    (void)g.Publish(9, OrbScope(), Collectors());
+    auto env = Env();
+    FakeNative::Clear();
+    std::atomic<bool> start{false};
+    std::vector<std::thread> workers;
+    for (unsigned w = 0; w < 3; ++w) workers.emplace_back([&, w] {
+        FakeNative::thread = 17 + w;
+        while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
+        for (unsigned i = 0; i < 100; ++i) {
+            const auto record = kRecord + w * 0x10000 + i * 0x80;
+            Record(record);
+            float point[4] {1, 2, 3, 1};
+            ad::Create(g, env, [&](std::uintptr_t, std::uintptr_t, const float*) { return record; },
+                       kManager, kBase + so::kDescriptorsRva, point);
+            ad::Pickup(g, env, [&] {
+                FakeNative::memory[record + so::kRecordUpdate] = 2;
+                FakeNative::memory[record + so::kRecordCollector] = 0x222;
+            }, record);
+        }
+    });
+    start.store(true, std::memory_order_release);
+    for (int i = 0; i < 100; ++i) ad::Drain(g, env, g.Publish(9, OrbScope(), Collectors()));
+    for (auto& w : workers) w.join();
+    ad::Drain(g, env, g.Publish(9, OrbScope(), Collectors()));
+    check(FakeNative::births == 300 && FakeNative::collects == 300 && g.queued == 600 && g.drained == 600 &&
+          g.overflow == 0 && g.stale == 0 && g.offThread == 600, "three workers + concurrent owner: every receipt drained once");
+    check(!FakeNative::wrongCallbackThread, "all EnemySync callbacks executed on the owner thread");
 }
 
 // Installation with injected failures at every step, and detours called while it runs.
@@ -585,7 +667,7 @@ void AdapterInstall() {
     {
         ad::Gate g; g.gameThread.store(9); FakeOps ops; ops.failApply = true;
         unsigned originals = 0, freedCalls = 0;
-        FakeNative::Clear(); FakeNative::thread = 9; FakeNative::following = true;
+        FakeNative::Clear(); FakeNative::thread = 9;
         // Quill r2: a thread enters the drop detour while Apply runs and pauses before its original call;
         // it resumes after Install has returned. The trampoline it calls must still exist.
         std::function<void()> paused;
@@ -597,7 +679,7 @@ void AdapterInstall() {
         const auto r = ad::Install(g, 5, ops);
         check(!r.active && !g.active && std::string(r.failedAt) == "apply" && r.retained == 5 && ops.removed.empty() &&
               r.rollbackFailures == 0, "install: a failed apply keeps every hook, inactive, and removes none");
-        check(originals == 2 && g.dropsSuppressed == 0 && g.picksSuppressed == 0 && FakeNative::reads == 0 && FakeNative::follows == 0,
+        check(originals == 2 && g.dropsSuppressed == 0 && g.picksSuppressed == 0 && FakeNative::reads == 0,
               "install: a detour reached while applying passes straight through");
         paused();
         bool all = true;
@@ -657,6 +739,7 @@ int main() {
     Btl84Replay();
     ManagerReplacement();
     AdapterGate();
+    WorkerMailbox();
     AdapterInstall();
     SameAddressReturn();
     std::printf("%d/%d checks PASS\n", checks - failed, checks);

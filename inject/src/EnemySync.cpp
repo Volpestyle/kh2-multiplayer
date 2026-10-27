@@ -7505,25 +7505,15 @@ void AdmitScriptCall(const WorldScope& scope, const std::uint8_t* payload, std::
 }
 } // namespace
 
-// VUH-2466: the Struggle orb hooks' context, on the game thread. The pickup hook asks once per orb per
-// frame, so each answer is kept for its frame.
+// VUH-2881: only OrbTick queries live game/session state. Detours use its copied policy.
 bool OrbHostLive() {
-    static std::uint32_t frame = UINT32_MAX; static bool live = false;
-    if (frame != g_hitTraceFrame) {
-        RoomTransition location;
-        frame = g_hitTraceFrame; live = CurrentRole() == Role::Host && ActivationContext(Role::Host, location);
-    }
-    return live;
+    RoomTransition location;
+    return CurrentRole() == Role::Host && ActivationContext(Role::Host, location);
 }
 bool OrbClientFollow() {
-    static std::uint32_t frame = UINT32_MAX; static bool follow = false;
-    if (frame != g_hitTraceFrame) {
-        RoomTransition room;
-        frame = g_hitTraceFrame;
-        follow = CurrentRole() == Role::Client && ActivationContext(Role::Client, room) && g_lastRoomPacket &&
-                 sameActivationLocation(room, *g_lastRoomPacket);
-    }
-    return follow;
+    RoomTransition room;
+    return CurrentRole() == Role::Client && ActivationContext(Role::Client, room) && g_lastRoomPacket &&
+           sameActivationLocation(room, *g_lastRoomPacket);
 }
 void OrbHostBirth(std::uintptr_t manager, std::uintptr_t record, std::uint8_t type, const float* point, const float* velocity) {
     const auto orb = g_orbBook.Birth(manager, record);
@@ -7558,6 +7548,15 @@ void OrbHostCollect(std::uintptr_t manager, std::uintptr_t record, std::uint8_t 
 void OrbTick() {
     // Both roles observe the orb manager every frame, rows or not: a manager seen gone ends its match.
     const std::uintptr_t manager = struggleorbs::Manager();
+    struggleorbs::Scope scope{};
+    if (manager && (OrbHostLive() || OrbClientFollow())) {
+        scope.generation = WorldSessionGeneration();
+        scope.epoch = CurrentRole() == Role::Host ? g_epoch : g_host.epoch;
+        scope.transition = warp::TransitionSerial(); scope.load = warp::LoadSerial();
+        scope.delivery = g_bridge.DeliverySerial(); scope.manager = manager;
+        scope.mode = CurrentRole() == Role::Host ? struggleorbs::Mode::Host : struggleorbs::Mode::Follow;
+    }
+    struggleorbs::Pump(scope);
     if (CurrentRole() == Role::Host) { g_orbBook.Observe(manager); return; }
     if (CurrentRole() == Role::Client) g_orbDisplay.Observe(manager);
     if (!OrbClientFollow()) return;
@@ -7567,7 +7566,7 @@ void OrbTick() {
     g_orbDisplay.Tick(manager, &struggleorbs::CreateDisplay, &struggleorbs::StartFlight);
     const auto& after = g_orbDisplay.Stats();
     if (g_log && g_orbLogs < 400 && (after.createFailed != before.createFailed || after.vanishFailed != before.vanishFailed ||
-                                     after.created / 16 != before.created / 16)) {
+                                     after.created / 16 != before.created / 16 || after.vanished != before.vanished)) {
         ++g_orbLogs;
         g_log("[struggle-orbs] client shown=%zu created=%llu vanished=%llu skipped=%llu createFailed=%llu vanishFailed=%llu queued=%zu",
             g_orbDisplay.Shown(), static_cast<unsigned long long>(after.created), static_cast<unsigned long long>(after.vanished),
@@ -7575,13 +7574,12 @@ void OrbTick() {
             static_cast<unsigned long long>(after.vanishFailed), g_orbDisplay.Queued());
     }
 }
-std::uint16_t HostCollectorNetId(uintptr_t actor) noexcept {
-    if (CurrentRole() != Role::Host || g_epoch == 0 || g_hostBeginPending || !actor) return 0;
-    const auto found = g_inst.byActor.find(actor);
-    if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return 0;
-    const auto& spawn = g_inst.spawns[found->second];
-    if (!spawn.present || !spawn.announced || spawn.actor != actor || spawn.spawnIndex + 1 > 0xFFFF) return 0;
-    return static_cast<std::uint16_t>(spawn.spawnIndex + 1);
+void OrbEnemyCollectors(std::vector<struggleorbs::Collector>& out) {
+    if (CurrentRole() != Role::Host || !g_epoch || g_hostBeginPending) return;
+    for (const auto& spawn : g_inst.spawns) {
+        if (spawn.present && spawn.announced && spawn.actor && spawn.spawnIndex + 1 <= 0xFFFF)
+            out.push_back({spawn.actor, struggleorbs::kCollectorEnemy, static_cast<std::uint16_t>(spawn.spawnIndex + 1)});
+    }
 }
 uintptr_t ClientActorForNetId(std::uint16_t netId) noexcept {
     if (CurrentRole() != Role::Client || !netId) return 0;

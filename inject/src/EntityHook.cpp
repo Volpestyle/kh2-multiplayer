@@ -4371,16 +4371,12 @@ bool Initialize(uintptr_t exeBase) {
     // is sent unresolved); the friend's orb flies to its copy of that collector, or fades.
     {
         struggleorbs::Callbacks orbs;
-        orbs.hostLive = &enemysync::OrbHostLive;
-        orbs.clientFollow = &enemysync::OrbClientFollow;
         orbs.hostBirth = &enemysync::OrbHostBirth;
         orbs.hostCollect = &enemysync::OrbHostCollect;
-        orbs.collectorOf = [](std::uintptr_t actor, std::uint16_t& netId) -> std::uint8_t {
-            netId = 0;
-            if (actor == g_soraActor) return struggleorbs::kCollectorHost;
-            if (actor == PuppetTarget(0)) return struggleorbs::kCollectorFriend;
-            netId = enemysync::HostCollectorNetId(actor);
-            return netId ? struggleorbs::kCollectorEnemy : struggleorbs::kCollectorNone;
+        orbs.collectors = [](std::vector<struggleorbs::Collector>& out) {
+            if (g_soraActor) out.push_back({g_soraActor, struggleorbs::kCollectorHost, 0});
+            if (const auto actor = PuppetTarget(0)) out.push_back({actor, struggleorbs::kCollectorFriend, 0});
+            enemysync::OrbEnemyCollectors(out);
         };
         // No copy of the collector here: 0, and the orb fades where it lies (never a stand-in collector).
         orbs.actorFor = [](std::uint8_t collector, std::uint16_t netId) -> std::uintptr_t {
