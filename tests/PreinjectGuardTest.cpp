@@ -32,6 +32,52 @@ int wmain(int argc, wchar_t** argv) {
         Write(argv[3], deleted ? "deleted" : "blocked");
         return deleted ? 3 : 0;
     }
+    // Run from a copied exe so its directory stands in for the install root
+    // (VUH-2763): movie, non-movie install file, outside file, twin tail, marker.
+    if (argc == 7 && std::wstring(argv[1]) == L"--movie-child") {
+        auto head = [](const wchar_t* path) {
+            FILE* file = nullptr;
+            char bytes[9] {};
+            if (_wfopen_s(&file, path, L"rb") == 0 && file) {
+                fread(bytes, 1, 8, file);
+                fclose(file);
+            }
+            return std::string(bytes);
+        };
+        // The game's header write: fopen r+b, 8 bytes at offset 0.
+        auto patch = [](const wchar_t* path, const char* text) {
+            FILE* file = nullptr;
+            if (_wfopen_s(&file, path, L"r+b") != 0 || !file) return std::string("failed");
+            const bool wrote = fwrite(text, 1, 8, file) == 8;
+            return std::string(fclose(file) == 0 && wrote ? "wrote" : "failed");
+        };
+        // Media Foundation's open goes through KernelBase CreateFile2.
+        auto mediaHead = [](const wchar_t* path) {
+            char bytes[9] {};
+            DWORD read = 0;
+            HANDLE file = CreateFile2(path, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, nullptr);
+            if (file != INVALID_HANDLE_VALUE) {
+                ReadFile(file, bytes, 8, &read, nullptr);
+                CloseHandle(file);
+            }
+            return std::string(bytes);
+        };
+        wchar_t logs[MAX_PATH] {};
+        GetEnvironmentVariableW(L"KH2COOP_LOG_DIR", logs, MAX_PATH);
+        const auto twin = fs::path(logs) / (L"save_sandbox_" + std::to_wstring(GetCurrentProcessId())) / argv[5];
+        // One step per statement: operands of + are evaluated in no fixed order.
+        std::string out = head(argv[2]);
+        out += fs::exists(twin) ? "|twin-early" : "|no-twin";
+        out += "|" + patch(argv[2], "decoded!");
+        out += "|" + head(argv[2]);
+        out += "|" + mediaHead(argv[2]);
+        out += "|" + patch(argv[2], "scramble");
+        out += "|" + head(argv[2]);
+        out += "|" + patch(argv[3], "install!");
+        out += "|" + patch(argv[4], "outside!");
+        Write(argv[6], out.c_str());
+        return 0;
+    }
     wchar_t exe[MAX_PATH] {}, temp[MAX_PATH] {};
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     GetTempPathW(MAX_PATH, temp);
@@ -114,6 +160,53 @@ int wmain(int argc, wchar_t** argv) {
               "failure terminates child before entry point or file mutation");
         if (observed) CloseHandle(observed);
         if (collision) CloseHandle(collision);
+    }
+    {
+        // A shipped movie's first bytes are scrambled; the game decodes them
+        // in place for playback and scrambles them again (VUH-2763).
+        const auto install = root / L"install";
+        const auto movies = install / L"STEAM" / L"juefigs" / L"KH2ReSource" / L"zmovie" / L"en";
+        fs::create_directories(movies);
+        const auto gameExe = install / fs::path(exe).filename();
+        fs::copy_file(exe, gameExe);
+        const auto movie = movies / L"me4.mp4";
+        const auto data = install / L"STEAM" / L"other.dat";
+        const auto outside = root / L"outside.mp4";
+        const char* original = "SCRAMBLED-HEADER+payload";
+        Write(movie, original);
+        Write(data, "install-data");
+        Write(outside, "outside-original");
+        const auto stamp = fs::last_write_time(movie);
+        const auto tail = fs::path(L"STEAM") / L"juefigs" / L"KH2ReSource" / L"zmovie" / L"en" / L"me4.mp4";
+        const auto marker = root / L"movie.marker";
+        STARTUPINFOW startup {};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION info {};
+        std::wstring command = L"\"" + gameExe.wstring() + L"\" --movie-child \"" + movie.wstring() + L"\" \"" +
+                               data.wstring() + L"\" \"" + outside.wstring() + L"\" \"" + tail.wstring() + L"\" \"" +
+                               marker.wstring() + L"\"";
+        if (!CreateProcessW(gameExe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED, nullptr,
+                            install.c_str(), &startup, &info))
+            throw std::runtime_error("offline movie child creation failed");
+        Child child(info);
+        const auto error = child.ProtectAndResume([&](DWORD pid) { return InjectDll(pid, dll); }, 10000);
+        Check(error.empty(), "movie child: actual SaveGuard acknowledged before resume");
+        if (error.empty()) {
+            Check(WaitForSingleObject(info.hProcess, 10000) == WAIT_OBJECT_0, "movie child exits");
+            Check(Read(marker) == "SCRAMBLE|no-twin|wrote|decoded!|decoded!|wrote|scramble|wrote|wrote",
+                  "movie: read before any write sees the install file; header writes and later reads use the twin");
+            Check(Read(movie) == original && fs::last_write_time(movie) == stamp,
+                  "install movie bytes and mtime unchanged");
+            const auto twin = logs / (L"save_sandbox_" + std::to_wstring(info.dwProcessId)) / tail;
+            Check(Read(twin) == std::string("scramble") + (original + 8), "movie twin holds the copy plus both writes");
+            Check(Read(data) == "install!data", "non-movie install file passes through");
+            Check(Read(outside) == "outside!original", "movie outside the install passes through");
+            const auto text = Read(logs / (L"preinject_guard_" + std::to_wstring(info.dwProcessId) + L".log"));
+            Check(text.find("[saveguard] redirected CreateFileW #1: ")!= std::string::npos &&
+                  text.find("me4.mp4 -> ") != std::string::npos && text.find("other.dat") == std::string::npos &&
+                  text.find("twin copy failed") == std::string::npos,
+                  "movie redirects are logged; non-movie and outside paths are not");
+        }
     }
     fs::remove_all(root); // exactly the temp directory successfully created above
     return failures ? 1 : 0;

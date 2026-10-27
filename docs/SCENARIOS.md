@@ -1807,6 +1807,17 @@ Three layers:
     (`DeleteFileA/W`) and `RemoveDirectoryA/W`. Copy goes to NtCreateFile
     without passing CreateFileW, so it's hooked by name. If no sandbox can be
     created, write opens are denied too (fail closed).
+  - **Install movies (VUH-2763):** every `.mp4` under the game exe's
+    directory is guarded the same way. Each shipped movie's first 256 bytes
+    are XOR-scrambled; around playback the game opens the file RW, writes
+    the decoded header, lets Media Foundation read it (through hooked
+    KernelBase `CreateFile2`), then writes the scrambled header back. Those
+    writes now land in a sandbox twin under `save_sandbox_<pid>/STEAM/…`
+    (up to 637 MB for `ena.mp4`), which MF then plays, so install bytes and
+    mtimes stay unchanged. A read before any write still opens the install
+    file. Twins are copies of copyrighted assets: never publish them, and
+    delete them at closure with `tools/rig/movie_twins.py clean --logs
+    build/rig/logs --pid <owned pid>`, recording its JSON in `closure.json`.
   - **Logging:** every operation is logged as
     `[saveguard] redirected|blocked …`.
   - **Self-test:** setting `KH2COOP_SAVEGUARD_TEST_DIR` before

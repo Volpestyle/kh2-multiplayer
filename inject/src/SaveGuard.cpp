@@ -6,7 +6,8 @@
 // resolve there), plus kernel32's own CopyFileA/MoveFileExA. CopyFile goes
 // to NtCreateFile without passing CreateFileW, so copies are hooked by name.
 // A path is guarded when, case-insensitively, its full path contains the
-// save folder name below; both slash styles are accepted.
+// save folder name below, or it is an .mp4 under the game exe's directory
+// (the install's movies); both slash styles are accepted.
 // ============================================================================
 
 #include "SaveGuard.hpp"
@@ -66,10 +67,39 @@ MoveFileWithProgressWFn g_moveFileWithProgressW = nullptr;
 // (KH2COOP_SAVEGUARD_TEST_DIR). Empty when unset.
 wchar_t g_testDir[MAX_PATH] = {};
 
+// Lower-cased directory of the game exe, without a trailing backslash: the
+// install root (VUH-2763). Every shipped movie keeps its first 256 bytes
+// scrambled; the game writes the plain header into the file before Media
+// Foundation opens it and scrambles it again afterwards. Those writes are
+// redirected like save writes, so playback reads the decoded twin and the
+// install's bytes and mtimes never change. Empty if unknown.
+wchar_t g_installRoot[MAX_PATH] = {};
+size_t g_installRootLen = 0;
+
 void Lower(wchar_t* text) {
     for (; *text; ++text) {
         *text = *text == L'/' ? L'\\' : static_cast<wchar_t>(std::towlower(*text));
     }
+}
+
+bool UnderInstallRoot(const wchar_t* lowered) {
+    return g_installRootLen && std::wcsncmp(lowered, g_installRoot, g_installRootLen) == 0 &&
+           lowered[g_installRootLen] == L'\\';
+}
+
+// Offset in a lower-cased full path just past the guarded root containing
+// it (the save folder, the self-test directory or the install root), or 0
+// when the path isn't guarded.
+size_t GuardedRootEnd(const wchar_t* lowered) {
+    if (const wchar_t* hit = std::wcsstr(lowered, kSaveFolder)) {
+        return (hit - lowered) + (sizeof(kSaveFolder) / sizeof(wchar_t) - 1);
+    }
+    if (g_testDir[0] && std::wcsstr(lowered, g_testDir) == lowered) return std::wcslen(g_testDir);
+    const size_t n = std::wcslen(lowered);
+    if (UnderInstallRoot(lowered) && n > 4 && std::wcscmp(lowered + n - 4, L".mp4") == 0) {
+        return g_installRootLen;
+    }
+    return 0;
 }
 
 // Relative names are resolved against the current directory first, so a
@@ -82,8 +112,7 @@ bool IsGuardedPath(LPCWSTR path) {
         wcsncpy_s(full, path, _TRUNCATE);
     }
     Lower(full);
-    return std::wcsstr(full, kSaveFolder) != nullptr ||
-           (g_testDir[0] && std::wcsstr(full, g_testDir) == full);
+    return GuardedRootEnd(full) != 0;
 }
 
 // ANSI paths (the game's own imports are mostly the A variants).
@@ -125,7 +154,7 @@ wchar_t g_sandbox[MAX_PATH] = {};
 std::atomic<std::uint32_t> g_redirected {0};
 
 // Full path of `path` and the offset where its part below the guarded root
-// starts (the root is the save folder or the self-test directory).
+// starts.
 bool GuardedTail(LPCWSTR path, wchar_t (&full)[1024], size_t& tail) {
     if (!path) return false;
     const DWORD n = GetFullPathNameW(path, 1024, full, nullptr);
@@ -133,15 +162,8 @@ bool GuardedTail(LPCWSTR path, wchar_t (&full)[1024], size_t& tail) {
     wchar_t lowered[1024];
     wcscpy_s(lowered, full);
     Lower(lowered);
-    if (const wchar_t* hit = std::wcsstr(lowered, kSaveFolder)) {
-        tail = (hit - lowered) + (sizeof(kSaveFolder) / sizeof(wchar_t) - 1);
-        return true;
-    }
-    if (g_testDir[0] && std::wcsstr(lowered, g_testDir) == lowered) {
-        tail = std::wcslen(g_testDir);
-        return true;
-    }
-    return false;
+    tail = GuardedRootEnd(lowered);
+    return tail != 0;
 }
 
 // Sandbox twin of a guarded path, with its parent directories created.
@@ -189,8 +211,9 @@ bool RouteOpen(const char* api, LPCWSTR path, DWORD access, DWORD disposition,
     const bool twinExists = Exists(twin);
     if (!write && !twinExists) return false;  // plain read of the real save
     const bool keepsContents = disposition == OPEN_EXISTING || disposition == OPEN_ALWAYS;
-    if (write && !twinExists && keepsContents && Exists(path)) {
-        g_copyFileW(path, twin, TRUE);  // trampoline; the destination isn't guarded
+    if (write && !twinExists && keepsContents && Exists(path) &&
+        !g_copyFileW(path, twin, TRUE) && g_log) {  // trampoline; the destination isn't guarded
+        g_log("[saveguard] twin copy failed for %s: error %lu", api, GetLastError());
     }
     if (write) LogRedirect(api, path, twin);
     return true;
@@ -474,6 +497,18 @@ bool Install(LogFn log) {
         Lower(g_testDir);
     }
     {
+        wchar_t exe[MAX_PATH] = {};
+        const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        wchar_t* slash = n > 0 && n < MAX_PATH ? std::wcsrchr(exe, L'\\') : nullptr;
+        if (slash) *slash = L'\0';
+        if (slash && GetFullPathNameW(exe, MAX_PATH, g_installRoot, nullptr) > 0) {
+            Lower(g_installRoot);
+            g_installRootLen = std::wcslen(g_installRoot);
+        } else {
+            g_installRoot[0] = L'\0';
+        }
+    }
+    {
         char dir[MAX_PATH] = {};
         DWORD n = GetEnvironmentVariableA("KH2COOP_LOG_DIR", dir, MAX_PATH);
         if (n == 0 || n >= MAX_PATH) n = GetTempPathA(MAX_PATH, dir);
@@ -481,9 +516,16 @@ bool Install(LogFn log) {
         MultiByteToWideChar(CP_ACP, 0, dir, -1, wide, MAX_PATH - 1);
         wchar_t joined[MAX_PATH] = {};
         swprintf_s(joined, L"%s\\save_sandbox_%lu", wide, GetCurrentProcessId());
-        if (GetFullPathNameW(joined, MAX_PATH, g_sandbox, nullptr) == 0 ||
+        wchar_t lowered[MAX_PATH] = {};
+        if (GetFullPathNameW(joined, MAX_PATH, g_sandbox, nullptr) > 0) {
+            wcscpy_s(lowered, g_sandbox);
+            Lower(lowered);
+        }
+        // A sandbox under the install root would hold movie twins that are
+        // themselves guarded.
+        if (!lowered[0] ||
             !(CreateDirectoryW(g_sandbox, nullptr) || GetLastError() == ERROR_ALREADY_EXISTS) ||
-            IsGuardedPath(g_sandbox)) {
+            IsGuardedPath(g_sandbox) || UnderInstallRoot(lowered)) {
             g_sandbox[0] = L'\0';  // no sandbox: write opens fail closed
         }
     }
@@ -513,7 +555,8 @@ bool Install(LogFn log) {
             g_log("  ERROR: save guard incomplete; saves are NOT protected");
         } else if (sandbox[0]) {
             g_log("  Save guard installed: writes under My Games\\KINGDOM HEARTS HD 1.5+2.5 ReMIX "
-                  "go to %s; deletes/moves/copies there are denied", sandbox);
+                  "and to install .mp4 movies go to %s; deletes/moves/copies there are denied",
+                  sandbox);
         } else {
             g_log("  Save guard installed without a sandbox: all writes there are denied");
         }

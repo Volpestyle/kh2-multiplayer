@@ -11,6 +11,12 @@
 // redirect is safer than a denial. Deletes, moves, copies, replaces and
 // directory removals there fail with ERROR_ACCESS_DENIED. Everything is
 // logged as [saveguard]. Reads of the real save work as before.
+//
+// The install's .mp4 movies (any under the game exe's directory) get the same
+// treatment (VUH-2763): the game rewrites each movie's scrambled 256-byte
+// header in place around playback, so those writes go to a sandbox twin that
+// Media Foundation then reads. The twins are copies of shipped assets; live
+// runs delete them at closure and they are never published.
 // ============================================================================
 
 #include <cstdint>

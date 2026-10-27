@@ -26,7 +26,7 @@ If **Start game** reports that setup did not finish, press it again **after the 
 
 ## Saves, warnings and removal
 
-Your usual save folder is `Documents\My Games\KINGDOM HEARTS HD 1.5+2.5 ReMIX\` (often under OneDrive). The mod never writes your original saves: SaveGuard redirects write opens there into this package's `build\rig\logs\save_sandbox_<pid>\` and denies deletes/moves/copies. Connection is refused unless its installation is logged. This is a backstop, not permission to save: **do not save in-game during the preview**. Package progress is temporary; never copy sandbox files over your saves.
+Your usual save folder is `Documents\My Games\KINGDOM HEARTS HD 1.5+2.5 ReMIX\` (often under OneDrive). The mod never writes your original saves: SaveGuard redirects write opens there into this package's `build\rig\logs\save_sandbox_<pid>\` and denies deletes/moves/copies. Connection is refused unless its installation is logged. This is a backstop, not permission to save: **do not save in-game during the preview**. Package progress is temporary; never copy sandbox files over your saves. The game also rewrites a movie file's header while it plays it, so SaveGuard keeps a copy of each movie it plays in the same sandbox folder (up to several hundred MB) instead of letting it touch your install. You can delete the `.mp4` files under `save_sandbox_*` once the game is closed.
 
 This unsigned preview injects a DLL into your owned game. SmartScreen or Defender may warn or quarantine files. Stop and contact your host; do not disable protection or add exclusions yourself. Any exclusion needs your host's approval and would be restricted to the package folder.
 
