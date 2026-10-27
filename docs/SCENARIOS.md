@@ -3386,9 +3386,18 @@ wave 1 and accepted a wave 2 that had already begun. The expression helper
   a re-mint of it before any new downing (`docs/DOWNED_REVIVE.md`, "Episodes":
   after 30 s without a request the same downing ends under the re-minted number).
 
-It returns `ok`/`why`, `episodeSeen`, `waveStarted` and `ended`. The variants
-stop wave 1 at two of its four deaths, refuse to continue if wave 2 has started,
-down the seat, and wait until both seats name the episode. Only then does the
+- in the host's own log, the episode before wave 1's third death. The Basement
+  Hall spawns its two 309s natively at that third host death, not the fourth
+  (fixtures 194057/194738), and the 309 lines lag it by tens of lines. Run
+  `20261026-225539` (VUH-2901) logged death, then Kill, then the first 309, an
+  order the birth lines alone would have accepted. The episode exists only after
+  the Kill, so the host naming it first proves the Kill came before the trigger.
+
+It returns `ok`/`why`, `episodeSeen`, `waveStarted`, `triggeredFirst` and
+`ended`. The variants stop wave 1 at two of its four deaths and refuse to
+continue if wave 2 has started or a third death has come. They then down the
+seat, wait until both seats name the episode, and re-check that neither wave 2
+nor its trigger came first. Only then does the
 other seat finish both waves. The end requires `ok`. Test:
 `tests/test_downed_wave_order.py`, which covers the checker and the variants'
 own steps through the runner's Context.

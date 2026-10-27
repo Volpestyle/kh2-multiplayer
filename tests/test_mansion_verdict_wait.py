@@ -141,7 +141,7 @@ class HostDownProtectTest(unittest.TestCase):
         self.assertEqual(len(on), 1)
         self.assertEqual(len(off), 1)
         (on,), (off,) = on, off
-        self.assertEqual(steps[on - 1]["message"], "wave 2 started before both seats knew the forced episode")
+        self.assertEqual(steps[on - 1]["message"], "wave 2 started, or the host's third wave-1 death triggered it, before both seats knew the forced episode")
         self.assertEqual([s["do"] for s in steps[:on]].count("downed_kill"), 1)
         self.assertEqual((steps[on + 1]["do"], steps[on + 1]["instances"], steps[on + 1]["as"]), ("fight", [1], "wave2"))
         self.assertEqual(off, on + 2)

@@ -13,6 +13,13 @@ line), which is the only order a seat's own log can establish:
   each logs its first line about the wave's object (`objectId=309` / `objectId 309`: a host
   manifest or difficulty scale line, a client local spawn or binding line). Any such line first
   means the wave had already started on that seat, and the downing proves nothing about it;
+- births lag the wave's native trigger: the Basement Hall spawns its two 309s at wave 1's THIRD
+  host death, not its fourth (fixtures 194057/194738; VUH-2901's run 225539 logged death < Kill
+  < first 309). So the host's own log (seat 0, where every `[enemysync] host death epoch` line
+  is) must also log episode E before its `trigger_deaths`-th death after the marker. E exists
+  only after the Kill, so this proves the Kill came before the trigger. When the friend is the
+  downed seat the host learns E over the wire, a little after the Kill, so a trigger that
+  raced the Kill fails closed;
 - the episode's end is a later downed-seat line naming E, or a re-mint of E: its logical hold
   ending, a revive, or a return. While still downed the owner re-mints the episode after 30 s
   without an accepted request (docs/DOWNED_REVIVE.md, "Episodes"); the same downing then ends
@@ -26,6 +33,7 @@ import re
 KILL = re.compile(r"\[downed\] kill actor=")
 INTERCEPT = re.compile(r"\[downed\] gate intercept mode=\d+ .*?episode=([0-9A-Fa-f]+)\b")
 REMINT = re.compile(r"\[downed\] episode re-minted reason=\S+ episode=([0-9A-Fa-f]+)\b")
+DEATH = re.compile(r"\[enemysync\] host death epoch")
 END = r"\[downed\] (?:logical hold ended reason=\d+ episode={e}\b|revive episode={e}\b|return (?!owed ).*episode={e}\b|owed return kind=\d+ episode={e}\b)"
 
 
@@ -56,10 +64,13 @@ def _episodes(lines: list[str], intercept: int, episode: str) -> list[str]:
     return chain
 
 
-def wave_order(texts: list[str], downed: int, marker: str, wave_object: int = 309) -> dict:
-    """texts[i] is seat i's log. Returns the evidence and ok/why; never raises on a bad trace."""
+def wave_order(texts: list[str], downed: int, marker: str, wave_object: int = 309,
+               trigger_deaths: int = 3) -> dict:
+    """texts[i] is seat i's log, seat 0 the host. Returns the evidence and ok/why; never raises on a
+    bad trace. `triggeredFirst` is whether the host logged its `trigger_deaths`-th death after the
+    marker before it named the episode (or at all, while no episode is known yet)."""
     out = {"ok": False, "why": "", "episode": None, "episodes": [], "downed": downed, "seats": [], "ended": False,
-           "episodeSeen": [False] * len(texts), "waveStarted": [False] * len(texts)}
+           "episodeSeen": [False] * len(texts), "waveStarted": [False] * len(texts), "triggeredFirst": False}
     if downed not in range(len(texts)) or len(texts) != 2:
         out["why"] = "two seats and a downed seat index are required"
         return out
@@ -73,6 +84,10 @@ def wave_order(texts: list[str], downed: int, marker: str, wave_object: int = 30
     if any(s is None for s in starts):
         out["why"] = f"marker missing on seat {starts.index(None)}"
         return out
+    deaths = [i for i in range(starts[0] + 1, len(lines[0])) if DEATH.search(lines[0][i])]
+    trigger = deaths[trigger_deaths - 1] if len(deaths) >= trigger_deaths else None
+    out["seats"][0]["trigger"] = trigger
+    out["triggeredFirst"] = trigger is not None
     d = lines[downed]
     kills = [i for i in range(starts[downed] + 1, len(d)) if KILL.search(d[i])]
     if len(kills) != 1:
@@ -97,6 +112,8 @@ def wave_order(texts: list[str], downed: int, marker: str, wave_object: int = 30
         line = out["seats"][seat]["episodeLine"]
         first_wave = out["seats"][seat]["firstWave"]
         out["episodeSeen"][seat] = line is not None and (first_wave is None or line < first_wave)
+    host_episode = out["seats"][0]["episodeLine"]
+    out["triggeredFirst"] = trigger is not None and (host_episode is None or trigger < host_episode)
     chain = _episodes(d, intercept[0], episode)
     out["episodes"] = chain
     ended = _first(d, intercept[0], END.format(e="(?:" + "|".join(chain) + ")"))
@@ -114,6 +131,10 @@ def wave_order(texts: list[str], downed: int, marker: str, wave_object: int = 30
             out["why"] = (f"seat {seat}'s wave started (line {s['firstWave']}) before it knew episode {episode} "
                           f"(line {s['episodeLine']})")
             return out
+    if out["triggeredFirst"]:
+        out["why"] = (f"the host's death {trigger_deaths} (line {trigger}), which triggers the wave, came before "
+                      f"it knew episode {episode} (line {host_episode})")
+        return out
     if out["seats"][downed]["firstWave"] < kills[0]:
         out["why"] = f"seat {downed}'s wave started before the forced kill"
         return out

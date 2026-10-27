@@ -56,7 +56,7 @@ Historical checked-site receipts below do not close the current rerun gate.
 | 5 | 05 Sandlot (Struggle) | 87 | `TT05_MS404` | B_EX110_SKIRMISH (2229), Axel | boss skirmish | checked site `tt05-87`; both seats fight, loopback from FM-01 (below) |
 | 5 | 05 Sandlot (Struggle) | 88 | `TT05_MS405` | N_EX600_BTL (2095) | Struggle match | checked site `tt05-88`; both seats fight, loopback from FM-01 (below) |
 | 6 | 03 Back Alley | 73 | `TT03_MS601` | 2 Dusks (318), 1 Dusk (309) | Dusk ambush | checked site `tt03-73`; loopback from FM-01, both seats fight; the late 309 binds by kind (VUH-2550, below) |
-| 6 | 19 Basement Hall | 134 | `TT19_MS602` | 4 Dusks (318), then 2 (309) | Mansion Dusk ambush | checked site `tt19-134`; loopback from FM-02 |
+| 6 | 19 Basement Hall | 134 | `TT19_MS602` | 4 Dusks (318), then 2 (309) | Mansion Dusk ambush | checked site `tt19-134`; loopback from FM-02; the 309s spawn at the third 318 death, not the fourth (VUH-2869) |
 | 6 | 20 Basement Hall | 137 | `TT20_MS603` | B_EX110 (81), Axel | Axel I | loopback, VUH-2465 |
 
 Jobs and minigames (host-owned, solo activities; `Party NO_FRIEND`, no Dusks):

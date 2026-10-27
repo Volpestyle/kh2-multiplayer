@@ -1,6 +1,6 @@
 {
  "name": "net_prologue_mansion_hall_friend_down",
- "description": "VUH-2866 downed variant of net_prologue_mansion_hall.json (ordering: VUH-2869). Both seats fight wave 1 until two of its four Dusks are dead, so wave 2 cannot have started. Then the friend is downed through the DownedSpike fixture channel's Kill (KH2COOP_DOWNED_SPIKE_FIXTURE=1, a test channel product play never maps; the downing itself is the product's logical downing), and the run waits until both seats name that fresh episode. Only then does the other seat finish wave 1 and fight wave 2 alone. downed_wave_order (tools/scenario/downed_order.py) must show, in each seat's own log, the episode before the first wave-2 (309) line, and the downed seat's hold end, revive or return for that episode. Both seats then load Axel I's room. Rehearsal save. No save.",
+ "description": "VUH-2866 downed variant of net_prologue_mansion_hall.json (ordering: VUH-2869). Both seats fight wave 1 until two of its four Dusks are dead; wave 2 spawns natively at the third death (VUH-2901, fixtures 194057/194738), so it cannot have started. Then the friend is downed through the DownedSpike fixture channel's Kill (KH2COOP_DOWNED_SPIKE_FIXTURE=1, a test channel product play never maps; the downing itself is the product's logical downing), and the run waits until both seats name that fresh episode. Only then does the other seat finish wave 1 and fight wave 2 alone. downed_wave_order (tools/scenario/downed_order.py) must show, in each seat's own log, the episode before the first wave-2 (309) line, and the downed seat's hold end, revive or return for that episode; and, in the host's own log, the episode before wave 1's third death, the wave's trigger. Both seats then load Axel I's room. Rehearsal save. No save.",
  "playerDefaults": true,
  "protect": [],
  "steps": [
@@ -121,8 +121,8 @@
   },
   {
    "do": "assert",
-   "expr": "not any(saved['before_down']['waveStarted']) and log_count('[enemysync] host death epoch', 0) - saved['deaths_before'] < 4",
-   "message": "wave 2 had already started, or wave 1 was over, before the forced downing: this run cannot prove the variant"
+   "expr": "not any(saved['before_down']['waveStarted']) and log_count('[enemysync] host death epoch', 0) - saved['deaths_before'] < 3",
+   "message": "wave 2 had already started, or wave 1's third death (wave 2's trigger) had come, before the forced downing: this run cannot prove the variant"
   },
   {
    "do": "downed_kill",
@@ -141,8 +141,8 @@
   },
   {
    "do": "assert",
-   "expr": "not any(saved['down_seen']['waveStarted'])",
-   "message": "wave 2 started before both seats knew the forced episode"
+   "expr": "not any(saved['down_seen']['waveStarted']) and not saved['down_seen']['triggeredFirst']",
+   "message": "wave 2 started, or the host's third wave-1 death triggered it, before both seats knew the forced episode"
   },
   {
    "do": "fight",

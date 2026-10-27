@@ -54,13 +54,20 @@ def ended(ep=EP):
 
 
 def traces(downed, order):
-    """order 'good': kill/episode on both, then wave 2; 'births-first': wave 2 then kill (the review's trace)."""
-    good = order == "good"
+    """order 'good': kill/episode on both, then wave 2; 'births-first': wave 2 then kill (the review's trace);
+    'native': kill/episode, then wave 1's third host death, which spawns wave 2 natively (fixtures
+    194057/194738), then the births; 'trigger-first': that third death before the kill, births still
+    after the episode on both seats (VUH-2869 re-review; run 20261026-225539 logged death < Kill < 309)."""
+    good = order != "births-first"
+    third, rest = DEATHS2[:1], DEATHS2[1:]
+    before = third if order == "trigger-first" else []
+    after = third if order == "native" else []
+    deaths = rest if order in ("native", "trigger-first") else DEATHS2
     if downed == 0:  # the host's own log holds every host death
-        host = (kill() + HOST_WAVE2 if good else HOST_WAVE2 + kill()) + DEATHS2 + ended()
+        host = before + (kill() + after + HOST_WAVE2 if good else HOST_WAVE2 + kill()) + deaths + ended()
         friend = seen() + FRIEND_WAVE2 if good else FRIEND_WAVE2 + seen()
     else:
-        host = (seen() + HOST_WAVE2 if good else HOST_WAVE2 + seen()) + DEATHS2
+        host = before + (seen() + after + HOST_WAVE2 if good else HOST_WAVE2 + seen()) + deaths
         friend = (kill() + FRIEND_WAVE2 if good else FRIEND_WAVE2 + kill()) + ended()
     return ["\n".join([HOST_RELEASE] + WAVE1 + host), "\n".join([FRIEND_RELEASE] + friend)]
 
@@ -78,6 +85,26 @@ class CheckerTest(unittest.TestCase):
             r = ORDER.wave_order(traces(downed, "births-first"), downed, MARK)
             self.assertFalse(r["ok"])
             self.assertIn("started", r["why"])
+
+    def test_the_wave_trigger_before_the_downing_is_rejected(self):
+        for downed in (0, 1):
+            r = ORDER.wave_order(traces(downed, "trigger-first"), downed, MARK)
+            self.assertFalse(r["ok"])
+            self.assertTrue(r["triggeredFirst"])
+            self.assertIn("triggers the wave", r["why"])
+            self.assertEqual(r["episodeSeen"], [True, True])  # the births alone would have passed
+
+    def test_the_native_order_passes_for_each_downed_seat(self):
+        for downed in (0, 1):
+            r = ORDER.wave_order(traces(downed, "native"), downed, MARK)
+            self.assertTrue(r["ok"], r["why"])
+            self.assertFalse(r["triggeredFirst"])
+
+    def test_a_trigger_before_any_episode_counts_as_first(self):
+        host = "\n".join([HOST_RELEASE] + WAVE1 + DEATHS2[:1])
+        r = ORDER.wave_order([host, FRIEND_RELEASE], 0, MARK)
+        self.assertTrue(r["triggeredFirst"])
+        self.assertEqual(r["waveStarted"], [False, False])
 
     def test_other_seat_birth_before_it_names_the_episode_is_rejected(self):
         host, friend = traces(0, "good")
@@ -179,6 +206,11 @@ class ScenarioStepsTest(unittest.TestCase):
         i = next(k for k, s in enumerate(steps) if s.get("as") == "before_down")
         return steps[i:i + 2]
 
+    def down_seen(self, downed):
+        steps = self.steps(downed)
+        i = next(k for k, s in enumerate(steps) if s.get("as") == "down_seen")
+        return steps[i:i + 2]
+
     def final(self, downed):
         """From the post-kill episode save through the ordered-end assert, without game reads."""
         steps = self.steps(downed)
@@ -207,6 +239,59 @@ class ScenarioStepsTest(unittest.TestCase):
             self.write("\n".join([HOST_RELEASE] + WAVE1), FRIEND_RELEASE)
             for step in self.before_down(downed):
                 self.run_step(step)
+
+    def test_reject_wave_ones_third_death_at_the_downing(self):
+        # The third death spawns wave 2 natively, before any 309 line: the guard must refuse it.
+        for downed in (0, 1):
+            self.ctx.saved = {"deaths_before": 0}
+            self.write("\n".join([HOST_RELEASE] + WAVE1 + DEATHS2[:1]), FRIEND_RELEASE)
+            save, check = self.before_down(downed)
+            self.run_step(save)
+            with self.assertRaises(RUN.StepFailed):
+                self.run_step(check)
+
+    def test_down_seen_rejects_the_trigger_before_the_downing(self):
+        for downed in (0, 1):
+            self.ctx.saved = {"deaths_before": 0}
+            host, friend = traces(downed, "trigger-first")
+            self.write(host.split(HOST_WAVE2[0])[0], friend.split(FRIEND_WAVE2[0])[0])
+            save, check = self.down_seen(downed)
+            self.run_step(save)
+            self.assertEqual(self.ctx.saved["down_seen"]["episodeSeen"], [True, True])
+            with self.assertRaises(RUN.StepFailed):
+                self.run_step(check)
+
+    def test_down_seen_accepts_the_downing_before_the_trigger(self):
+        for downed in (0, 1):
+            self.ctx.saved = {"deaths_before": 0}
+            host, friend = traces(downed, "native")
+            self.write(host.split(HOST_WAVE2[0])[0], friend.split(FRIEND_WAVE2[0])[0])
+            for step in self.down_seen(downed):
+                self.run_step(step)
+
+    def test_final_steps_reject_the_trigger_before_the_downing(self):
+        for downed in (0, 1):
+            self.ctx.saved = {"deaths_before": 0}
+            host, friend = traces(downed, "trigger-first")
+            host += "\n[mission-mirror] host end trap=mission_complete arg=0"
+            friend += "\n[mission-mirror] client end like the host file=TT19_MS602.bar trap=mission_complete arg=0 ok=1 path=clean-census"
+            self.write(host, friend)
+            with self.assertRaises(RUN.StepFailed):
+                for step in self.final(downed):
+                    self.run_step(step)
+            self.assertFalse(self.ctx.saved["order"]["ok"])
+            self.assertGreaterEqual(self.ctx.saved["combat"]["hostDeaths"], 6)
+
+    def test_final_steps_accept_the_native_order(self):
+        for downed in (0, 1):
+            self.ctx.saved = {"deaths_before": 0}
+            host, friend = traces(downed, "native")
+            host += "\n[mission-mirror] host end trap=mission_complete arg=0"
+            friend += "\n[mission-mirror] client end like the host file=TT19_MS602.bar trap=mission_complete arg=0 ok=1 path=clean-census"
+            self.write(host, friend)
+            for step in self.final(downed):
+                self.run_step(step)
+            self.assertTrue(self.ctx.saved["order"]["ok"])
 
     def test_final_steps_reject_births_before_the_downing(self):
         for downed in (0, 1):
