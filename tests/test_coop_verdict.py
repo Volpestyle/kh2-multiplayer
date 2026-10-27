@@ -1,6 +1,8 @@
 """Co-op route verdict (VUH-2344): log lines in, pass/fail and problems out."""
 import importlib.util
+import json
 from pathlib import Path
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,6 +104,72 @@ class CoopVerdictTest(unittest.TestCase):
         self.assertEqual(v["host"]["rooms"][-1]["tickMs"], 794568187)
         first = v["friends"]["friend"]["rooms"][0]
         self.assertEqual((first["hostTickMs"], first["friendTickMs"], first["lagMs"]), (None, None, None))
+
+
+# VUH-2897: line formats from run 20261027-043745 (Axel I, friend ACK withheld, deadline release
+# with the pause menu open). The frozen host lags the friend's own room-visited progress byte.
+def axel_sample(role, frame, progress, tick):
+    return (f"[statehash] role={role} epoch=4 frame={frame} room=02/14 door=0 map=137 btl=137 evt=137 "
+            f"enemies=210A0FB3 progress={progress} count=1 unmatched=0 observed=1 tickMs={tick}\n")
+
+
+AXEL_HOST = (
+    "[progresssync] host delta version=4 spans=2 bytes=2 hash=30BEFB6E\n"
+    "[enemysync] host arrived epoch=4 room=02/14 door=0 map=137 btl=137 evt=137\n"
+    "[combat-admission] released failed-barrier native-fallback incarnation=1 outcome=deadline failed=1 "
+    "elapsedMs=15000 epoch=4 load=4 transition=3 deferred=3 owned=18 released=1B missingSeats=2 seats=1/0 "
+    "mask=0000001B event=0 menu=8 challenge=931A122524878104\n"
+    + axel_sample("host", 9517, "30BEFB6E", 827297531)
+    + "[progresssync] host delta version=5 spans=1 bytes=1 hash=7F55CDFE\n"
+    + axel_sample("host", 9577, "7F55CDFE", 827298546)
+    + axel_sample("host", 9637, "7F55CDFE", 827299546))
+AXEL_FRIEND = (
+    "[progresssync] apply version=4 spans=0 bytes=0 hash=30BEFB6E personal_before=1 personal_after=1 "
+    "personal_unchanged=1\n"
+    "[enemysync] client arrived epoch=4 room=02/14 door=0 map=137 btl=137 evt=137\n"
+    + axel_sample("client", 6355, "7F55CDFE", 827297140)
+    + axel_sample("client", 6413, "7F55CDFE", 827298140)
+    + axel_sample("client", 6471, "7F55CDFE", 827299140))
+AXEL_RELAY = "[SessionHost] Desync: peer1 fields=4 epoch=4\n"
+
+
+class AdmissionHoldDesyncTest(unittest.TestCase):
+    def verdict(self, host=AXEL_HOST, friend=AXEL_FRIEND, host_hash=0x30BEFB6E, friend_hash=0x7F55CDFE):
+        with tempfile.TemporaryDirectory() as root:
+            report = Path(root) / "session" / "1"
+            report.mkdir(parents=True)
+            (report / "manifest.json").write_text(json.dumps({"trigger": {
+                "epoch": 4, "fields": 4, "hostHash": {"worldId": 2, "roomId": 20, "progressHash": host_hash},
+                "clientHash": {"worldId": 2, "roomId": 20, "progressHash": friend_hash}}}), encoding="utf-8")
+            return coop_verdict.verdict(host, {"friend": friend}, AXEL_RELAY, Path(root))
+
+    def test_hold_lag_converging_inside_the_bound_warns(self):
+        v = self.verdict()
+        self.assertTrue(v["pass"], v["problems"])
+        self.assertTrue(any("combat-admission hold, converged 1015 ms into host play" in w for w in v["warnings"]),
+                        v["warnings"])
+
+    def test_hold_lag_converging_past_the_bound_fails(self):
+        late = AXEL_HOST.replace(axel_sample("host", 9577, "7F55CDFE", 827298546),
+                                 axel_sample("host", 9577, "30BEFB6E", 827298546))
+        v = self.verdict(host=late)
+        self.assertFalse(v["pass"])
+        self.assertTrue(any("converged 2015 ms" in p and "over the 2000 ms bound" in p for p in v["problems"]),
+                        v["problems"])
+
+    def test_without_an_admission_release_it_never_converged(self):
+        host = "".join(l + "\n" for l in AXEL_HOST.splitlines() if "[combat-admission]" not in l)
+        v = self.verdict(host=host)
+        self.assertFalse(v["pass"])
+        self.assertTrue(any(p.endswith("progress never converged") for p in v["problems"]), v["problems"])
+
+    def test_a_mismatch_that_is_not_the_held_host_lag_still_fails(self):
+        # The relay's host hash was never a held host sample, so this is unrelated drift.
+        v = self.verdict(host_hash=0x12345678)
+        self.assertFalse(v["pass"])
+        # A friend that ends the epoch on another hash has not converged either.
+        drift = AXEL_FRIEND + axel_sample("client", 6531, "0BADF00D", 827300140)
+        self.assertFalse(self.verdict(friend=drift)["pass"])
 
 
 if __name__ == "__main__":

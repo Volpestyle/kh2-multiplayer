@@ -21,8 +21,11 @@ not how fast:
   progress-only desync (fields=4) is a warning instead when every friend later
   applies, at a room boundary after that epoch, a host version with a matching
   hash: friends apply progress at boundaries, so their own copies of an event
-  can drift mid-room. One that never converges fails. Room and enemy desyncs
-  always fail. The relay's desync-reports manifests (--desync-dir) add the room
+  can drift mid-room. A progress-only desync in the epoch of a combat-admission
+  hold (VUH-2897) is also a warning when the host, frozen behind the friend,
+  reaches the friend's hash within 2 s of host play after `admission-release`
+  and both seats end the epoch on it; past the bound it fails. One that never
+  converges fails. Room and enemy desyncs always fail. The relay's desync-reports manifests (--desync-dir) add the room
   and both progress hashes to each entry.
 
     python -B tools/scenario/coop_verdict.py --host H.log --friend F.log [--relay relay.log]
@@ -53,7 +56,11 @@ EXIT_BLOCKED = re.compile(r"\[warp\] client native exit blocked")
 DESYNC = re.compile(r"Desync: (?P<detail>(?P<peer>\S+) fields=(?P<fields>\d+) epoch=(?P<epoch>\d+).*)")
 CLIENT_ISSUED = re.compile(r"\[warp\] client issued epoch=(?P<epoch>\d+)")
 STATEHASH_TICK = re.compile(r"\[statehash\] role=(?:host|client) epoch=(?P<epoch>\d+) .*?tickMs=(?P<tick>\d+)")
+STATEHASH_PROGRESS = re.compile(
+    r"\[statehash\] role=(?:host|client) epoch=(?P<epoch>\d+) .*?progress=(?P<progress>[0-9A-F]+) .*?tickMs=(?P<tick>\d+)")
+ADMISSION_RELEASED = re.compile(r"\[combat-admission\] released .*?epoch=(?P<epoch>\d+) ")
 DESYNC_PROGRESS = 4  # DesyncField::DesyncProgress
+ADMISSION_CONVERGE_MS = 2000  # host play after its first post-release sample (VUH-2897 run 043745: 1015 ms)
 
 
 def location(m: re.Match) -> dict:
@@ -100,6 +107,36 @@ def desync_details(desync_dir: Path | None) -> dict:
         except (OSError, KeyError, ValueError, TypeError):
             continue
     return out
+
+
+def admission_convergence(host_text: str, friend_texts: dict[str, str], epoch: int, detail: dict) -> int | None:
+    """VUH-2897: ms of host play, from its first statehash after `admission-release` to the sample
+    that reaches the friend's diverged progress; None when this desync is not that case.
+
+    The combat-admission hold keeps the host frozen after the friend's own intro, and a frozen
+    player never sets the progress byte a controllable one does (static hazard H5), so the
+    friend runs ahead until release. It counts only when the relay's host hash is a host
+    sample of that epoch taken before it converged, the host then reaches the relay's friend
+    hash (and never had it before), and every seat ends the epoch on it. Statehash samples
+    only in gameplay, so a native pause across the release is not counted."""
+    release = next((m for m in ADMISSION_RELEASED.finditer(host_text) if int(m["epoch"]) == epoch), None)
+    if release is None or not detail:
+        return None
+    rows = [(m.start(), m["progress"], int(m["tick"])) for m in STATEHASH_PROGRESS.finditer(host_text)
+            if int(m["epoch"]) == epoch]
+    after = [r for r in rows if r[0] > release.start()]
+    target = detail["friendProgress"]
+    reached = next((r for r in after if r[1] == target), None)
+    if reached is None:
+        return None
+    before = [r[1] for r in rows if r[0] < reached[0]]
+    if target in before or detail["hostProgress"] not in before or any(r[1] != target for r in after if r[0] > reached[0]):
+        return None
+    for text in friend_texts.values():
+        seen = [m["progress"] for m in STATEHASH_PROGRESS.finditer(text) if int(m["epoch"]) == epoch]
+        if not seen or seen[-1] != target:
+            return None
+    return reached[2] - after[0][2]
 
 
 def friend_report(text: str, host_rooms: list[dict], host_progress: list[dict]) -> dict:
@@ -185,10 +222,17 @@ def verdict(host_text: str, friend_texts: dict[str, str], relay_text: str = "",
                 f"friendProgress={detail['friendProgress']}" if detail else ""))
         converged = {name: next((a for a in rows if a["epoch"] is not None and a["epoch"] > epoch and
                                  published.get(a["version"]) == a["hash"]), None) for name, rows in applies.items()}
+        held = admission_convergence(host_text, friend_texts, epoch, detail) if fields == DESYNC_PROGRESS else None
         if fields == DESYNC_PROGRESS and converged and all(converged.values()):
             first = min((a for a in converged.values()), key=lambda a: a["epoch"])
             desync_warnings.append(f"{text}; converged at the epoch {first['epoch']} boundary "
                                    f"(v{first['version']} hash {first['hash']})")
+        elif held is not None and held <= ADMISSION_CONVERGE_MS:
+            desync_warnings.append(f"{text}; combat-admission hold, converged {held} ms into host play "
+                                   f"after admission-release (bound {ADMISSION_CONVERGE_MS} ms)")
+        elif held is not None:
+            desync_problems.append(f"{text}; combat-admission hold, converged {held} ms into host play "
+                                   f"after admission-release, over the {ADMISSION_CONVERGE_MS} ms bound")
         else:
             desync_problems.append(text + ("; progress never converged" if fields == DESYNC_PROGRESS else ""))
     result["desyncWarnings"] = desync_warnings
