@@ -72,9 +72,33 @@ LastError is preserved around tracing and receipt work.
   friend vanish and no overflow. Missing evidence/collect/receive/vanish or either
   seat's overflow fails. Synthetic positives are not a replay of unlogged pickups.
 
-Release build and full CTest results will be recorded after rebase onto current
-main. Builds and tests are serial, below-normal priority. Sanitizers are not
-claimed; this uses the repository's normal MSVC path.
+Source `2a2a9d0` on main `c330cfd`: full serial Release build passed.
+The full CTest run passed **278/279** in 268.48 seconds, including **43/43 Python
+files**, **35/35 actual orb-wrapper checks**, **447/447 adapter/rule checks** and
+all five new scenario-predicate tests. The unchanged resync target failed one
+combined quarantine assertion in 19.77 seconds, then again in 19.60 seconds.
+
+Its original machine-code section matches the passing main binary, with matching
+compiler, build graph and include sets. After restoring temporary diagnostics,
+the original binary passed **308/308 checks, 3/3 idle runs**, in **15.97, 15.45,
+15.51 seconds**, with the same CWD and no desk job before/after each. The main
+baseline passed in 15.55 seconds. The timing-sensitive failure is separately
+tracked as [VUH-2894](https://linear.app/vuhlp/issue/VUH-2894); both red logs remain
+preserved. The original failures preceded Juniper's base job, so attributing
+them specifically to that live run would be unsupported.
+
+The scenario passed `run.py --validate` before rebase; the fixture and validator
+blobs are unchanged, so that passing evidence is reused. A fresh recheck was
+deferred when the next live job began. All builds/tests used below-normal,
+serial execution; every build/test after the live handoff checked gate/jobs
+first. Sanitizers are not claimed; this uses the normal MSVC path.
+
+[Offline verification receipt](https://uploads.linear.app/75f1d1f0-542b-4095-9967-fd7b27093472/48673e83-a80e-4621-a359-5732528bc229/8ad77391-5e88-4361-92aa-1adc85490d15)
+is attached to VUH-2881 and was downloaded back byte-for-byte. It pins source,
+staged DLL, historical provenance, build/test logs, synthetic TIDs and idle
+trials. Raw logs remain under this worktree's `.local/`; the evidence-store CLI
+is unavailable in this seat. The attached receipt and issue are the shared
+record.
 
 ## Remaining qualification
 
