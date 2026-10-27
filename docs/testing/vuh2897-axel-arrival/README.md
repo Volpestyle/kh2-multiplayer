@@ -239,11 +239,16 @@ callback liveness. No VUH-2897 live execution is claimed here.
 
 After VUH-2881 landed and its single live qualification passed, the lead approved
 this diagnostic-only patch and a fresh independent review before any trace run.
-The code is based on main `4194ea7c`. It uses the existing
-`KH2COOP_ENEMY_MIRROR_TRACE=1` setting already present in the base Mansion fixture.
-No new scenario, pause, group write, readiness packet or update suppression is
-introduced. The 15 s behavior-barrier timeout proposed above is still a future
-requirement; the probe's separate 15 s logging window never holds native control.
+The code is based on main `4194ea7c`. Following Oriel's R1 review, it requires
+its own `KH2COOP_AXEL_BOUNDARY_TRACE=1` opt-in. Only
+`net_prologue_mansion_axel_trace.json` supplies it, on both seats; the existing
+base, downed, Thorn, Struggle and borough fixtures do not install these hooks
+or enable the owner capture. The dedicated scenario preserves the base Mansion
+route and both native intros, verifies installation before the route, and waits
+for both clean trace footers before cleanup. No pause, group write, readiness
+packet or update suppression is introduced. The 15 s behavior-barrier timeout
+proposed above is still a future requirement; the probe's separate **30 s**
+logging window never holds native control.
 
 The probe arms once per process on an observed native or issued client request
 from `02/13 btl134` to `02/14 btl137`, retaining the full destination tuple.
@@ -256,7 +261,7 @@ group, timeline state and menu are scalar reads under SEH, explicitly not an
 atomic snapshot. Native pointers are identities only, never retained actors or
 dereferenced event contexts.
 
-The three new all-or-nothing, byte-pinned observational hooks are:
+The four all-or-nothing, byte-pinned observational hooks are:
 
 - `14FC20(group)`: entry/return of the native field mode's own task group
   (`716860 + 8`). Other groups forward without emitting; this is not a census
@@ -267,6 +272,14 @@ The three new all-or-nothing, byte-pinned observational hooks are:
 - `3BF2E0(group)`: native group release before/after, with the real caller RVA.
   The original function performs the release exactly once; the probe never
   writes its mask.
+- `152680(task)`: `load-task-start` before the native field-load pipeline, with
+  paired return/unwind. Static receipts show `152990` schedules readiness/
+  fade task `152A90`, which performs old-room teardown and commits NOW through
+  `152BE0`, then schedules `152680`. That task runs the load pipeline and finally
+  schedules the already observed completion `152CD0`. Thus request-to-task-start
+  and task-start-to-finalizers-returned can be separated from the intro's
+  install/teardown observations. The stamp is the field-load task's entry, not
+  an assertion about the first disk read or every alternate native load path.
 
 Existing hooked paths supply event-start/install entry, native request and
 post-finalizer load completion, entity-head service, successful host room
@@ -285,11 +298,23 @@ callbacks never read EnemySync's mutable bridge, maps or owner globals.
 The existing independent input callback contributes a 250 ms per-thread
 heartbeat. If this run never enters native field pause, those points cannot
 prove service liveness during pause; that qualification remains open. No pause
-is requested to manufacture it. A 15 s deadline or 8,192-line budget ends only
+is requested to manufacture it. A 30 s deadline or 16,384-row budget ends only
 the trace, with the reason logged. A later callback observes expiration; there
 is no timer thread. Missing boundaries outside that window remain missing.
-Logging and snapshot contention use try-locks, count lost observations and
-never wait on the native caller. No lock crosses a native call. LastError and
+Logging and snapshot contention use try-locks. Only lost observations while the
+window is active count as `dropped`; other task groups are classified through
+an immutable image scalar before logging-lock acquisition. Pre-arm snapshot
+contention is not loss. A candidate arm missed through contention is counted
+separately and logged on the next input callback, successful request/point or
+shutdown, even if no window is active; native-read/source/finished refusals also
+name the reason. `lossObserved=1` means a scoped drop or an actual rejected
+over-budget row; merely reaching the last allowed row is not loss. The fixture
+requires deadline stops with `lossObserved=0 missedArms=0`, no missed-arm line,
+and native load-task/completion observations on both seats.
+
+No lock crosses a native game call. Try-lock acquisition does not wait, but the
+existing logger can wait on its CRT FILE lock and flush I/O. Check entity-head
+timestamp spacing in the eventual trace before trusting its timing. LastError and
 native exceptional unwinding are preserved. Shutdown disables observations
 before logger teardown and leaves in-flight trampolines process-lifetime.
 
@@ -298,22 +323,40 @@ owned image, substituting only native leaves and MinHook installation. It
 checks opt-out/pin refusal, partial-install rollback, exact native forwarding,
 LastError, entry/return and SEH unwind receipts, copied owner provenance,
 nonblocking loss reporting, wrong-target refusal and the independent-input
-deadline. This is not a live scheduling or first-hit exclusion proof.
+deadline. Oriel's R2 controls cover exact-budget emission, the next rejected row,
+no later rows, shutdown at the exact budget without false loss, both supersession
+forms, active shutdown and disabled post-shutdown observations. They parse each
+return/unwind `call` against the corresponding entry `seq`, with a wrong-ID
+negative control, and require no row from another task group even under logging
+contention. Missed-arm flushing while inactive is also exercised. This is not a
+live scheduling or first-hit exclusion proof.
 
-Fresh serial/background Release build passed. **CTest 281/281 passed in 277.67 s**,
+For the original `e603b45c` candidate, serial/background Release passed and
+**CTest 281/281 passed in 277.67 s**,
 including **44 Python files** and the new production-adapter control's **18 checks**.
 The unchanged resync test passed in 15.77 s. Offline structure/expression syntax
 validation of the unchanged base Mansion fixture passed. The first build's
 diagnostic generation narrowing warning was corrected before these checks;
 the final DLL was rebuilt after restricting actor observations to entity-head
 service. No sanitizers or native game execution are claimed. Raw build/test and
-idle gate receipts remain in this worktree's `.local/trace-*` files.
+idle gate receipts remain in this worktree's `.local/trace-*` files. The revised
+adapter control passes **35 checks**; three fixture controls restrict the opt-in,
+compare the route with the base, and execute the real runner footer predicate
+against positive/missing/censored trace logs. For the review delta, fresh
+serial/background Release and **CTest 282/282 passed in 278.23 s**, including
+**45 Python files**; resync passed in 15.52 s. The dedicated trace scenario
+passes offline structure/expression syntax validation. Raw delta verification,
+five native load-chain/pin query receipts and idle gate snapshots are retained
+under `.local/r1-*` and `.local/ghidra-r1-*` and attached to the issue.
 
 The next live trace must show both seats' request/install/teardown/arrival
 boundaries and the first player HP loss, with no loss/budget censoring across
 those boundaries. Preserve native intros. Only after reviewing that order can
 the combat seam and an independent authenticated ACK/deadline service be chosen.
 The lead schedules that run after independent source approval; none has run here.
+`GetTickCount64` ties remain ambiguous; the probe does not stamp Axel's first
+action before HP changes, the host's receipt of the ACK, or a pause that never
+occurs. These limits are unchanged by the review delta.
 
 ## Evidence locations
 
