@@ -24,11 +24,13 @@ The barrier is offline-qualified only. Kestrel runs the live checks listed at th
   objentry type (`3B5DC0` returns record `+4`: 0 PLAYER, 1 FRIEND, 3 BOSS, 4 ZAKO). Groups
   0/1 hold only Roxas and the party; the intro's event context is what held Axel. At the
   first deferral the lease therefore calls the native setter `3BF2C0` for groups 3 and 4.
-  It does so only for bits that are clear, and records them as owned. A bit the game had
+  It does so only for bits that are clear, and records exactly the bits it set as owned
+  (`3BF2C0` is a pinned, unconditional OR; there is no readback). A bit the game had
   already set is never owned and never cleared by the barrier.
 - **Release:** one owner-thread pass, ascending: the deferred 0 and 1 through the original
   `3BF2E0`, then the owned 3 and 4. A bit that is no longer set is skipped. The release
-  happens only in the same load, with no event context installed. Owned 3/4 are never
+  happens only in the same load, with no host transition in flight, and with no event
+  installed that froze 0/1 itself (see **Event installed** below). Owned 3/4 are never
   freed while 0/1 are still held.
 
 ## Lease, challenge and ACK
@@ -74,11 +76,34 @@ wins; later ones cannot rewrite it.
 | `shutdown` | DLL shutdown: an unloader thread only signals, and waits up to 500 ms for the owner |
 | `load-changed` | a new load landed first: retired without any release |
 
-**Event installed.** A new event installed during the hold blocks every clear, 3/4
-included, until its context clears. Its own teardown clears 0/1 through the native code
-(forwarded, since the lease is busy), and then only the owned 3/4 remain. Decision A said
-"don't touch 3/4" when a new event was installed. I read that as "while installed":
-leaving owned 3/4 set after the event ended would freeze Axel until the next load.
+**Event installed.** Event install (`3AC350`, `3AD2D0`) freezes 0/1 only when its
+descriptor's flag bit 3 is clear (descriptor at context `+0x48`, flag byte `+2`). Its
+teardown clears 0/1 either way, unless the context's own state bit 5 is set. The adapter
+reads that flag under its own SEH whenever an event context is installed.
+- **The event froze 0/1, or its descriptor can't be read:** it owns those bits (they are
+  a set, not a count). Every clear, 3/4 included, waits until its context clears and logs
+  `release-waiting-event` once. Its own teardown clears 0/1 (forwarded, since the lease is
+  busy), and then only the owned 3/4 remain.
+- **The event's descriptor spared the party:** it never froze 0/1, so waiting would hold
+  Roxas and Axel for its whole lifetime, past the 15 s bound, where native play would have
+  left the player free. The decided lease releases 0, 1, 3, 4 through it in the usual order
+  and logs `release-via event-spares-party` (Maren's N1). The deadline therefore stays hard
+  unless the event itself froze the player.
+
+The lead accepted both readings on 2026-10-27 (VUH-2897, lead message 3 and Maren's review
+e0188648):
+- Decision A's "don't touch 3/4 while a new event is installed" means "while a freezing
+  event is installed". Leaving the owned 3/4 set after it ends would freeze Axel until the
+  next load.
+- Strict S3 publication means a stray extra group bit falls back to the 15 s deadline.
+
+**Transition in flight (N2).** The host releases before a native request is forwarded:
+`NoteHostRequest` runs after `BeginTransition`, and its own pass may release. Later
+services wait while a host transition newer than the lease is pending, logging
+`release-waiting-transition` once. That load then retires the lease (S2), so nothing is
+cleared mid-load. If the request is abandoned without a load, the next service releases
+as usual. This only matters when a freezing event blocked the release during the request's
+own pass.
 
 **Reload (S2, static).** `3BF810` zeroes dword `2A171E8` (groups 0–31). It is called only
 from `39CA10`, which runs in `152CD0`, the task at the end of every field-build load task
@@ -113,6 +138,18 @@ would stop the host's publication, so friends would never load. The only relaxat
 
 It is used only by `HostBeginInstance` and by the progress sample in `ProgressSync::Tick`
 that precedes it. Progress still goes first and the room is announced once.
+
+The host's ordinary `HostBeginInstance` call sits after a complete native census, and
+`CaptureNativeCensus` refuses while the mask is nonzero ("gameplay gate"). So the held room
+is announced from the same pre-census point as a qualified event scene (VUH-2359). HP
+scaling, the manifest and every other census consumer still wait for the release. They
+need `spawn.announced`, which only a post-release census can set.
+
+Kestrel's first live run on `d70b6de` (`20261027-033229_net_prologue_mansion_barrier_normal_1`)
+lacked this announcement. Progress was sampled under the hold with mask `0x1B` (exactly
+deferred plus owned), but every census refused, so the room was never published and the
+friend never loaded. The 15 s deadline released through the failed-barrier path, so the
+safety fallback worked.
 `SafeNativeGameplay`, `SafeRecoveryGameplay`, `ProgressSync::SafeGameplay` and
 `SafeToWarp` are unchanged, so combat, spawn and recovery consumers stay closed.
 `tests/test_combat_admission_scope.py` enforces this.
@@ -139,12 +176,20 @@ bundle. Results:
 
 - `kh2coop_combat_admission_test`: ownership, release order and idempotence, every exit,
   ACK negative controls, the scoped publication proof, the deadline, and the owned-3/4 rules.
-  It checks every mask for "never 3/4 alone".
+  It checks every mask for "never 3/4 alone". It also covers the release waits: sparing,
+  freezing and unreadable events at and past the deadline, and an in-flight, abandoned or
+  forwarding transition.
 - `kh2coop_combat_admission_native_test`: the real pinned teardown bytes and `3BF2C0`
-  setter run in an owned executable image, with MinHook stubbed. It covers deferral, owned
-  3/4, release order 0, 1, 3, 4 on the owner thread, the deadline at 15 s, event wait,
-  downing, Continue, reload retirement, off-thread refusal, solo, off-thread shutdown, and
-  coexistence with the trace (one 3BF2E0 detour).
+  setter run in an owned executable image, with MinHook stubbed. It covers:
+  - deferral, owned 3/4, and release order 0, 1, 3, 4 on the owner thread;
+  - the deadline at 15 s;
+  - event waits, read from a fake descriptor: a sparing event releases through it at the
+    deadline, and a freezing event holds past it, then frees only the owned 3/4;
+  - downing, Continue, reload retirement;
+  - a request forwarded under a freezing event, which waits for its load, or releases if
+    the request is abandoned;
+  - off-thread refusal, solo, off-thread shutdown;
+  - coexistence with the trace (one 3BF2E0 detour).
 - `kh2coop_combat_admission_net_test`: exact framing (truncated or suffixed rejected), the
   room challenge trailer, and loopback-ENet relay admission with negative controls.
 - `tests/test_combat_admission_scope.py`: the S3 scope and single-detour guard.

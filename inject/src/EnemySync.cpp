@@ -6370,8 +6370,12 @@ void OnFrameStart(std::uint32_t frame) {
     }
     // VUH-2359: a qualified scene's census never completes (no field play), so announce it here,
     // after progress and the room instance and before the census gate.
+    // VUH-2897 (S3): the combat-admission hold keeps the census closed (mask != 0) until release,
+    // and a friend cannot ACK a room it was never sent, so its room is announced here too.
+    // HostBeginInstance re-proves the hold; HP scaling and every census consumer wait for release.
     if (g_role == Role::Host && g_hostBeginPending && !warp::TransitionPending() &&
-        eventscenes::Qualified(g_pendingHostRoom)) (void)HostBeginInstance();
+        (eventscenes::Qualified(g_pendingHostRoom) || combatadmission::PublicationHoldQualifies()))
+        (void)HostBeginInstance();
     if (!g_inst.live) { DrainPendingSpawnTrace(false); return; }
     auto census = CaptureNativeCensus();
     ObserveNativeMissionEnd(frame,census); // read-only end receipt, including native end holds

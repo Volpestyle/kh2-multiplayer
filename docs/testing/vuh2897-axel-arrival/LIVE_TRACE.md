@@ -207,6 +207,9 @@ build, with the trace flag on both seats. Judge from the raw `[combat-admission]
    bound (expected ≤250 ms). Repeat with the pause menu open across expiry, if the rig can
    hold it there.
 5. **Saves.** Saves and install are unchanged (the standard closure).
+6. **No event wait.** No `release-waiting-event`, `release-waiting-transition` or
+   `release-via` row is expected in Axel I. If one appears, record the event context and
+   the time until `admission-release`.
 
 Downing, Continue, disconnect and reload exits are covered offline and need no dedicated
 run, unless one happens naturally.

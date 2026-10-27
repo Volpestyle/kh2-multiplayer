@@ -45,6 +45,11 @@ struct Destination {
 constexpr Destination AxelTarget {2, 0x14, 0, 137, 137, 137};
 inline bool AxelSource(const Destination& d) { return d.world == 2 && d.room == 0x13 && d.battle == 134; }
 
+// Whether the installed event froze groups 0/1 itself. Event install (3AC350, 3AD2D0)
+// calls 3BF2C0(0/1) only when its descriptor's flag bit 3 is clear; Unknown when the
+// descriptor could not be read, which is treated as freezing.
+enum class EventFreeze : std::uint8_t { Unknown, Freezes, Spares };
+
 // Native scalars, sampled by the adapter on the owner thread. Not atomic as a
 // set; every decision rechecks the ones it depends on.
 struct NativeView {
@@ -52,7 +57,8 @@ struct NativeView {
     std::uint32_t load = 0, transition = 0;
     bool pending = false;            // warp::TransitionPending
     Destination room {};             // NOW
-    std::uint64_t eventContext = 0;  // EVENT_CONTEXT, an identity scalar; never dereferenced
+    std::uint64_t eventContext = 0;  // EVENT_CONTEXT, an identity scalar
+    EventFreeze eventFreeze = EventFreeze::Unknown; // the installed event's descriptor, read under SEH
     std::int32_t cutscene = 0;
     std::uint32_t mask = 0;          // CONTROLLABLE word 0 (groups 0..31)
     std::uint8_t menu = 0xFF;
@@ -121,6 +127,19 @@ struct Seat {
     bool required = false, acked = false;
 };
 
+// Why a decided lease has not released yet (diagnostic), and how it released.
+enum class Wait : std::uint8_t { None, Event, Transition };
+inline const char* WaitName(Wait w) {
+    switch (w) {
+    case Wait::None: return "none";
+    case Wait::Event: return "release-waiting-event";
+    case Wait::Transition: return "release-waiting-transition";
+    }
+    return "unknown";
+}
+enum class Via : std::uint8_t { Clear, SparingEvent };
+inline const char* ViaName(Via v) { return v == Via::SparingEvent ? "event-spares-party" : "clear"; }
+
 struct Lease {
     std::uint64_t incarnation = 0, challenge = 0;
     std::uint32_t generation = 0, load = 0, transition = 0, epoch = 0;
@@ -136,7 +155,8 @@ struct Lease {
     Phase phase = Phase::Idle;
     Outcome outcome = Outcome::None;
     bool retiredWithoutRelease = false;
-    bool eventWaitLogged = false;
+    Via via = Via::Clear;
+    std::uint8_t waitsLogged = 0;     // bit w: Wait w already logged
 };
 
 enum class Decision : std::uint8_t { Forward, Defer };
@@ -169,6 +189,8 @@ struct Action {
     enum Kind : std::uint8_t { None, Release, Retire } kind = None;
     std::uint8_t groups = 0;
     std::uint64_t incarnation = 0;
+    Wait wait = Wait::None;           // kind None on a decided lease: what it waits for
+    Via via = Via::Clear;
 };
 
 class Machine {
@@ -258,7 +280,8 @@ public:
         return lease_.phase == Phase::Held && lease_.deferred == 1 && !lease_.owned
             ? static_cast<std::uint8_t>(OwnableGroups & ~v.mask) : 0;
     }
-    // The adapter set these bits through 3BF2C0 and read them back set.
+    // The adapter set these bits through 3BF2C0 (a pinned, unconditional OR):
+    // recorded from what was set, never from a readback.
     bool NoteOwned(std::uint64_t incarnation, std::uint8_t groups) {
         if (incarnation != lease_.incarnation || lease_.phase != Phase::Held || lease_.owned) return false;
         lease_.owned = static_cast<std::uint8_t>(groups & OwnableGroups);
@@ -320,8 +343,9 @@ public:
 
     // Owner service: input collector (also runs during native pause) and the
     // entity-head frame. Decides at most once per lease, then releases when
-    // the native identity allows it.
-    Action Service(const NativeView& v, const SessionView& s, std::uint64_t now) {
+    // the native identity allows it. `forwarding` is NoteHostRequest's own pass,
+    // which runs after BeginTransition but before the request reaches the game.
+    Action Service(const NativeView& v, const SessionView& s, std::uint64_t now, bool forwarding = false) {
         if (!Live()) return {};
         if (lease_.phase == Phase::Held) {
             const auto outcome = Evaluate(v, s, now);
@@ -333,12 +357,22 @@ public:
         // (152CD0 -> 39CA10 -> 3BF810, dword 2A171E8), so a lease from an older load is
         // retired without touching any group of the new room.
         if (v.load != lease_.load) return Retire(now);
-        // A new event owns its own freezes (the bits are a set, not a count): wait, and touch
-        // nothing, until its context clears. Its own teardown clears 0/1 through the native.
-        if (v.eventContext != 0) return {};
+        // A host transition issued after the lease is in flight: its load resets the mask (S2),
+        // so nothing is cleared mid-load. If it is abandoned without a load, release as usual.
+        if (v.pending && v.transition != lease_.transition && !forwarding) return Waiting(Wait::Transition);
+        // A new event that froze 0/1 itself owns them (the bits are a set, not a count): wait,
+        // touching nothing, until its context clears; its own teardown clears 0/1 natively.
+        // An event whose descriptor spared the party never set them, and waiting would hold
+        // Roxas and Axel for its whole lifetime past the deadline, so release through it.
+        Via via = Via::Clear;
+        if (v.eventContext != 0) {
+            if (v.eventFreeze != EventFreeze::Spares) return Waiting(Wait::Event);
+            via = Via::SparingEvent;
+        }
         const auto groups = static_cast<std::uint8_t>(v.mask & HeldGroups() & ~lease_.released);
         if (!groups) return Retire(now); // already cleared natively; nothing is ours to clear
-        return {Action::Release, groups, lease_.incarnation};
+        lease_.via = via;
+        return {Action::Release, groups, lease_.incarnation, Wait::None, via};
     }
     // The adapter replayed `groups` through the original, in order.
     bool NoteReleased(std::uint64_t incarnation, std::uint8_t groups) {
@@ -348,10 +382,12 @@ public:
         return true;
     }
 
-    // Diagnostics only.
-    bool FirstEventWait() {
-        if (lease_.phase != Phase::Releasing || lease_.eventWaitLogged) return false;
-        return lease_.eventWaitLogged = true;
+    // Diagnostics only: true the first time this lease waits for `w`.
+    bool FirstWait(Wait w) {
+        const auto bit = static_cast<std::uint8_t>(1u << static_cast<unsigned>(w));
+        if (w == Wait::None || lease_.phase != Phase::Releasing || (lease_.waitsLogged & bit)) return false;
+        lease_.waitsLogged |= bit;
+        return true;
     }
     std::uint8_t MissingSeats() const {
         std::uint8_t missing = 0;
@@ -396,6 +432,11 @@ private:
         lease_.outcome = outcome;
         lease_.decidedMs = now;
         lease_.phase = Phase::Releasing;
+    }
+    static Action Waiting(Wait w) {
+        Action action;
+        action.wait = w;
+        return action;
     }
     Action Retire(std::uint64_t now) {
         if (lease_.phase == Phase::Held) Decide(Outcome::LoadChanged, now);

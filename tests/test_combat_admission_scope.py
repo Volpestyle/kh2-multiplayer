@@ -1,7 +1,8 @@
 """VUH-2897: the combat-admission barrier's scope stays exactly where it was reviewed.
 
-S3 relaxation: the barrier's held-mask proof admits only the host's room publication and the
-progress sample that precedes it; SafeNativeGameplay and every other mask==0 gate stay closed.
+S3 relaxation: the barrier's held-mask proof admits only the host's room publication (announced
+ahead of the census, which the hold keeps closed) and the progress sample that precedes it;
+SafeNativeGameplay, the census and every other mask==0 gate stay closed.
 One detour owns 3BF2E0 (MinHook allows one per target); the Axel trace observes through it.
 """
 import re
@@ -38,8 +39,16 @@ class CombatAdmissionScopeTest(unittest.TestCase):
                                  'ProgressSync.cpp': {'PublicationHoldQualifies'}})
         enemy = (SRC / 'EnemySync.cpp').read_text(encoding='utf-8')
         begin = function_body(enemy, 'bool HostBeginInstance() {')
-        self.assertEqual(enemy.count('combatadmission::PublicationHoldQualifies('),
-                         begin.count('combatadmission::PublicationHoldQualifies('))
+        self.assertEqual(begin.count('combatadmission::PublicationHoldQualifies('), 1)
+        # The one other use announces the held room before the census gate, which the hold keeps
+        # closed (live run 20261027-033229: every census refused "gameplay gate", no publication).
+        outside = enemy.replace(begin, '')
+        self.assertEqual(outside.count('combatadmission::PublicationHoldQualifies('), 1)
+        at = outside.index('combatadmission::PublicationHoldQualifies(')
+        end = outside.index(';', at)
+        self.assertTrue(outside[at:end].rstrip().endswith('(void)HostBeginInstance()'), outside[at:end])
+        following = re.sub(r'\s+', ' ', outside[end + 1:outside.index('CaptureNativeCensus(', end)])
+        self.assertEqual(following.strip(), 'if (!g_inst.live) { DrainPendingSpawnTrace(false); return; } auto census =')
         progress = (SRC / 'ProgressSync.cpp').read_text(encoding='utf-8')
         tick = function_body(progress, 'void Tick(std::uint32_t frame, bool host, bool client) {')
         self.assertIn('combatadmission::PublicationHoldQualifies()', tick)

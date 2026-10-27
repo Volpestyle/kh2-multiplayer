@@ -54,6 +54,18 @@ inline std::uint64_t NextChallenge() noexcept {
     }
 }
 inline bool Owner() noexcept { return providers.ownerThread && providers.ownerThread(); }
+// 3AC350/3AD2D0: the event's descriptor is at context+0x48; its flag byte +2 bit 3
+// set means install did not freeze groups 0/1. Own SEH, so a bad descriptor reads
+// as Unknown without making the rest of the sample unreadable.
+inline EventFreeze EventFreezeOf(std::uintptr_t context) noexcept {
+    if (!context) return EventFreeze::Unknown;
+    __try {
+        const auto descriptor = *reinterpret_cast<const volatile std::uintptr_t*>(context + 0x48);
+        if (!descriptor) return EventFreeze::Unknown;
+        return (*reinterpret_cast<const volatile std::uint8_t*>(descriptor + 2) & 0x08) ? EventFreeze::Spares
+                                                                                      : EventFreeze::Freezes;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return EventFreeze::Unknown; }
+}
 inline NativeView Sample() noexcept {
     NativeView v;
     if (!base || !providers.identity || !providers.identity(v.load, v.transition, v.pending)) return v;
@@ -70,6 +82,7 @@ inline NativeView Sample() noexcept {
         v.inField = *reinterpret_cast<const volatile std::uint8_t*>(base + offsets::IN_FIELD) != 0;
         v.readable = true;
     } __except (EXCEPTION_EXECUTE_HANDLER) { v.readable = false; }
+    if (v.readable) v.eventFreeze = EventFreezeOf(static_cast<std::uintptr_t>(v.eventContext));
     return v;
 }
 inline SessionView Session() noexcept {
@@ -103,22 +116,25 @@ inline void Apply(const Action& action, const NativeView& v, std::uint64_t now) 
         if (action.groups & (1u << group)) unfreeze(group);
     releasing = false;
     machine.NoteReleased(action.incarnation, action.groups);
+    if (log && action.via != Via::Clear)
+        log("[combat-admission] release-via %s incarnation=%llu event=%llX groups=%X", ViaName(action.via),
+            static_cast<unsigned long long>(action.incarnation), static_cast<unsigned long long>(v.eventContext),
+            action.groups);
     LogLease(Failed(l.outcome) ? "released failed-barrier native-fallback" : "released admitted", l, v, now);
     axeltrace::Point(Failed(l.outcome) ? "admission-release-failed" : "admission-release", action.incarnation);
 }
-inline void ServiceOwner(std::uint64_t now) {
+inline void ServiceOwner(std::uint64_t now, bool forwarding = false) {
     if (!installed.load(std::memory_order_acquire) || releasing || !machine.Live() || !Owner()) return;
     const auto before = machine.Current().phase;
     if (shutdownRequested.load(std::memory_order_acquire)) machine.RequestShutdown(now);
     const auto v = Sample();
-    const auto action = machine.Service(v, Session(), now);
+    const auto action = machine.Service(v, Session(), now, forwarding);
     const auto& l = machine.Current();
     if (before == Phase::Held && l.phase != Phase::Held) {
         LogLease("decided", l, v, now);
         axeltrace::Point("admission-decided", static_cast<std::uintptr_t>(l.outcome));
     }
-    if (action.kind == Action::None && v.eventContext && machine.FirstEventWait())
-        LogLease("release-waiting-event", l, v, now);
+    if (action.kind == Action::None && machine.FirstWait(action.wait)) LogLease(WaitName(action.wait), l, v, now);
     Apply(action, v, now);
     live.store(machine.Live(), std::memory_order_release);
 }
@@ -139,10 +155,10 @@ inline void __fastcall Unfreeze(std::uintptr_t group) {
             const auto& l = machine.Current();
             // First deferral: also freeze BOSS/ZAKO (Axel is BOSS, group 3), owning only
             // the bits this lease set; a bit the game already set is left to the game.
+            // 3BF2C0 is a pinned, unconditional OR, so the lease owns exactly what it set.
             if (const auto own = machine.OwnCandidates(v)) {
                 for (std::uint32_t g = 0; g < 8; ++g) if (own & (1u << g)) freeze(g);
-                const auto after = Sample();
-                machine.NoteOwned(l.incarnation, static_cast<std::uint8_t>(own & after.mask));
+                machine.NoteOwned(l.incarnation, own);
             }
             if (log) log("[combat-admission] deferred group=%u caller=%llX incarnation=%llu load=%u transition=%u "
                          "room=%02X/%02X btl=%u event=%llX mask=%08X owned=%X seats=%u deadlineMs=%llu challenge=%016llX",
@@ -181,7 +197,7 @@ inline void NoteHostRequest(const Destination& from, const Destination& to, std:
         detail::machine.BeforeNativeTransition(now);
         detail::LogLease("decided", detail::machine.Current(), detail::Sample(), now);
         axeltrace::Point("admission-decided", static_cast<std::uintptr_t>(detail::machine.Current().outcome));
-        detail::ServiceOwner(now); // release while the old native identity still matches
+        detail::ServiceOwner(now, true); // release while the old native identity still matches
     }
     detail::machine.NoteRequest(from, to, nextTransition);
     SetLastError(error);

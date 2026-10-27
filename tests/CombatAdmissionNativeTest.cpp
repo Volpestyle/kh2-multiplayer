@@ -55,7 +55,10 @@ static void __fastcall FakeUnfreeze(std::uintptr_t group) { // the original 3BF2
 static DWORD ownerTid = 0;
 static bool OwnerThread() { return GetCurrentThreadId() == ownerTid; }
 static std::uint32_t load = 9, transition = 12;
-static bool Identity(std::uint32_t& l, std::uint32_t& t, bool& pending) { l = load; t = transition; pending = false; return true; }
+static bool pendingTransition = false;
+static bool Identity(std::uint32_t& l, std::uint32_t& t, bool& pending) {
+    l = load; t = transition; pending = pendingTransition; return true;
+}
 static ca::SessionView session;
 static bool Session(ca::SessionView& s) { s = session; return true; }
 static std::uint64_t now = 1000;
@@ -69,6 +72,17 @@ static void SetNow(const ca::Destination& d) {
     *reinterpret_cast<std::uint16_t*>(image + off::NOW + 8) = d.event;
 }
 static void SetEventContext(std::uintptr_t context) { *reinterpret_cast<std::uintptr_t*>(image + off::EVENT_CONTEXT) = context; }
+// An installed event: context+0x48 -> descriptor, flag byte +2 bit 3 set = install spared 0/1.
+struct FakeEvent {
+    alignas(8) unsigned char context[0x50] {};
+    unsigned char descriptor[4] {};
+    explicit FakeEvent(bool sparesParty) {
+        const auto d = reinterpret_cast<std::uintptr_t>(descriptor);
+        std::memcpy(context + 0x48, &d, sizeof(d));
+        descriptor[2] = sparesParty ? 0x08 : 0x00;
+    }
+    std::uintptr_t Address() const { return reinterpret_cast<std::uintptr_t>(context); }
+};
 static void RunTeardown() { reinterpret_cast<void(*)()>(image + 0x3ACBF8)(); }
 // One armed Mansion -> Axel load, the intro's teardown, then its context clears.
 static void HoldOnce(std::uint32_t preMask = 3) {
@@ -176,6 +190,32 @@ int main() {
     SetEventContext(0); ca::Service(); session.hostDowned = false;
     Check(Groups() == std::vector<std::uintptr_t>{0, 1, 3, 4} && Has("outcome=host-downed"),
           "host downing releases through the one path once the event clears");
+    // (0x9000 is unmapped: its descriptor read faults under SEH and counts as freezing.)
+
+    // An event whose descriptor spared the party never froze 0/1: the deadline is hard.
+    {   FakeEvent sparing(true);
+        output.clear();
+        HoldOnce();
+        SetEventContext(sparing.Address());
+        now += ca::DeadlineMs; ca::Service();
+        Check(Groups() == std::vector<std::uintptr_t>{0, 1, 3, 4} && *mask == 0 && Has("outcome=deadline") &&
+              Has("release-via event-spares-party") && !ca::Live(),
+              "a sparing event cannot extend the hold: deadline releases 0, 1, 3, 4 through it");
+        SetEventContext(0);
+    }
+    // An event that froze 0/1 itself keeps the release waiting past the deadline until it ends.
+    {   FakeEvent freezing(false);
+        output.clear();
+        HoldOnce();
+        SetEventContext(freezing.Address());
+        now += ca::DeadlineMs; ca::Service();
+        now += 60000; ca::Service();
+        Check(natives.empty() && *mask == 0b11011 && Has("outcome=deadline") && Has("release-waiting-event") && ca::Live(),
+              "a freezing event holds every clear past the deadline");
+        *mask &= ~3u; SetEventContext(0); ca::Service(); // its teardown cleared 0/1 natively
+        Check(Groups() == std::vector<std::uintptr_t>{3, 4} && *mask == 0 && !Has("release-via"),
+              "after the freezing event ends, only the lease's own 3/4 are released");
+    }
 
     // A BOSS bit the game set before the lease armed survives release.
     HoldOnce(0b01011);
@@ -191,6 +231,42 @@ int main() {
     Check(Groups() == std::vector<std::uintptr_t>{0, 1, 3, 4} && Has("decided incarnation") &&
           Has("outcome=native-transition") && !cd::machine.Armed(),
           "a native request releases while the old identity matches, and Axel->Axel never re-arms");
+
+    // As warp issues it: BeginTransition (serial+1, pending) runs before NoteHostRequest.
+    output.clear();
+    HoldOnce();
+    ++transition; pendingTransition = true;
+    ca::NoteHostRequest(ca::AxelTarget, ca::AxelTarget, transition);
+    Check(Groups() == std::vector<std::uintptr_t>{0, 1, 3, 4} && !ca::Live(),
+          "the request's own pass releases although its transition is already pending");
+    pendingTransition = false;
+
+    // A request forwarded while a freezing event blocked its release: nothing is cleared mid-load.
+    {   FakeEvent freezing(false);
+        output.clear();
+        HoldOnce();
+        SetEventContext(freezing.Address());
+        ++transition; pendingTransition = true;
+        ca::NoteHostRequest(ca::AxelTarget, {2, 0x13, 0, 134, 134, 134}, transition);
+        *mask &= ~3u; SetEventContext(0); ca::Service();
+        Check(natives.empty() && Has("release-waiting-event") && Has("release-waiting-transition") && ca::Live(),
+              "after the event, an in-flight transition still holds the release");
+        ++load; ca::NoteLoad(load, transition); pendingTransition = false;
+        Check(natives.empty() && !ca::Live() && Has("retired-without-release"),
+              "its load retires the lease without touching the new room (S2)");
+    }
+    // The same, but the request is abandoned without a load: the release goes ahead.
+    {   FakeEvent freezing(false);
+        output.clear();
+        HoldOnce();
+        SetEventContext(freezing.Address());
+        ++transition; pendingTransition = true;
+        ca::NoteHostRequest(ca::AxelTarget, {2, 0x13, 0, 134, 134, 134}, transition);
+        *mask &= ~3u; SetEventContext(0); ca::Service();
+        pendingTransition = false; ca::Service();
+        Check(Groups() == std::vector<std::uintptr_t>{3, 4} && *mask == 0 && !ca::Live(),
+              "an abandoned transition releases the owned 3/4 on the next service");
+    }
 
     // Reload landed first: retired, nothing replayed into the new room.
     output.clear();

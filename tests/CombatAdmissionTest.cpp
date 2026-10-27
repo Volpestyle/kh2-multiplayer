@@ -4,6 +4,7 @@
 #include "CombatAdmission.hpp"
 
 #include <cstdio>
+#include <initializer_list>
 
 using namespace kh2coop::inject::combatadmission;
 
@@ -348,6 +349,76 @@ void ownedGroups() {
               "owned bits are recorded once, for the current lease");
     }
 }
+
+// An event installed during the hold: wait only when it froze 0/1 itself; an event whose
+// descriptor spared the party cannot extend the hold past the deadline. A transition issued
+// after the lease is never released into mid-load, except on NoteHostRequest's own pass.
+void releaseWaits() {
+    auto during = [](EventFreeze freeze) { auto v = AfterIntro(); v.eventContext = 0xBEEF; v.eventFreeze = freeze; return v; };
+    {   Machine m; Hold(m);
+        const auto v = during(EventFreeze::Spares);
+        check(m.Service(v, Session(), 2000).kind == Action::None && m.Held(), "a sparing event does not end the hold early");
+        const auto a = m.Service(v, Session(), 1000 + DeadlineMs);
+        check(a.kind == Action::Release && a.groups == 0b11011 && a.via == Via::SparingEvent &&
+              m.Current().outcome == Outcome::Deadline && m.Current().via == Via::SparingEvent,
+              "deadline under an event that spared the party releases 0/1 and the owned 3/4 through it");
+        check(m.NoteReleased(a.incarnation, a.groups) && !m.Live(), "released once");
+    }
+    {   Machine m; Hold(m);
+        (void)Acks(m, 1);
+        const auto a = m.Service(during(EventFreeze::Spares), Session(), 2000);
+        check(a.kind == Action::Release && a.groups == 0b11011 && a.via == Via::SparingEvent,
+              "all-arrived under a sparing event releases at once");
+    }
+    for (const auto kind : {EventFreeze::Freezes, EventFreeze::Unknown}) {
+        Machine m; Hold(m);
+        auto v = during(kind);
+        auto a = m.Service(v, Session(), 1000 + DeadlineMs);
+        check(a.kind == Action::None && a.wait == Wait::Event && m.Current().outcome == Outcome::Deadline,
+              "an event that froze 0/1 (or an unreadable descriptor) holds the release at the deadline");
+        check(m.FirstWait(a.wait) && !m.FirstWait(a.wait), "the event wait is logged once");
+        a = m.Service(v, Session(), 1000 + DeadlineMs + 60000);
+        check(a.kind == Action::None && a.wait == Wait::Event, "and for as long as the freezing event is installed");
+        v.eventContext = 0; v.mask = 0b11000; // its teardown cleared 0/1 natively
+        a = m.Service(v, Session(), 1000 + DeadlineMs + 60001);
+        check(a.kind == Action::Release && a.groups == 0b11000 && a.via == Via::Clear,
+              "after the freezing event only the lease's own 3/4 are released");
+    }
+    {   // A transition issued after the lease (pending) waits for its load, which retires the lease.
+        Machine m; Hold(m);
+        auto v = AfterIntro(); v.transition = Transition + 1; v.pending = true;
+        auto a = m.Service(v, Session(), 2000);
+        check(a.kind == Action::None && a.wait == Wait::Transition && m.Current().outcome == Outcome::Transition,
+              "an in-flight transition is decided but nothing is cleared mid-load");
+        check(m.FirstWait(Wait::Transition) && m.FirstWait(Wait::Event) && !m.FirstWait(Wait::Transition),
+              "each wait kind is logged once");
+        v.load = Load + 1;
+        a = m.Service(v, Session(), 2100);
+        check(a.kind == Action::Retire && m.Current().retiredWithoutRelease, "its load retires the lease (S2)");
+    }
+    {   // The same transition abandoned without a load: release as usual.
+        Machine m; Hold(m);
+        auto v = AfterIntro(); v.transition = Transition + 1; v.pending = true;
+        (void)m.Service(v, Session(), 2000);
+        v.pending = false;
+        const auto a = m.Service(v, Session(), 2100);
+        check(a.kind == Action::Release && a.groups == 0b11011, "an abandoned transition releases on the next service");
+    }
+    {   // NoteHostRequest's pass runs after BeginTransition, before the request reaches the game.
+        Machine m; Hold(m);
+        m.BeforeNativeTransition(2000);
+        auto v = AfterIntro(); v.transition = Transition + 1; v.pending = true;
+        const auto a = m.Service(v, Session(), 2000, true);
+        check(a.kind == Action::Release && a.groups == 0b11011 && m.Current().outcome == Outcome::Transition,
+              "the forwarding pass releases before the request is forwarded");
+    }
+    {   // A pending flag alone (not in field, same transition) never blocks the release.
+        Machine m; Hold(m);
+        auto v = AfterIntro(); v.pending = true;
+        const auto a = m.Service(v, Session(), 1000 + DeadlineMs);
+        check(a.kind == Action::Release && a.groups == 0b11011, "pending without a new transition does not wait");
+    }
+}
 } // namespace
 
 int main() {
@@ -357,6 +428,7 @@ int main() {
     ackNegatives();
     publication();
     ownedGroups();
+    releaseWaits();
     std::printf("%u checks, %u failures\n", checks, failures);
     return failures ? 1 : 0;
 }
