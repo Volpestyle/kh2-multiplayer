@@ -2,6 +2,7 @@
 // uniquely owned temp directory; no game process, save, network or Steam API.
 #include "../tools/kh2ctl/src/preinject.hpp"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -46,16 +47,35 @@ int wmain(int argc, wchar_t** argv) {
         //   attr  SetFileAttributesW READONLY|HIDDEN      -> set|denied
         //   attrA SetFileAttributesA READONLY|HIDDEN      -> set|denied
         //   race  8 threads at once: r+b, read the last 8 bytes, write "patched!" at 0 -> race:<tails seen>
-        std::string out;
+        //   head  fopen rb, first 8 bytes; mhead the same through KernelBase CreateFile2 (Media Foundation's open)
+        //   undo  fopen r+b, write "restored" at 0 (the game's restore thread) -> wrote|failed
+        std::string out, retries;
         for (int i = 3; i + 1 < argc; i += 2) {
             const std::wstring op = argv[i];
             const wchar_t* path = argv[i + 1];
             std::string result;
-            if (op == L"rw") {
+            if (op == L"rw" || op == L"undo") {
                 FILE* file = nullptr;
                 const bool opened = _wfopen_s(&file, path, L"r+b") == 0 && file;
-                const bool wrote = opened && fwrite("patched!", 1, 8, file) == 8;
+                const bool wrote = opened && fwrite(op == L"rw" ? "patched!" : "restored", 1, 8, file) == 8;
                 result = opened && fclose(file) == 0 && wrote ? "wrote" : "failed";
+            } else if (op == L"head") {
+                FILE* file = nullptr;
+                char bytes[9] {};
+                if (_wfopen_s(&file, path, L"rb") == 0 && file) {
+                    fread(bytes, 1, 8, file);
+                    fclose(file);
+                }
+                result = bytes;
+            } else if (op == L"mhead") {
+                char bytes[9] {};
+                DWORD read = 0;
+                HANDLE file = CreateFile2(path, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, nullptr);
+                if (file != INVALID_HANDLE_VALUE) {
+                    ReadFile(file, bytes, 8, &read, nullptr);
+                    CloseHandle(file);
+                }
+                result = bytes;
             } else if (op == L"ow") {
                 HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, 0, nullptr);
                 result = file != INVALID_HANDLE_VALUE ? "opened" : "failed";
@@ -68,16 +88,20 @@ int wmain(int argc, wchar_t** argv) {
             } else if (op == L"race") {
                 std::vector<std::string> tails(8);
                 std::vector<std::thread> threads;
+                std::atomic<int> sharingRetries {0};
                 HANDLE start = CreateEventW(nullptr, TRUE, FALSE, nullptr);
                 for (int t = 0; t < 8; ++t) {
                     threads.emplace_back([&, t] {
                         WaitForSingleObject(start, INFINITE);
-                        // A scanner can briefly hold a freshly written file (error 32); the game's own
-                        // movie writer retries such a failure too (VUH-2763 capture, 0xc01c0004).
+                        // Openers get transient ERROR_SHARING_VIOLATIONs here (10-16 retries per run on
+                        // 2026-10-27, the same with edf3d5d's guard); the holder hasn't been identified. Only
+                        // that error is retried, a bounded number of times, and the count is reported; every
+                        // opener must still see the whole copy.
                         FILE* file = nullptr;
                         for (int attempt = 0; attempt < 40; ++attempt) {
                             if (_wfopen_s(&file, path, L"r+b") == 0 && file) break;
                             if (GetLastError() != ERROR_SHARING_VIOLATION) break;
+                            ++sharingRetries;
                             Sleep(50);
                         }
                         if (!file) {
@@ -99,10 +123,11 @@ int wmain(int argc, wchar_t** argv) {
                 tails.erase(std::unique(tails.begin(), tails.end()), tails.end());
                 result = "race:";
                 for (const auto& tail : tails) result += tail + ";";
+                retries = " sharing-retries=" + std::to_string(sharingRetries.load());
             }
             out += (out.empty() ? "" : "|") + result;
         }
-        Write(argv[2], out.c_str());
+        Write(argv[2], (out + retries).c_str());
         return 0;
     }
     if (argc == 4 && std::wstring(argv[1]) == L"--movie-child") {
@@ -363,15 +388,21 @@ int wmain(int argc, wchar_t** argv) {
         if (!shortNames) std::cout << "NOTE 8.3 names are disabled on this volume; the short-name case is not exercised\n";
         const std::wstring extended = L"\\\\?\\" + (asset / L"a3.mp4").wstring();
         const auto marker = root / "alias.marker";
-        auto [exited, pid] = runOps({L"rw", (alias / L"a1.mp4").wstring(), L"rw",
-                                     shortNames ? std::wstring(shortName) : (asset / L"a2.mp4").wstring(), L"rw", extended},
-                                    marker, nullptr);
-        Check(exited && Read(marker) == "wrote|wrote|wrote", "aliased movie writes succeed");
+        // Per alias, a playback: read, decrypt write, CRT and CreateFile2 reads, restore. Reads after the write
+        // must resolve the alias the same way the write did (Rhea eb389de1), or they see the install.
+        std::vector<std::wstring> ops;
+        for (const std::wstring& path : {(alias / L"a1.mp4").wstring(),
+                                         shortNames ? std::wstring(shortName) : (asset / L"a2.mp4").wstring(), extended})
+            for (const wchar_t* op : {L"head", L"rw", L"head", L"mhead", L"undo"}) ops.insert(ops.end(), {op, path});
+        auto [exited, pid] = runOps(ops, marker, nullptr);
+        const std::string playback = "ORIGINAL|wrote|patched!|patched!|wrote";
+        Check(exited && Read(marker) == playback + "|" + playback + "|" + playback,
+              "aliased movie playback: writes succeed and later reads through each alias see the twin");
         Check(Read(asset / L"a1.mp4") == "ORIGINAL-alias" && Read(asset / L"a2.mp4") == "ORIGINAL-alias" &&
                   Read(asset / L"a3.mp4") == "ORIGINAL-alias",
               "junction, 8.3 and \\\\?\\ aliases of an installed movie never write the install");
-        Check(Read(twinOf(pid, L"a1.mp4")) == "patched!-alias" && Read(twinOf(pid, L"a2.mp4")) == "patched!-alias" &&
-                  Read(twinOf(pid, L"a3.mp4")) == "patched!-alias",
+        Check(Read(twinOf(pid, L"a1.mp4")) == "restored-alias" && Read(twinOf(pid, L"a2.mp4")) == "restored-alias" &&
+                  Read(twinOf(pid, L"a3.mp4")) == "restored-alias",
               "aliased movie writes land on the resolved twin");
         RemoveDirectoryW(alias.c_str());  // the junction only, never its target
     }
@@ -405,8 +436,11 @@ int wmain(int argc, wchar_t** argv) {
         size_t ready = 0;
         for (size_t at = text.find("asset twin ready"); at != std::string::npos; at = text.find("asset twin ready", at + 1))
             ++ready;
-        Check(exited && Read(marker) == "race:TAILTAIL;" && ready == 1,
+        const auto raced = Read(marker);
+        const size_t space = raced.find(' ');  // "race:<tails> sharing-retries=N"
+        Check(exited && raced.substr(0, space) == "race:TAILTAIL;" && ready == 1,
               "concurrent first opens copy the movie once and all see the whole copy");
+        std::cout << "NOTE race " << (space == std::string::npos ? "no retry count" : raced.substr(space + 1)) << '\n';
         Check(Read(asset / L"big.mp4") == big && fs::file_size(twinOf(pid, L"big.mp4")) == big.size(),
               "raced movie: install unchanged, twin complete");
         // 3b. The copy fails (source locked): an OPEN_ALWAYS write fails and publishes no twin.
@@ -419,6 +453,32 @@ int wmain(int argc, wchar_t** argv) {
         Check(failExited && Read(failMarker) == "failed" && !fs::exists(failedTwin) &&
                   !fs::exists(failedTwin.wstring() + L".partial") && Read(asset / L"c.mp4") == "ORIGINAL-c",
               "a failed twin copy fails the open, leaves no twin and never reaches the install");
+    }
+    {
+        // 3c. A planted twin .partial that links to another installed movie (Rhea eb389de1): the copy must not
+        // write through it. The open fails, both installed movies are unchanged, and the link is left as found.
+        Write(asset / L"p.mp4", "ORIGINAL-p");
+        Write(asset / L"q.mp4", "ORIGINAL-q");
+        const auto stampP = fs::last_write_time(asset / L"p.mp4"), stampQ = fs::last_write_time(asset / L"q.mp4");
+        const auto marker = root / "partial.marker";
+        fs::path partial;
+        bool linked = false;
+        auto [exited, pid] = runOps({L"rw", (asset / L"p.mp4").wstring()}, marker, [&](DWORD id) {
+            partial = twinOf(id, L"p.mp4").wstring() + L".partial";
+            fs::create_directories(partial.parent_path());
+            linked = CreateSymbolicLinkW(partial.c_str(), (asset / L"q.mp4").c_str(),
+                                         SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != FALSE;
+        });
+        if (!linked) {
+            std::cout << "NOTE this account can't create file symlinks; the planted-partial case is not exercised\n";
+        } else {
+            Check(exited && Read(marker) == "failed", "a planted .partial symlink fails the movie open");
+            Check(Read(asset / L"p.mp4") == "ORIGINAL-p" && Read(asset / L"q.mp4") == "ORIGINAL-q" &&
+                      fs::last_write_time(asset / L"p.mp4") == stampP && fs::last_write_time(asset / L"q.mp4") == stampQ,
+                  "planted .partial: neither installed movie's bytes or mtime change");
+            Check(!fs::exists(twinOf(pid, L"p.mp4")), "planted .partial: no twin is published");
+            DeleteFileW(partial.c_str());  // the link only, never its target
+        }
     }
     {
         // 4. Path-based attribute writes on an installed movie are denied.

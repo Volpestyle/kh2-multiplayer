@@ -62,8 +62,12 @@ def clean(logs: Path, pids: list[int]) -> tuple[int, dict]:
         receipt["deletedBytes"] = 0
         return 2, receipt
 
-    if not logs.is_dir() or linked(logs) or not allowed_logs(logs):
-        return refuse(f"logs root is missing, a link, or outside build/rig/logs and the temp dir: {logs}")
+    if not logs.is_dir() or not allowed_logs(logs):
+        return refuse(f"logs root is missing or outside build/rig/logs and the temp dir: {logs}")
+    # The logs root and every ancestor, as spelled, before anything is resolved or walked.
+    for part in (logs, *logs.parents):
+        if part.exists() and linked(part):
+            return refuse(f"link in the logs path: {part}")
     for pid in pids:
         if running(pid):
             receipt["refused"].append(f"pid {pid} may still be running")

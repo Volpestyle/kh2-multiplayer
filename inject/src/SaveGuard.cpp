@@ -143,9 +143,9 @@ bool ResolvedLower(LPCWSTR path, wchar_t (&out)[1024]) {
 
 // What a path is to the guard. Saves (and the self-test directory) are
 // matched by spelling exactly as before VUH-2775. An installed asset is
-// matched on the resolved path when `resolve` is set (write opens and the
-// destructive APIs), so an 8.3 name or a junction alias of KH2ReSource is
-// still the install; its spelling also counts. `full` and `tail` give the
+// matched on the resolved path when `resolve` is set (write opens, the
+// destructive APIs, and reads once a twin exists), so an 8.3 name or a
+// junction alias of KH2ReSource is still the install; its spelling also counts. `full` and `tail` give the
 // path used for the twin and where its part below the guarded root starts.
 enum class Kind { None, Save, Asset, AssetRoot };
 
@@ -239,6 +239,10 @@ std::atomic<std::uint32_t> g_redirected {0};
 bool g_assetTwinsOk = false;
 // Serializes asset twin initialization, so concurrent first opens copy once.
 SRWLOCK g_twinLock = SRWLOCK_INIT;
+// Set once any asset write has been routed to a twin. From then on reads are
+// classified on the resolved path too, so a read through an alias follows
+// the same twin as the write; before it no twin exists and reads skip that cost.
+std::atomic<bool> g_anyAssetTwin {false};
 
 // Creates the parent directories of a sandbox twin.
 void CreateParents(wchar_t (&twin)[1024]) {
@@ -398,21 +402,48 @@ void LogRedirect(const char* api, LPCWSTR from, LPCWSTR to) {
 }
 
 // Copies an installed asset to its twin under g_twinLock. The copy goes to a
-// ".partial" name first and is renamed into place only when complete, so a
-// twin that exists is always a whole copy. False (nothing published) on any
-// failure.
+// ".partial" file this call creates itself (CREATE_NEW, never through a
+// link) and is renamed into place only when complete, so a twin that exists
+// is always a whole copy. A stale partial that is a link or can't be removed
+// fails the copy. False (nothing published) on any failure.
 bool CopyAssetTwin(LPCWSTR path, const wchar_t* twin) {
     wchar_t partial[1040];
     if (swprintf_s(partial, L"%s.partial", twin) < 0) return false;
-    DeleteFileW(partial);  // a stale partial from an earlier failure; never guarded
-    // The trampolines the public CopyFileW/MoveFileExW call internally, so no
-    // hook judges the guard's own copy.
-    if (!g_copyFileExW(path, partial, nullptr, nullptr, nullptr, 0) ||
-        !g_moveFileWithProgressW(partial, twin, nullptr, nullptr, 0)) {
-        const DWORD error = GetLastError();
-        DeleteFileW(partial);
-        if (g_log) g_log("[saveguard] asset twin copy failed: error %lu", error);
+    auto fail = [&](const char* step, DWORD error) {
+        if (g_log) g_log("[saveguard] asset twin copy failed at %s: error %lu", step, error);
         return false;
+    };
+    const DWORD stale = GetFileAttributesW(partial);
+    if (stale != INVALID_FILE_ATTRIBUTES) {
+        if (stale & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) return fail("stale partial link", 0);
+        if (!g_deleteFileW(partial)) return fail("stale partial removal", GetLastError());
+    }
+    HANDLE out = g_createFileW(partial, GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (out == INVALID_HANDLE_VALUE) return fail("partial create", GetLastError());
+    HANDLE in = g_createFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                              FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    bool copied = in != INVALID_HANDLE_VALUE;
+    DWORD error = copied ? 0 : GetLastError();
+    std::vector<char> buffer(1 << 20);
+    for (DWORD got = 0; copied;) {
+        DWORD put = 0;
+        if (!ReadFile(in, buffer.data(), static_cast<DWORD>(buffer.size()), &got, nullptr)) {
+            copied = false, error = GetLastError();
+        } else if (got == 0) {
+            break;
+        } else if (!WriteFile(out, buffer.data(), got, &put, nullptr) || put != got) {
+            copied = false, error = GetLastError();
+        }
+    }
+    if (in != INVALID_HANDLE_VALUE) CloseHandle(in);
+    CloseHandle(out);
+    // The trampoline MoveFileExW calls internally, so no hook judges the
+    // guard's own rename. Without a replace flag it never overwrites.
+    if (!copied || !g_moveFileWithProgressW(partial, twin, nullptr, nullptr, 0)) {
+        if (copied) error = GetLastError();
+        g_deleteFileW(partial);  // ours, created above
+        return fail(copied ? "publish" : "copy", error);
     }
     if (g_log) {
         char narrow[600] = {};
@@ -442,6 +473,7 @@ bool RouteAsset(const char* api, LPCWSTR path, const wchar_t* below, bool write,
         const bool keepsContents = disposition == OPEN_EXISTING || disposition == OPEN_ALWAYS;
         if (TwinPathSafe(twin) &&
             (Exists(twin) || !keepsContents || !Exists(path) || CopyAssetTwin(path, twin))) {
+            g_anyAssetTwin = true;
             LogRedirect(api, path, twin);
         } else {
             twin[0] = L'\0';
@@ -461,7 +493,7 @@ bool RouteOpen(const char* api, LPCWSTR path, DWORD access, DWORD disposition,
     const bool write = IsWriteOpen(access, disposition);
     wchar_t full[1024];
     size_t tail = 0;
-    const Kind kind = Classify(path, write, full, tail);
+    const Kind kind = Classify(path, write || g_anyAssetTwin, full, tail);
     if (kind == Kind::None) return false;
     if (kind == Kind::AssetRoot) {  // the KH2ReSource root itself: no twin
         if (write) Deny(api, path);

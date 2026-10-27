@@ -97,6 +97,25 @@ class MovieTwinsTest(unittest.TestCase):
         self.assertTrue(outside.exists())
         self.assertEqual(receipt["deleted"], [])
 
+    def test_refuses_a_linked_ancestor_of_the_logs_root(self):
+        # Rhea's repro (eb389de1): linked-parent -> outside, clean(linked-parent/logs) deleted outside twins.
+        outside = self.write(self.root / f"outside/logs/save_sandbox_{DEAD}" / MOVIE, "not ours")
+        for kind in ("junction", "symlink"):
+            parent = self.root / f"linked-parent-{kind}"
+            with self.subTest(kind):
+                if kind == "junction":
+                    _winapi.CreateJunction(str(self.root / "outside"), str(parent))
+                else:
+                    try:
+                        os.symlink(self.root / "outside", parent, target_is_directory=True)
+                    except OSError:
+                        self.skipTest("this account can't create symlinks")
+                self.addCleanup(os.rmdir, parent)
+                code, receipt = TWINS.clean(parent / "logs", [DEAD])
+                self.assertEqual(code, 2)
+                self.assertTrue(outside.exists())
+                self.assertEqual(receipt["deleted"], [])
+
     def test_refuses_a_logs_root_outside_the_allowed_roots(self):
         with mock.patch.object(TWINS, "allowed_logs", return_value=False):
             self.assertEqual(TWINS.clean(self.logs, [DEAD])[0], 2)
