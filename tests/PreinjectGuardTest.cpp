@@ -35,6 +35,44 @@ int wmain(int argc, wchar_t** argv) {
         Write(argv[3], ((deleted ? "deleted|" : "blocked|") + readBack).c_str());
         return deleted ? 3 : 0;
     }
+    if (argc == 4 && std::wstring(argv[1]) == L"--movie-child") {
+        // argv[2]: an installed cipher movie, played the way the game does (VUH-2763): a read, the decrypt
+        // write of the header, the CRT and Media Foundation (KernelBase CreateFile2) reads, the restore write.
+        auto head = [](const wchar_t* path) {
+            FILE* file = nullptr;
+            char bytes[9] {};
+            if (_wfopen_s(&file, path, L"rb") == 0 && file) {
+                fread(bytes, 1, 8, file);
+                fclose(file);
+            }
+            return std::string(bytes);
+        };
+        auto patch = [](const wchar_t* path, const char* text) {
+            FILE* file = nullptr;
+            if (_wfopen_s(&file, path, L"r+b") != 0 || !file) return std::string("failed");
+            const bool wrote = fwrite(text, 1, 8, file) == 8;
+            return std::string(fclose(file) == 0 && wrote ? "wrote" : "failed");
+        };
+        auto mediaHead = [](const wchar_t* path) {
+            char bytes[9] {};
+            DWORD read = 0;
+            HANDLE file = CreateFile2(path, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, nullptr);
+            if (file != INVALID_HANDLE_VALUE) {
+                ReadFile(file, bytes, 8, &read, nullptr);
+                CloseHandle(file);
+            }
+            return std::string(bytes);
+        };
+        // One step per statement: operands of + are evaluated in no fixed order.
+        std::string out = head(argv[2]);
+        out += "|" + patch(argv[2], "decoded!");
+        out += "|" + head(argv[2]);
+        out += "|" + mediaHead(argv[2]);
+        out += "|" + patch(argv[2], "restored");
+        out += "|" + head(argv[2]);
+        Write(argv[3], out.c_str());
+        return 0;
+    }
     if (argc == 4 && std::wstring(argv[1]) == L"--child-root") {
         // argv[2]: an empty exact KH2ReSource root, whose sibling KH2ReSource-other sits beside it.
         const fs::path assetRoot = argv[2], sibling = assetRoot.wstring() + L"-other";
@@ -194,6 +232,30 @@ int wmain(int argc, wchar_t** argv) {
               "failure terminates child before entry point or file mutation");
         if (observed) CloseHandle(observed);
         if (collision) CloseHandle(collision);
+    }
+    {
+        // A whole playback (VUH-2763): a read before any write opens the installed movie; the decrypt write,
+        // the later reads (Media Foundation's CreateFile2 included) and the restore all use the twin, and the
+        // installed file's bytes and mtime never change. Last, so its sandbox can't affect the prune checks.
+        const auto movie = asset / L"me4.mp4";
+        const char* original = "SCRAMBLED-HEADER+payload";
+        Write(movie, original);
+        const auto stamp = fs::last_write_time(movie);
+        const auto marker = root / "movie.marker";
+        auto info = spawn(movie, marker, L"--movie-child");
+        Child child(info);
+        const auto error = child.ProtectAndResume([&](DWORD pid) { return InjectDll(pid, dll); }, 10000);
+        Check(error.empty(), "movie playback child: actual SaveGuard acknowledged before resume");
+        if (error.empty()) {
+            Check(WaitForSingleObject(info.hProcess, 10000) == WAIT_OBJECT_0, "movie playback child exits");
+            Check(Read(marker) == "SCRAMBLE|wrote|decoded!|decoded!|wrote|restored",
+                  "movie read before any write sees the install; decrypt, CRT/CreateFile2 reads and restore use the twin");
+            Check(Read(movie) == original && fs::last_write_time(movie) == stamp,
+                  "installed movie bytes and mtime unchanged through playback");
+            const auto twin = logs / (L"save_sandbox_" + std::to_wstring(info.dwProcessId)) / L"install-assets" /
+                              L"zmovie" / L"en" / L"me4.mp4";
+            Check(Read(twin) == std::string("restored") + (original + 8), "movie twin holds the copy plus both writes");
+        }
     }
     fs::remove_all(root); // exactly the temp directory successfully created above
     return failures ? 1 : 0;
