@@ -270,7 +270,7 @@
   },
   {
    "do": "assert",
-   "expr": "saved['census_axel'][0]['btlf'] == 1 and saved['census_axel'][0]['sora'] == 1 and saved['census_axel'][0]['roxas'] == 0 and saved['census_axel'][0]['w10'] == 1 and saved['census_axel'][0]['w20'] == 1 and saved['census_axel'][0]['member0'] == 803 and saved['census_axel'][1]['btlf'] == 1 and saved['census_axel'][1]['sora'] == 1 and saved['census_axel'][1]['roxas'] == 0 and saved['census_axel'][1]['w10'] == 1 and saved['census_axel'][1]['w20'] == 1 and saved['census_axel'][1]['member0'] == 84",
+   "expr": "saved['census_axel'][0]['btlf'] == 1 and saved['census_axel'][0]['sora'] == 1 and saved['census_axel'][0]['roxas'] == 0 and saved['census_axel'][0]['w10'] == 1 and saved['census_axel'][0]['w20'] == 2 and saved['census_axel'][0]['member0'] == 803 and saved['census_axel'][1]['btlf'] == 1 and saved['census_axel'][1]['sora'] == 1 and saved['census_axel'][1]['roxas'] == 0 and saved['census_axel'][1]['w10'] == 1 and saved['census_axel'][1]['w20'] == 2 and saved['census_axel'][1]['member0'] == 84",
    "message": "each screen must hold one body per seat (dual-wield Roxas with both keyblades, or Sora), no single-blade Roxas"
   },
   {
@@ -591,7 +591,7 @@
   },
   {
    "do": "assert",
-   "expr": "saved['retired'][0]['btlf'] == 0 and saved['retired'][0]['w10'] == 0 and saved['retired'][0]['w20'] == 0 and saved['retired'][0]['roxas'] == 1 and saved['retired'][0]['sora'] == 0 and saved['retired'][0]['member0'] == 90 and log_count('[prologue] encounter exit at=02/15', 0) == 0 and saved['retired'][1]['btlf'] == 0 and saved['retired'][1]['w10'] == 0 and saved['retired'][1]['w20'] == 0 and saved['retired'][1]['roxas'] == 0 and saved['retired'][1]['sora'] == 1 and saved['retired'][1]['member0'] == 84 and log_count('[prologue] encounter exit at=02/15', 1) == 1",
+   "expr": "saved['retired'][0]['btlf'] == 0 and saved['retired'][0]['w10'] == 0 and saved['retired'][0]['w20'] == 0 and saved['retired'][0]['roxas'] == 1 and saved['retired'][0]['sora'] == 0 and saved['retired'][0]['member0'] == 90 and log_count('[prologue] encounter exit at=02/15', 0) == 0 and saved['retired'][1]['btlf'] == 0 and saved['retired'][1]['w10'] == 0 and saved['retired'][1]['w20'] == 1 and saved['retired'][1]['roxas'] == 0 and saved['retired'][1]['sora'] == 1 and saved['retired'][1]['member0'] == 84 and log_count('[prologue] encounter exit at=02/15', 1) == 1",
    "message": "after Continue each seat must hold only its selected body (Sora restored, Roxas native), no dual-wield body or keyblade pair"
   },
   {

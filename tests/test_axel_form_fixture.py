@@ -80,8 +80,11 @@ class AxelFormFixtureTest(unittest.TestCase):
             self.assertTrue(held(ok)(expr), name)
             self.assertFalse(held({**ok, "owner_downs": {"owners": {"0": None, "1": {"kind": "forced"}}}})(expr), name)
 
-    def census(self, member0, roxas=0, sora=0, btlf=0, w=0):
-        return {"btlf": btlf, "roxas": roxas, "sora": sora, "w10": w, "w20": w, "member0": member0}
+    def census(self, member0, roxas=0, sora=0, btlf=0, w=None):
+        # One W_EX010_10 and one W_EX010_20 per dual-wield body, and Sora's own W_EX010_20 (runs axel-02, sora-01).
+        w10 = btlf if w is None else w
+        return {"btlf": btlf, "roxas": roxas, "sora": sora, "w10": w10, "w20": btlf + sora if w is None else w,
+                "member0": member0}
 
     def test_each_selection_is_back_after_continue_in_both_seat_orders(self):
         exit_line = "[prologue] encounter exit at=02/15"
@@ -107,9 +110,11 @@ class AxelFormFixtureTest(unittest.TestCase):
         self.assertIn(r"cloneObject=803 cloneKey=14 local=\S+ localKey=1 ', 0)", born)
         self.assertIn(r"cloneObject=84 cloneKey=1 local=\S+ localKey=14 ', 1)", born)
         census = assertion(host, "each screen must hold one body per seat")
-        mixed = [self.census(0x54, sora=1, btlf=1, w=1), self.census(0x323, sora=1, btlf=1, w=1)]
+        mixed = [self.census(0x54, sora=1, btlf=1), self.census(0x323, sora=1, btlf=1)]
+        self.assertEqual((mixed[0]["w10"], mixed[0]["w20"]), (1, 2))  # what run vuh2911-sora-01 held
         self.assertTrue(held({"census_axel": mixed})(census))
         self.assertFalse(held({"census_axel": [self.census(0x323, btlf=2, w=2), mixed[1]]})(census))
+        self.assertFalse(held({"census_axel": [dict(mixed[0], w20=1), mixed[1]]})(census))  # the old wrong count
         envs = [s.get("env", {}).get("KH2COOP_PROFILE") for s in host if s["do"] == "boot"]
         self.assertEqual(envs, ["0x54", None])
 

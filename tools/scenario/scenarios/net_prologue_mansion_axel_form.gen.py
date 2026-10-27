@@ -98,16 +98,20 @@ def steps_for(selection):
     clone = [local[1], local[0]]                         # each seat's clone of the other seat
     btlf = sum(body == BTLF for body in local)           # dual-wield bodies on each screen
     sora = sum(body == SORA for body in local)
+    # Each dual-wield body holds one W_EX010_10 and one W_EX010_20 (run vuh2911-axel-02: 2/2 for two bodies);
+    # Sora's own keyblade is a W_EX010_20 too (run vuh2911-sora-01: 1 BTLF + 1 Sora held 1 and 2).
+    w10, w20 = btlf, btlf + sora
     env = [dict(ENV, **({"KH2COOP_PROFILE": f"0x{s:X}"} if s != ROXAS else {})) for s in selection]
     born = " and ".join(
         f"len(log_matches(r'born site=tt20-137 bound=1 clone=\\S+ cloneObject={clone[i]} cloneKey={KEY[clone[i]]} "
         f"local=\\S+ localKey={KEY[local[i]]} ', {i})) == 1" for i in (0, 1))
     at_axel = " and ".join(
         f"saved['census_axel'][{i}]['btlf'] == {btlf} and saved['census_axel'][{i}]['sora'] == {sora} and "
-        f"saved['census_axel'][{i}]['roxas'] == 0 and saved['census_axel'][{i}]['w10'] == {btlf} and "
-        f"saved['census_axel'][{i}]['w20'] == {btlf} and saved['census_axel'][{i}]['member0'] == {local[i]}" for i in (0, 1))
+        f"saved['census_axel'][{i}]['roxas'] == 0 and saved['census_axel'][{i}]['w10'] == {w10} and "
+        f"saved['census_axel'][{i}]['w20'] == {w20} and saved['census_axel'][{i}]['member0'] == {local[i]}" for i in (0, 1))
     retired = " and ".join(
-        f"saved['retired'][{i}]['btlf'] == 0 and saved['retired'][{i}]['w10'] == 0 and saved['retired'][{i}]['w20'] == 0 and "
+        f"saved['retired'][{i}]['btlf'] == 0 and saved['retired'][{i}]['w10'] == 0 and "
+        f"saved['retired'][{i}]['w20'] == {int(selection[i] == SORA)} and "
         f"saved['retired'][{i}]['roxas'] == {int(selection[i] == ROXAS)} and saved['retired'][{i}]['sora'] == {int(selection[i] == SORA)} and "
         f"saved['retired'][{i}]['member0'] == {selection[i]} and "
         f"log_count('[prologue] encounter exit at=02/15', {i}) == {int(selection[i] != ROXAS)}" for i in (0, 1))
