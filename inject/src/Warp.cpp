@@ -17,6 +17,7 @@
 // ============================================================================
 
 #include "Warp.hpp"
+#include "AxelBoundaryTrace.hpp"
 #include "EnemySync.hpp"
 #include "ProgressSync.hpp"
 #include "PrologueParty.hpp"
@@ -269,8 +270,13 @@ bool FieldDoor() {
 
 void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t fade,
                                         int mode, std::uint8_t flag, int extra) {
+    if (axeltrace::Enabled()) {
+        const std::uint16_t target[] = {to->world, to->room, to->door, to->map, to->battle, to->event};
+        axeltrace::Request(target, false);
+    }
     if (enemysync::HasClientAuthority()) {
         ++g_blockedNativeExits;
+        axeltrace::Point("client-native-exit-blocked", g_blockedNativeExits);
         g_blockedExit = *to;
         g_blockedExitLoad = g_loadSerial;
         RefreshWaitingAtExit();  // entity frames may not run during the event's exit fade
@@ -293,13 +299,20 @@ void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t 
     if (travel && g_log) g_log("[travel] native request target=%02X/%02X door=%u from=%02X/%02X",
                                to->world, to->room, to->door, ReadExe<std::uint8_t>(offsets::WORLD_ID),
                                ReadExe<std::uint8_t>(offsets::ROOM_ID));
+    if (axeltrace::Enabled()) {
+        const std::uint16_t target[] = {to->world, to->room, to->door, to->map, to->battle, to->event};
+        axeltrace::Request(target, true);
+    }
+    axeltrace::Point("native-request-enter", g_transitionSerial);
     g_requestTransition(to, fade, mode, flag, extra);
+    axeltrace::Point("native-request-return", g_transitionSerial);
     // Still in the old room: a host can publish its hold before the map loads.
     if (travel) enemysync::OnHostTravelRequest();
 }
 
 void CompleteLoad() {
     ++g_loadSerial;
+    axeltrace::Point("load-finalizers-returned", g_loadSerial);
     const bool hostIssued = g_hostCause.issued && g_transitionPending && LoadCauseCurrent(g_hostCause) &&
         g_hostCause.issueTransition == g_transitionSerial && g_hostCause.loadBefore != UINT32_MAX &&
         g_loadSerial == g_hostCause.loadBefore + 1;
@@ -430,7 +443,13 @@ void IssueHostTransition() {
                          static_cast<unsigned long long>(retained.key->requestId), retained.loadBefore, issuedTransition);
     }
     // Only this authority path bypasses the native-exit detour.
+    if (axeltrace::Enabled()) {
+        const std::uint16_t target[] = {packet.world, packet.room, packet.door, packet.map, packet.battle, packet.event};
+        axeltrace::Request(target, true);
+    }
+    axeltrace::Point("client-request-enter", issuedTransition);
     g_requestTransition(&packet, 1, 0, 0, 0);
+    axeltrace::Point("client-request-return", issuedTransition);
     if (g_log) g_log("[warp] client issued epoch=%u transition=%u%s", issuedEpoch, issuedTransition,
                      superseded ? " at its own blocked native exit, in place of its own target (prologue)"
                      : atNativeExit ? " at its own blocked native exit" : "");

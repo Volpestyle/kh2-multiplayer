@@ -31,6 +31,7 @@
 // ============================================================================
 
 #include "EntityHook.hpp"
+#include "AxelBoundaryTrace.hpp"
 #include "PatternScan.hpp"
 #include "RenderHook.hpp"
 #include "CrownInputs.hpp"
@@ -585,7 +586,9 @@ static void LogHpDelta(void* actor, int delta, int idx, int reactFlag, int resul
 }
 
 static int ApplyStatDeltaBody(void* actor, int delta, int idx, int reactFlag) {
+    const auto boundary = idx == 0 && delta < 0 ? axeltrace::BeginHp(reinterpret_cast<uintptr_t>(actor), delta) : 0;
     const int result = g_origApplyStatDelta(actor, delta, idx, reactFlag);
+    axeltrace::EndHp(boundary, reinterpret_cast<uintptr_t>(actor), result);
     if (idx == 0 && delta < 0 && g_hpDamageLogged < HP_DAMAGE_LOG_LIMIT) {
         ++g_hpDamageLogged;
         __try {
@@ -3577,6 +3580,7 @@ static void TraceInputCallback() {
 }
 
 static void __fastcall HookedInputCollector(void* inputStruct) {
+    axeltrace::Input();
     TraceInputCallback();
     const bool control = eventholdnative::EnterInput();
     __try {
@@ -4293,6 +4297,7 @@ bool Initialize(uintptr_t exeBase) {
 
     render::Install(exeBase, &Log);
     warp::Install(exeBase, &Log);
+    axeltrace::Install(exeBase, &Log);
     warp::SetTransitionObserver(&PublishLocalForTransition);
     downedspike::Install(exeBase);
     downedspectate::Install();
@@ -4431,6 +4436,7 @@ bool Initialize(uintptr_t exeBase) {
 }
 
 void Shutdown() {
+    axeltrace::Shutdown();
     nativehud::Retire();
     // Drain spectate before clearing ANY restoration/lifetime authority.
     if (!downedspectate::Shutdown()) return;

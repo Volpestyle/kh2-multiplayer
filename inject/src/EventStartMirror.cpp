@@ -1,4 +1,5 @@
 #include "EventStartMirror.hpp"
+#include "AxelBoundaryTrace.hpp"
 #include "ThornDefeatNative.hpp"
 #include "kh2coop/Protocol.hpp"
 #include "kh2coop/EventScenes.hpp"
@@ -70,6 +71,7 @@ bool CopyParams(const std::uint32_t* params, std::array<std::uint32_t, 9>& out) 
 }
 
 void __fastcall HookedStart(std::uint32_t id, std::uint8_t flags, std::uint32_t* params) {
+    axeltrace::Point("event-start-entry", id);
     Field before {};
     EventStart s {};
     // Every start taken in open field is recorded with its arguments (the trace each checked row
@@ -107,9 +109,11 @@ void __fastcall HookedStart(std::uint32_t id, std::uint8_t flags, std::uint32_t*
 }
 
 void __fastcall HookedInstall(std::uint32_t* context) {
+    axeltrace::Point("event-install-entry", reinterpret_cast<std::uintptr_t>(context));
     g_installContext = reinterpret_cast<std::uintptr_t>(context);
     g_installCaller = reinterpret_cast<std::uintptr_t>(_ReturnAddress()) - g_base;
     g_installOriginal(context);
+    axeltrace::Point("event-install-return", reinterpret_cast<std::uintptr_t>(context));
 }
 }  // namespace
 

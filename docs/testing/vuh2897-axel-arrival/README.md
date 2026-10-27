@@ -163,7 +163,8 @@ unchanged. No live run is authorized by this proposal.
 
 The authenticated return path is reusable. The **native admission seam is not
 yet qualified**; a menu request or actor freeze cannot currently claim that
-combat is stopped before the first hit. No production patch has been written.
+combat is stopped before the first hit. No behavior-changing patch has been
+written. The subsequent approved diagnostic patch is described below.
 
 ### Arrival transport
 
@@ -228,12 +229,91 @@ Also observe which independent input/control callback continues during a native
 pause before relying on it for ACK delivery or the deadline.
 
 The existing logs cannot recover these missing boundaries. The lead required
-qualification before coding and owns all live runs. The next decision is
-whether to prepare this diagnostic-only patch for independent review and a
-lead-scheduled qualification run, rather than implement a hold on an unproven
-seam. Static audit and a bounded state-machine test cannot by themselves prove
-first-hit exclusion or pause-time callback liveness. Neither live execution nor
-that diagnostic patch is claimed here.
+qualification before coding a hold and owns all live runs. Preparing a
+diagnostic-only patch for independent review was approved after the VUH-2881
+qualification; the patch is described below. Static audit and a bounded
+state-machine test cannot by themselves prove first-hit exclusion or pause-time
+callback liveness. No VUH-2897 live execution is claimed here.
+
+## Approved diagnostic trace (before a behavior change)
+
+After VUH-2881 landed and its single live qualification passed, the lead approved
+this diagnostic-only patch and a fresh independent review before any trace run.
+The code is based on main `4194ea7c`. It uses the existing
+`KH2COOP_ENEMY_MIRROR_TRACE=1` setting already present in the base Mansion fixture.
+No new scenario, pause, group write, readiness packet or update suppression is
+introduced. The 15 s behavior-barrier timeout proposed above is still a future
+requirement; the probe's separate 15 s logging window never holds native control.
+
+The probe arms once per process on an observed native or issued client request
+from `02/13 btl134` to `02/14 btl137`, retaining the full destination tuple.
+Blocked native exits are observations, not issued loads. Issue does not restart
+the window. It records `GetTickCount64`, actual callback TID, fiber identity and
+stack address. Paired native entries/returns have call IDs; TLS depth is not used
+to invent parentage across fiber switches. The full current native tuple,
+event-context identity, frozen-group mask, pause blockers, field-mode state and
+group, timeline state and menu are scalar reads under SEH, explicitly not an
+atomic snapshot. Native pointers are identities only, never retained actors or
+dereferenced event contexts.
+
+The three new all-or-nothing, byte-pinned observational hooks are:
+
+- `14FC20(group)`: entry/return of the native field mode's own task group
+  (`716860 + 8`). Other groups forward without emitting; this is not a census
+  of every worker task or every source of combat.
+- `3AC000(task)`: the native intro/event task update, including its call to
+  teardown `3AC750` and subsequent context clear. A return with context zero
+  can be placed against nested unfreeze and dispatch receipts.
+- `3BF2E0(group)`: native group release before/after, with the real caller RVA.
+  The original function performs the release exactly once; the probe never
+  writes its mask.
+
+Existing hooked paths supply event-start/install entry, native request and
+post-finalizer load completion, entity-head service, successful host room
+publication and successful client arrival-ACK enqueue. Native HP delta entry
+and return carry actor identity, the requested delta and native result; compare
+with the independently read canonical player identity, rather than treating
+every enemy hit as a hit on the host. These do not claim an ACK reached the host.
+
+An owner-only copied snapshot carries session salt, generation, delivery,
+connection/host identity, epoch, load/transition, frame and the existing native
+context read mask. Every point includes its separate `ownerMs`: it can lag the
+native callback, especially during loading or pause. Load/issue/publication/ACK
+points additionally carry their actual serial/epoch argument. Foreign native
+callbacks never read EnemySync's mutable bridge, maps or owner globals.
+
+The existing independent input callback contributes a 250 ms per-thread
+heartbeat. If this run never enters native field pause, those points cannot
+prove service liveness during pause; that qualification remains open. No pause
+is requested to manufacture it. A 15 s deadline or 8,192-line budget ends only
+the trace, with the reason logged. A later callback observes expiration; there
+is no timer thread. Missing boundaries outside that window remain missing.
+Logging and snapshot contention use try-locks, count lost observations and
+never wait on the native caller. No lock crosses a native call. LastError and
+native exceptional unwinding are preserved. Shutdown disables observations
+before logger teardown and leaves in-flight trampolines process-lifetime.
+
+The offline adapter control calls the production wrappers over a read-only
+owned image, substituting only native leaves and MinHook installation. It
+checks opt-out/pin refusal, partial-install rollback, exact native forwarding,
+LastError, entry/return and SEH unwind receipts, copied owner provenance,
+nonblocking loss reporting, wrong-target refusal and the independent-input
+deadline. This is not a live scheduling or first-hit exclusion proof.
+
+Fresh serial/background Release build passed. **CTest 281/281 passed in 277.67 s**,
+including **44 Python files** and the new production-adapter control's **18 checks**.
+The unchanged resync test passed in 15.77 s. Offline structure/expression syntax
+validation of the unchanged base Mansion fixture passed. The first build's
+diagnostic generation narrowing warning was corrected before these checks;
+the final DLL was rebuilt after restricting actor observations to entity-head
+service. No sanitizers or native game execution are claimed. Raw build/test and
+idle gate receipts remain in this worktree's `.local/trace-*` files.
+
+The next live trace must show both seats' request/install/teardown/arrival
+boundaries and the first player HP loss, with no loss/budget censoring across
+those boundaries. Preserve native intros. Only after reviewing that order can
+the combat seam and an independent authenticated ACK/deadline service be chosen.
+The lead schedules that run after independent source approval; none has run here.
 
 ## Evidence locations
 

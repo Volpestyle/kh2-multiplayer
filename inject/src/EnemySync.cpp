@@ -15,6 +15,7 @@
 // ============================================================================
 
 #include "EnemySync.hpp"
+#include "AxelBoundaryTrace.hpp"
 #include "CombatCausalTrace.hpp"
 #include "CausalDisappearance.hpp"
 #include "OrdinaryEnemyBinding.hpp"
@@ -2134,6 +2135,7 @@ bool HostBeginInstance() {
     g_hostAnnouncedRoom = t;
     g_hostEventPublication.admittedRoom = g_pendingHostRoomContext;
     g_hostBeginPending = false;
+    axeltrace::Point("host-room-published", t.epoch);
     if (g_log) g_log("[enemysync] host arrived epoch=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u",
                      t.epoch, t.worldId, t.roomId, t.door, t.mapProgram,
                      t.battleProgram, t.eventProgram);
@@ -6120,6 +6122,26 @@ void OnFrameStart(std::uint32_t frame) {
     spawncontroller::RegisterDiagnosticGameThread();
     nativehittrace::RegisterOwnerThread();
     g_hitTraceFrame = frame;
+    if (axeltrace::Enabled()) {
+        const auto traceError = GetLastError();
+        RoomTransition observed;
+        if (ReadLocationChecked(observed) && observed.worldId == 2 &&
+            ((observed.roomId == 0x13 && observed.battleProgram == 134) ||
+             (observed.roomId == 0x14 && observed.battleProgram == 137))) {
+            const auto c = CaptureNativeHitContext();
+            axeltrace::Owner sample;
+            sample.frame = frame; sample.session = g_bridge.SpawnPickSalt();
+            sample.connection = c.connectionId; sample.host = c.hostConnectionId;
+            sample.delivery = g_bridge.DeliverySerial();
+            // The diagnostic context widens the bridge's uint32 generation.
+            sample.generation = static_cast<std::uint32_t>(c.generation);
+            sample.epoch = static_cast<std::uint32_t>(c.epoch); sample.load = warp::LoadSerial();
+            sample.transition = warp::TransitionSerial(); sample.mask = c.readMask; sample.role = c.role;
+            axeltrace::Publish(sample);
+            axeltrace::Point("entity-head", frame);
+        }
+        SetLastError(traceError);
+    }
     SeatState retiredSeat; // VUH-2464: no session, no prologue hold (generation 0 forgets every seat)
     if (!g_bridge.IsOpen()) {
         partynative::Observe(0, {}, 0xFF, false); (void)prologueparty::Tick(0, {}, 0xFF, GetTickCount64(), retiredSeat);
@@ -6264,6 +6286,7 @@ void OnFrameStart(std::uint32_t frame) {
             // Retry on ring pressure; only log arrival once the ack is queued.
             if (Send(encode(ack))) {
                 g_host.ackSent = true;
+                axeltrace::Point("client-arrival-ack-queued", ack.epoch);
                 if (g_log) g_log("[enemysync] client arrived epoch=%u room=%02X/%02X door=%u map=%u btl=%u evt=%u",
                                  ack.epoch, location.worldId, location.roomId, location.door,
                                  location.mapProgram, location.battleProgram, location.eventProgram);

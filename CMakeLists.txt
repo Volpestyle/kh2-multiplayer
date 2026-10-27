@@ -455,6 +455,15 @@ if(WIN32)
         target_compile_options(kh2coop_lifecycletrace_test PRIVATE /W4 /WX)
     endif()
 
+    # VUH-2897: actual observational adapters over a read-only owned image.
+    add_executable(kh2coop_axel_boundary_trace_test tests/AxelBoundaryTraceTest.cpp)
+    target_include_directories(kh2coop_axel_boundary_trace_test PRIVATE runtime/include
+        $<TARGET_PROPERTY:minhook_lib,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(kh2coop_axel_boundary_trace_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(kh2coop_axel_boundary_trace_test PRIVATE /W4 /WX)
+    endif()
+
     # VUH-2881: actual orb detours and thread logging, no native hooks installed.
     add_executable(kh2coop_struggle_orbs_hook_test tests/StruggleOrbsHookTest.cpp)
     target_include_directories(kh2coop_struggle_orbs_hook_test PRIVATE common/include
