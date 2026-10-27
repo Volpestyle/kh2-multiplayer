@@ -1,0 +1,287 @@
+{
+  "name": "net_twilight_thorn_movie_qual",
+  "description": "VUH-2763 qualification: bots05's two-seat loopback route from FM-00 to Twilight Thorn, the native fight pilots, then a test-only HP assist (test_enemy_hp lowers the host-owned Thorn to 1 HP after 20 s) so the seats land a native kill. Asserts the native victory, the host's me4.mp4 decode and restore writes landing on SaveGuard's sandbox twin, and both seats leaving the Thorn room after the post-boss movie. Install manifest, desk mtime check, ProcMon capture and twin cleanup belong to the wrapper. Not a combat or kill-rate result.",
+  "testOnly": [
+    "enemy_hp_write"
+  ],
+  "protect": [],
+  "playerDefaults": true,
+  "steps": [
+    {
+      "do": "boot",
+      "instance": 0,
+      "slotMoves": -3,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+        "KH2COOP_THORN_HIT_TRACE": "1",
+        "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
+        "KH2COOP_DOWNED_SPIKE_CONTROL": "0"
+      }
+    },
+    {
+      "do": "boot",
+      "instance": 1,
+      "slotMoves": -3,
+      "initTimeoutMs": 60000,
+      "env": {
+        "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+        "KH2COOP_THORN_HIT_TRACE": "1",
+        "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
+        "KH2COOP_DOWNED_SPIKE_CONTROL": "0"
+      }
+    },
+    {
+      "do": "assert",
+      "expr": "(log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',0)==1 and log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',1)==1) and all(log_count('[script-lifecycle] installed motionEnd=1 captureId=1 cancel=1 queryBudget=2048 cancelBudget=1024 captureBudget=512 changedOnly=1',i)==1 and log_count('[script-lifecycle] unavailable reason=',i)==0 for i in (0,1))",
+      "message": "Both seats must qualify existing RC-cache hooks, actual motion-end/capture-ID observers and sole cancel hook before any route input"
+    },
+    {
+      "do": "assert",
+      "expr": "location(0)[:2] == [2,32] and location(1)[:2] == [2,32]",
+      "message": "FM-00 must load Station of Serenity on both seats; slotMoves is relative to the save-list cursor"
+    },
+    {
+      "do": "assert",
+      "expr": "(log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',0)==1 and log_count('[script-rc-cache] installed refresh=408520 winner=408BD0 accept=3B22D0',1)==1) and all(log_count('[script-lifecycle] installed motionEnd=1 captureId=1 cancel=1 queryBudget=2048 cancelBudget=1024 captureBudget=512 changedOnly=1',i)==1 and log_count('[script-lifecycle] unavailable reason=',i)==0 for i in (0,1))",
+      "message": "Both seats must qualify existing RC-cache hooks, actual motion-end/capture-ID observers and sole cancel hook before any route input"
+    },
+    {
+      "do": "relay",
+      "port": 27809,
+      "args": [
+        "--bind",
+        "127.0.0.1"
+      ]
+    },
+    {
+      "do": "runtime",
+      "instance": 0,
+      "role": "player"
+    },
+    {
+      "do": "runtime",
+      "instance": 1,
+      "role": "friend1"
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[enemysync] client arrived epoch=',1)>0",
+      "timeoutMs": 60000
+    },
+    {
+      "do": "hang_check",
+      "instance": 0,
+      "on": false
+    },
+    {
+      "do": "hang_check",
+      "instance": 1,
+      "on": false
+    },
+    {
+      "do": "save",
+      "as": "evidence_scope",
+      "expr": "{'topology':'single-PC loopback, two native seats','input':'pad mailbox; no OS focus','boot':'FM-00 rehearsal, not New Game acceptance','clips':'30-second two-screen blocks; encoding gaps are not continuous footage','caption_work':'Burn in HOST / FRIEND and Single-PC loopback labels during final assembly; retain raw blocks','watchdog':'gameplay hang checks off across native event holds; all steps have fixed deadlines','reaction_observation':'Live08: existing read-only v7 promptHide from product-qualified actionable RC; raw cached RC remains diagnostic; routes/reach/timing/strategy unchanged'}"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_serenity_door.json",
+      "name": "host_to_calling",
+      "seconds": 120,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==[2,33,0,0,1,0] and location(1)==location(0)",
+      "timeoutMs": 60000
+    },
+    {
+      "do": "save",
+      "as": "calling_deaths_before",
+      "expr": "log_count('[enemysync] host death epoch',0)"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_calling_bots03.json",
+      "name": "host_calling_path",
+      "seconds": 360,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 1
+    },
+    {
+      "do": "pilot",
+      "instance": 1,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_calling_bots03.json",
+      "name": "friend_calling_path",
+      "seconds": 360,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 0
+    },
+    {
+      "do": "pilot_wait"
+    },
+    {
+      "do": "assert",
+      "expr": "log_count('[enemysync] host death epoch',0) >= saved['calling_deaths_before']+10 and all(not any(a.get('objectId')==318 and a.get('hp',-1)>0 for a in actors(i)) for i in (0,1))",
+      "message": "The real Calling path must clear all ten Dusks on both seats before the boss door"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_menu_tutorial.json",
+      "name": "host_menu_tutorial",
+      "seconds": 40,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "pilot",
+      "instance": 1,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_menu_tutorial.json",
+      "name": "friend_menu_tutorial",
+      "seconds": 40,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "assert",
+      "expr": "peek('0x7435D0','u8',0)==255 and peek('0x7435D0','u8',1)==255",
+      "message": "First-open menu tutorial must be closed before boss event hold"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_awakening_bots04.json",
+      "name": "host_to_awakening",
+      "seconds": 260,
+      "input": "pad",
+      "background": false
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==[2,34,0,157,157,157] and location(1)==location(0) and all(any(a.get('objectId')==307 and a.get('objectType')==12 and a.get('hp',0)>0 for a in actors(i)) for i in (0,1))",
+      "timeoutMs": 120000
+    },
+    {
+      "do": "save",
+      "as": "thorn_ingress",
+      "expr": "[{'location':location(i),'mission':mission(i),'boss':[a for a in actors(i) if a.get('objectId')==307],'player':[a for a in actors(i) if int(a['address'],16)==int(peek('0x2A105D0','u64',i),16)]} for i in (0,1)]"
+    },
+    {
+      "do": "assert",
+      "expr": "all(row['mission'] and row['mission']['file']=='TT34_MS304.bar' and len(row['boss'])==1 and len(row['player'])==1 for row in saved['thorn_ingress'])",
+      "message": "Both seats require the real Thorn mission, one exact307 boss, and a canonical native player"
+    },
+    {
+      "do": "wait_until",
+      "expr": "[(a['hp'],a['maxHp']) for a in actors(0) if a.get('objectId')==307]==[(a['hp'],a['maxHp']) for a in actors(1) if a.get('objectId')==307]",
+      "timeoutMs": 10000
+    },
+    {
+      "do": "save",
+      "as": "thorn_baseline",
+      "expr": "{'host_end':log_count('[mission-mirror] host end trap=mission_dead_boss',0),'friend_end':log_count('[mission-mirror] client boss end host-led file=TT34_MS304.bar trap=16 replays=0',1),'victory_start':log_count('[event-mirror] host publishes start id=353133 ',0),'claims':log_count('[enemysync] host hit claim',0),'downs':[log_count('[downed] gate intercept ',i) for i in (0,1)],'revives':[len(log_matches('\\\\[downed\\\\] revive returned (?![^\\\\n]*fault=[1-9])hp=[1-9]\\\\d*/[^\\\\n]*state=1(?:\\\\s|$)',i)) for i in (0,1)]}"
+    },
+    {
+      "do": "pilot",
+      "instance": 0,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_host_fight.json",
+      "name": "host_thorn",
+      "seconds": 350,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 1,
+      "externalEvidence": true,
+      "_releaseReceipt": {}
+    },
+    {
+      "do": "pilot",
+      "instance": 1,
+      "route": "tools/rig/route_pilot/routes/twilight_thorn_fight.json",
+      "name": "friend_thorn",
+      "seconds": 350,
+      "input": "pad",
+      "background": true,
+      "revivePeer": 0,
+      "externalEvidence": true,
+      "_releaseReceipt": {}
+    },
+    {
+      "do": "wait",
+      "ms": 20000
+    },
+    {
+      "do": "assert",
+      "expr": "all(p[0].poll() in (None,0) or p[3].get('allowStuck',False) for p in saved.get('_background_pilots',[]))",
+      "message": "An owned combat pilot failed before the assisted kill"
+    },
+    {
+      "do": "test_enemy_hp",
+      "instance": 0,
+      "objectId": 307,
+      "hp": 1,
+      "as": "thorn_assist"
+    },
+    {
+      "do": "wait_until",
+      "expr": "log_count('[mission-mirror] host end trap=mission_dead_boss',0)==saved['thorn_baseline']['host_end']+1",
+      "timeoutMs": 120000
+    },
+    {
+      "do": "save",
+      "as": "victory_location",
+      "expr": "[location(i) for i in (0,1)]"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(log_matches(r'\\[saveguard\\] redirected [^\\n]*me4\\.mp4 -> ',0))>=1",
+      "timeoutMs": 120000
+    },
+    {
+      "do": "clip",
+      "instance": 0,
+      "seconds": 30,
+      "fps": 15,
+      "name": "me4_movie_host"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "me4_movie_friend"
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(0)==location(1) and location(0)[:2]!=[2,34]",
+      "timeoutMs": 300000
+    },
+    {
+      "do": "pilot_wait"
+    },
+    {
+      "do": "save",
+      "as": "me4_redirects",
+      "expr": "[len(log_matches(r'\\[saveguard\\] redirected [^\\n]*me4\\.mp4 -> ',0)),len(log_matches(r'\\[saveguard\\] redirected [^\\n]*me4\\.mp4 -> ',1))]"
+    },
+    {
+      "do": "assert",
+      "expr": "saved['me4_redirects'][0]>=2",
+      "message": "The host's me4 decode and restore writes must both go to the sandbox twin"
+    },
+    {
+      "do": "capture",
+      "instance": 0,
+      "name": "after_movie_host"
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "after_movie_friend"
+    }
+  ]
+}
