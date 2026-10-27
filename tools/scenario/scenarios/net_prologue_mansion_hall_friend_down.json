@@ -1,6 +1,6 @@
 {
  "name": "net_prologue_mansion_hall_friend_down",
- "description": "VUH-2866 downed variant of net_prologue_mansion_hall.json (ordering: VUH-2869). Both seats fight wave 1 until two of its four Dusks are dead; wave 2 spawns natively at the third death (VUH-2901, fixtures 194057/194738), so it cannot have started. Then the friend is downed through the DownedSpike fixture channel's Kill (KH2COOP_DOWNED_SPIKE_FIXTURE=1, a test channel product play never maps; the downing itself is the product's logical downing), and the run waits until both seats name that fresh episode. Only then does the other seat finish wave 1 and fight wave 2 alone. downed_wave_order (tools/scenario/downed_order.py) must show, in each seat's own log, the episode before the first wave-2 (309) line, and the downed seat's hold end, revive or return for that episode; and, in the host's own log, the episode before wave 1's third death, the wave's trigger. Both seats then load Axel I's room. Rehearsal save. No save.",
+ "description": "VUH-2866 downed variant of net_prologue_mansion_hall.json (ordering: VUH-2869). Both seats fight wave 1 until its first Dusk dies, then hold still for a 1.5 s settle (VUH-2901). Wave 2 spawns natively at the third death (fixtures 194057/194738). A two-death stop lost host_down 062703 and friend_down 225539 to a hit already in flight; stopping at one leaves a margin of two kills, and the settle lets the unchanged pre-Kill guard (no 309, fewer than 3 deaths) count any in-flight death before the Kill, so an overshoot is refused, never raced. Then the friend is downed through the DownedSpike fixture channel's Kill (KH2COOP_DOWNED_SPIKE_FIXTURE=1, a test channel product play never maps; the downing itself is the product's logical downing), and the run waits until both seats name that fresh episode. Only then does the other seat finish wave 1 and fight wave 2 alone. downed_wave_order (tools/scenario/downed_order.py) must show, in each seat's own log, the episode before the first wave-2 (309) line, and the downed seat's hold end, revive or return for that episode; and, in the host's own log, the episode before wave 1's third death, the wave's trigger. Both seats then load Axel I's room. Rehearsal save. No save. VUH-2901: from the confirmed forced downing until the wave-2 fight ends, the lone fighting host is protected (team 0, afterPilot: its route pilot finished at the hall), as host_down protects its lone friend. In 063606 native Dusk damage downed the lone host with one 309 left, before the friend's return was due, and the native game over followed. The host still kills natively; this variant makes no claim about the host taking hits, and its full-party-down check cannot fire while the host is protected. The friend's own hold end, revive or return for the forced episode is still required (downed_wave_order ended).",
  "playerDefaults": true,
  "protect": [],
  "steps": [
@@ -112,7 +112,11 @@
    "seconds": 150,
    "reach": 250,
    "as": "wave1_first_half",
-   "until": "log_count('[enemysync] host death epoch', 0) >= saved['deaths_before'] + 2"
+   "until": "log_count('[enemysync] host death epoch', 0) >= saved['deaths_before'] + 1"
+  },
+  {
+   "do": "wait",
+   "ms": 1500
   },
   {
    "do": "save",
@@ -145,6 +149,11 @@
    "message": "wave 2 started, or the host's third wave-1 death triggered it, before both seats knew the forced episode"
   },
   {
+   "do": "protect",
+   "instance": 0,
+   "afterPilot": true
+  },
+  {
    "do": "fight",
    "instances": [
     0
@@ -167,6 +176,11 @@
      "name": "wave2_friend"
     }
    ]
+  },
+  {
+   "do": "protect",
+   "instance": 0,
+   "on": false
   },
   {
    "do": "save",

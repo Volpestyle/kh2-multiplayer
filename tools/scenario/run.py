@@ -237,6 +237,8 @@ class Context:
         self.artifacts: list[str] = []
         self.protect: set[int] = set()
         self.piloted: set[int] = set()  # instances a route pilot plays; never protected
+        self.after_pilot: set[int] = set()  # piloted seats protected for a later bot fight (VUH-2901)
+        self.after_pilot_covered: set[int] = set()  # those the protector actually wrote, for the report
         self.protected_actors: dict[int, set[str]] = {}  # what protect actually covered, for the report
         self.processes: list[tuple] = []  # (name, Popen, log file) to stop at the end
         self.relay_port = "7782"
@@ -403,7 +405,7 @@ class Context:
 
     def protect_once(self) -> None:
         for index in list(self.protect):
-            if index in self.piloted:
+            if index in self.piloted and index not in self.after_pilot:
                 continue  # refused at the pilot step; never protect the playing seat
             try:
                 inst = self.instances[index]
@@ -414,6 +416,8 @@ class Context:
                 kh2ctl("poke", "--addr", f"0x{addr:X}", "--type", "u32", "--value", "0",
                        pid=inst.pid, check=False)
                 self.protected_actors.setdefault(index, set()).add(actor["name"])
+                if index in self.after_pilot:
+                    self.after_pilot_covered.add(index)
             except Exception:  # noqa: BLE001 - best effort; loading rooms have no player
                 pass
 
@@ -908,9 +912,23 @@ def step_save(ctx: Context, step: dict) -> dict:
 def step_protect(ctx: Context, step: dict) -> dict:
     index = step.get("instance", 0)
     ctx.inst(index)
-    if step.get("on", True) and index in ctx.piloted:
+    on, after = step.get("on", True), step.get("afterPilot", False)
+    if type(after) is not bool:
+        raise StepFailed("protect afterPilot must be a boolean")
+    # VUH-2901: afterPilot protects a seat whose route pilot has finished, for a later bot
+    # fight only. pilot still refuses a protected seat, so no pilot ever plays it protected.
+    if on and after and (index not in ctx.piloted or
+                         any(p[2].index == index for p in ctx.saved.get("_background_pilots", []))):
+        raise StepFailed(f"instance {index}: afterPilot protects only a seat whose route pilot has finished")
+    if on and index in ctx.piloted and not after:
         raise StepFailed(f"instance {index} is played by the route pilot; protect is for an unplayed stand-in only")
-    (ctx.protect.add if step.get("on", True) else ctx.protect.discard)(index)
+    if on:
+        ctx.protect.add(index)
+        if after:
+            ctx.after_pilot.add(index)
+    else:
+        ctx.protect.discard(index)
+        ctx.after_pilot.discard(index)
     return {}
 
 
@@ -5575,8 +5593,10 @@ def run_scenario(path: Path, attempt: int) -> dict:
         report["seconds"] = round(time.monotonic() - t0, 1)
         report["instances"] = [inst.pid for inst in ctx.instances]
         if ctx.protect or ctx.protected_actors:
-            report["standInProtected"] = {"label": "stand-in friend protected", "instances": sorted(ctx.protect),
-                                          "actors": {str(i): sorted(n) for i, n in ctx.protected_actors.items()}}
+            label = "stand-in seat protected" if ctx.after_pilot_covered else "stand-in friend protected"
+            report["standInProtected"] = {"label": label, "instances": sorted(ctx.protect),
+                                          "actors": {str(i): sorted(n) for i, n in ctx.protected_actors.items()},
+                                          "afterPilot": sorted(ctx.after_pilot_covered)}
         if total_segments:
             passed = [s["name"] for s in segments if s["status"] == "pass"]
             report["route"] = {"segments": total_segments, "entered": len(segments), "passed": len(passed),
@@ -5595,8 +5615,11 @@ def render_md(report: dict) -> str:
              f"Started {report['started']}, {report.get('seconds', '?')} s, instances {report.get('instances')}.", ""]
     if report.get("standInProtected"):
         protected = report["standInProtected"]
+        after = protected.get("afterPilot")
+        note = (f"Instances {after} were protected only after their route pilot finished (afterPilot); "
+                "no pilot played a protected seat." if after else "The pilot-played seat is never protected.")
         lines += [f"**{protected['label']}** (single-PC fixture aid, team 0): instances {protected['instances']}, "
-                  f"actors {json.dumps(protected['actors'], sort_keys=True)}. The pilot-played seat is never protected.", ""]
+                  f"actors {json.dumps(protected['actors'], sort_keys=True)}. {note}", ""]
     if report.get("desyncCollection"):
         diagnostic = report["desyncCollection"]
         lines += [f"Automatic desync collection: **{diagnostic['collectionStatus'].upper()}** (separate from scenario step status).", ""]
@@ -5734,6 +5757,8 @@ def validate_scenario(scenario: dict) -> None:
             compile(step["blockedExpr"], f"<{prefix} blockedExpr>", "eval")
         if kind == "fight" and "until" in step:
             compile(step["until"], f"<{prefix} fight until>", "eval")
+        if kind == "protect" and type(step.get("afterPilot", False)) is not bool:
+            raise ValueError(f"{prefix}: protect afterPilot must be a boolean")
         if kind == "runtime" and step["role"] not in ("player", "friend1", "friend2", "spectator"):
             raise ValueError(f"{prefix}: invalid runtime role")
         if kind in ("reconnect_mark", "runtime_pause", "reconnect_check"):

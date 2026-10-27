@@ -1866,7 +1866,12 @@ second the protector writes team 0 to the actor that instance's camera follows
 (Roxas `P_EX110` in the TT prologue, Sora later; never a remote player's clone).
 A pilot-played instance is never protected: `pilot` refuses a protected seat
 and `protect` refuses a piloted one. Scripted boss hits can still reach team 0
-(Axel, VUH-2364).
+(Axel, VUH-2364). The one exception is explicit: `{"do":"protect","afterPilot":true}`
+protects a seat whose route pilot has finished, for a later bot `fight` only
+(VUH-2901). It refuses a seat that was never piloted or whose background pilot
+is still running, and `pilot` still refuses it while it is protected, so no
+pilot ever plays a protected seat. Reports then say "stand-in seat protected"
+and name the seats protected after their pilot.
 `{"do":"protect","on":false}` only stops that polling; it does not restore
 the previous team value. An incoming-damage test must use a fresh naturally
 damageable Sora and verify its canonical identity instead of reusing a
@@ -3394,11 +3399,20 @@ wave 1 and accepted a wave 2 that had already begun. The expression helper
   the Kill, so the host naming it first proves the Kill came before the trigger.
 
 It returns `ok`/`why`, `episodeSeen`, `waveStarted`, `triggeredFirst` and
-`ended`. The variants stop wave 1 at two of its four deaths and refuse to
-continue if wave 2 has started or a third death has come. They then down the
-seat, wait until both seats name the episode, and re-check that neither wave 2
-nor its trigger came first. Only then does the
-other seat finish both waves. The end requires `ok`. Test:
+`ended`. The variants stop wave 1's fight at its first death, hold still for a
+1.5 s settle, and refuse to continue if wave 2 has started or a third death has
+come. They then down the seat, wait until both seats name the episode, and
+re-check that neither wave 2 nor its trigger came first. Only then does the
+other seat finish both waves.
+
+The stop used to be the second death. A hit already in flight when the fight
+stopped then killed the third Dusk before the Kill twice (host_down
+`20261027-062703`, friend_down `20261026-225539`, VUH-2901): the guard refused
+the first, and the second predated it. Stopping at the first death leaves a
+margin of two kills for those in-flight hits, and the settle, with no input,
+lets the guard count any of them before the Kill instead of racing it. The guard
+itself (`< 3` deaths, no 309 line) is unchanged, so an overshoot still fails the
+run before the downing. The end requires `ok`. Test:
 `tests/test_downed_wave_order.py`, which covers the checker and the variants'
 own steps through the runner's Context.
 
@@ -3407,11 +3421,22 @@ wave 2. Twice (`20261026-200433`, `-220631`) native Dusk damage downed it as
 well, before any 309 spawned. That made a full-party down, and the variant never
 reached the wave it exists to test. So from the confirmed downing until the
 wave-2 fight ends, that seat is protected (`{"do": "protect", "instance": 1}`,
-then `"on": false`). The friend-down variant needs no protection: its host
-cleared wave 2 alone in every run. Protection makes the friend's mirrored Dusks
+then `"on": false`). Protection makes the friend's mirrored Dusks
 miss it, but the friend still lands its hits as claims
 (`net_client_hit_claims.json`). The host-down variant therefore claims nothing
-about the friend taking hits. The forced downing, its order before wave 2, and
+about the friend taking hits.
+
+The friend-down variant's lone host needs the same aid (VUH-2901). In
+`20261027-063606` the forced episode was ordered correctly, then native Dusk
+damage downed the host after five of six deaths (one 309 left at 28 HP), before
+the friend's return was due, and the native game over followed. That is a bot
+losing a solo fight, not a revive or return failure (VUH-2866 comment
+`8d1820c1`). So over the same window the host is protected with
+`"afterPilot": true`: its route pilot finished at the hall, and from there a
+`fight` bot plays it. The variant claims nothing about the host taking hits, and
+its `fullPartyDown == 0` check cannot fire while the host is protected. The
+friend's own hold end, revive or return for the forced episode is still
+required. The forced downing, its order before wave 2, and
 the 6/6 deaths and end checks are unchanged.
 
 ### Waiting for the friend's arrival before `coop_verdict` (VUH-2898)

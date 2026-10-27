@@ -63,6 +63,42 @@ class StandInProtectTest(unittest.TestCase):
         with self.assertRaises(RUNNER.StepFailed):  # protected first: the pilot refuses it
             RUNNER.step_pilot(self.ctx, {"do": "pilot", "instance": 0, "teach": "x"})
 
+    def test_after_pilot_protects_a_finished_pilot_seat_only(self):
+        # VUH-2901: friend_down's lone host, whose route pilot ended at the hall.
+        self.ctx.piloted.add(0)
+        RUNNER.step_protect(self.ctx, {"do": "protect", "instance": 0, "afterPilot": True})
+        self.ctx.protect_once()
+        self.assertEqual(self.cli.pokes, [(1000, f"0x{ROXAS + 0x4DC:X}")])
+        self.assertEqual(self.ctx.after_pilot_covered, {0})
+        with self.assertRaises(RUNNER.StepFailed):  # still protected: no pilot may play it
+            RUNNER.step_pilot(self.ctx, {"do": "pilot", "instance": 0, "teach": "x"})
+        RUNNER.step_protect(self.ctx, {"do": "protect", "instance": 0, "on": False})
+        self.assertEqual((self.ctx.protect, self.ctx.after_pilot), (set(), set()))
+        self.ctx.protect.add(0)  # a stale plain entry stays skipped for a piloted seat
+        self.ctx.protect_once()
+        self.assertEqual(len(self.cli.pokes), 1)
+
+    def test_after_pilot_refusals(self):
+        with self.assertRaises(RUNNER.StepFailed):  # never piloted: plain protect is the stand-in form
+            RUNNER.step_protect(self.ctx, {"do": "protect", "instance": 1, "afterPilot": True})
+        self.ctx.piloted.add(0)
+        self.ctx.saved["_background_pilots"] = [(None, 0, self.ctx.instances[0], {}, "p", None)]
+        with self.assertRaises(RUNNER.StepFailed):  # its pilot is still running
+            RUNNER.step_protect(self.ctx, {"do": "protect", "instance": 0, "afterPilot": True})
+        self.ctx.saved.clear()
+        with self.assertRaises(RUNNER.StepFailed):
+            RUNNER.step_protect(self.ctx, {"do": "protect", "instance": 0, "afterPilot": "yes"})
+        self.assertEqual(self.ctx.protect, set())
+        with self.assertRaises(ValueError):
+            RUNNER.validate_scenario({"steps": [{"do": "boot"}, {"do": "protect", "instance": 0, "afterPilot": 1}]})
+
+    def test_after_pilot_report_note(self):
+        text = RUNNER.render_md({"scenario": "s", "attempt": 1, "status": "pass", "started": "t", "steps": [],
+                                 "standInProtected": {"label": "stand-in seat protected", "instances": [],
+                                                      "actors": {"0": ["P_EX110"]}, "afterPilot": [0]}})
+        self.assertIn("only after their route pilot finished", text)
+        self.assertNotIn("never protected", text)
+
     def test_report_is_labelled(self):
         text = RUNNER.render_md({"scenario": "s", "attempt": 1, "status": "pass", "started": "t", "steps": [],
                                  "standInProtected": {"label": "stand-in friend protected", "instances": [1],

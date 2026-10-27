@@ -134,27 +134,30 @@ class VerdictWaitTest(unittest.TestCase):
 
 
 class HostDownProtectTest(unittest.TestCase):
-    def test_protection_covers_only_the_lone_friends_wave_two_fight(self):
-        steps = scenario("net_prologue_mansion_hall_host_down")["steps"]
-        on = [k for k, s in enumerate(steps) if s["do"] == "protect" and s.get("on", True)]
-        off = [k for k, s in enumerate(steps) if s["do"] == "protect" and not s.get("on", True)]
-        self.assertEqual(len(on), 1)
-        self.assertEqual(len(off), 1)
-        (on,), (off,) = on, off
-        self.assertEqual(steps[on - 1]["message"], "wave 2 started, or the host's third wave-1 death triggered it, before both seats knew the forced episode")
-        self.assertEqual([s["do"] for s in steps[:on]].count("downed_kill"), 1)
-        self.assertEqual((steps[on + 1]["do"], steps[on + 1]["instances"], steps[on + 1]["as"]), ("fight", [1], "wave2"))
-        self.assertEqual(off, on + 2)
-        self.assertEqual(steps[on]["instance"], 1)
-        self.assertEqual(steps[off]["instance"], 1)
-        self.assertEqual(scenario("net_prologue_mansion_hall_host_down")["protect"], [])
-        self.assertNotIn(1, [s.get("instance") for s in steps if s["do"] == "pilot"])
+    def test_protection_covers_only_the_lone_seats_wave_two_fight(self):
+        # host_down's lone friend (VUH-2898) and friend_down's lone host (VUH-2901, run 063606).
+        for name, lone in (("net_prologue_mansion_hall_host_down", 1), ("net_prologue_mansion_hall_friend_down", 0)):
+            with self.subTest(name):
+                steps = scenario(name)["steps"]
+                on = [k for k, s in enumerate(steps) if s["do"] == "protect" and s.get("on", True)]
+                off = [k for k, s in enumerate(steps) if s["do"] == "protect" and not s.get("on", True)]
+                self.assertEqual(len(on), 1)
+                self.assertEqual(len(off), 1)
+                (on,), (off,) = on, off
+                self.assertEqual(steps[on - 1]["message"], "wave 2 started, or the host's third wave-1 death triggered it, before both seats knew the forced episode")
+                self.assertEqual([s["do"] for s in steps[:on]].count("downed_kill"), 1)
+                self.assertEqual((steps[on + 1]["do"], steps[on + 1]["instances"], steps[on + 1]["as"]), ("fight", [lone], "wave2"))
+                self.assertEqual(off, on + 2)
+                self.assertEqual(steps[on]["instance"], lone)
+                self.assertEqual(steps[off]["instance"], lone)
+                self.assertEqual(scenario(name)["protect"], [])
+                piloted = lone in [s.get("instance") for s in steps if s["do"] == "pilot"]
+                self.assertEqual(steps[on].get("afterPilot", False), piloted)  # only friend_down's host walked
 
-    def test_the_other_mansion_scenarios_protect_no_one(self):
-        for name in ("net_prologue_mansion_hall", "net_prologue_mansion_hall_friend_down"):
-            d = scenario(name)
-            self.assertEqual(d["protect"], [], name)
-            self.assertNotIn("protect", [s["do"] for s in d["steps"]], name)
+    def test_the_base_mansion_scenario_protects_no_one(self):
+        d = scenario("net_prologue_mansion_hall")
+        self.assertEqual(d["protect"], [])
+        self.assertNotIn("protect", [s["do"] for s in d["steps"]])
 
     def test_the_protect_steps_toggle_the_runner_protection_set(self):
         with tempfile.TemporaryDirectory() as temp:

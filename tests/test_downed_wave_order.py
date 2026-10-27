@@ -250,6 +250,64 @@ class ScenarioStepsTest(unittest.TestCase):
             with self.assertRaises(RUN.StepFailed):
                 self.run_step(check)
 
+    def test_first_half_stops_at_the_first_death_and_settles_before_the_guard(self):
+        # VUH-2901: a two-death stop lost host_down 062703 and friend_down 225539 to one in-flight kill.
+        for downed in (0, 1):
+            steps = self.steps(downed)
+            i = next(k for k, s in enumerate(steps) if s.get("as") == "wave1_first_half")
+            fight, settle, save, check = steps[i:i + 4]
+            self.assertEqual(settle["do"], "wait")
+            self.assertGreaterEqual(settle["ms"], 1000)
+            self.assertEqual((save["as"], check["do"]), ("before_down", "assert"))
+            self.assertIn("< 3", check["expr"])  # the guard keeps wave 2's native trigger, the third death
+            self.ctx.saved = {"deaths_before": 0}
+            self.write(HOST_RELEASE, FRIEND_RELEASE)
+            self.assertFalse(self.ctx.eval(fight["until"]))
+            self.write("\n".join([HOST_RELEASE] + WAVE1[:2]), FRIEND_RELEASE)
+            self.assertTrue(self.ctx.eval(fight["until"]))
+
+    def test_overshoot_after_the_first_death_stop_is_absorbed_or_refused(self):
+        # One kill in flight past the stop keeps the margin; two reach wave 2's trigger and are refused.
+        for downed in (0, 1):
+            for deaths, passes in ((WAVE1[1:2], True), (WAVE1[1:], True), (WAVE1[1:] + DEATHS2[:1], False)):
+                with self.subTest(downed=downed, deaths=len(deaths)):
+                    self.ctx.saved = {"deaths_before": 0}
+                    self.write("\n".join([HOST_RELEASE, WAVE1[0]] + deaths), FRIEND_RELEASE)
+                    save, check = self.before_down(downed)
+                    self.run_step(save)
+                    if passes:
+                        self.run_step(check)
+                    else:
+                        with self.assertRaises(RUN.StepFailed):
+                            self.run_step(check)
+
+    def test_the_lone_seat_is_protected_from_the_confirmed_downing_through_wave_two(self):
+        # VUH-2898 (host_down's friend) and VUH-2901 (friend_down's host, 063606): the seat left fighting
+        # alone is protected only between the confirmed episode and the end of the wave-2 fight; the
+        # downed seat's own end is still waited for and ordered afterwards.
+        self.ctx._stop.set()  # no background protector: nothing here may poke a game
+        for downed in (0, 1):
+            lone = 1 - downed
+            steps = self.steps(downed)
+            pilots = [s for s in steps if s["do"] == "pilot"]
+            self.assertEqual([s["instance"] for s in pilots], [0])  # the host walks to the hall
+            seen_check = next(k for k, s in enumerate(steps) if s.get("as") == "down_seen") + 1
+            on, wave2, off = steps[seen_check + 1:seen_check + 4]
+            self.assertEqual(wave2["as"], "wave2")
+            self.assertEqual(wave2["instances"], [lone])
+            self.assertEqual((on["do"], on["instance"], on.get("on", True)), ("protect", lone, True))
+            self.assertEqual((off["do"], off["instance"], off.get("on", True)), ("protect", lone, False))
+            self.assertEqual(on.get("afterPilot", False), lone == 0)  # only the host was piloted
+            self.assertEqual([k for k, s in enumerate(steps) if s["do"] == "protect"],
+                             [seen_check + 1, seen_check + 3])
+            ended = next(k for k, s in enumerate(steps) if s["do"] == "wait_until" and "['ended']" in s["expr"])
+            self.assertGreater(ended, seen_check + 3)
+            self.ctx.protect, self.ctx.after_pilot, self.ctx.piloted = set(), set(), {0}
+            self.run_step(on)
+            self.assertEqual(self.ctx.protect, {lone})
+            self.run_step(off)
+            self.assertEqual((self.ctx.protect, self.ctx.after_pilot), (set(), set()))
+
     def test_down_seen_rejects_the_trigger_before_the_downing(self):
         for downed in (0, 1):
             self.ctx.saved = {"deaths_before": 0}
