@@ -175,6 +175,7 @@ public:
             if (r.kind != SpawnEmissionKind::Controller && r.orbId && r.orbMatch) queue_.push_back(r);
     }
     // create(request) -> record (0: the allocator refused); vanish(request) -> ended.
+    // Callbacks must not mutate/reset this display. Refresh authority after Tick returns.
     template <class Create, class Vanish>
     void Tick(std::uintptr_t manager, Create&& create, Vanish&& vanish) {
         Observe(manager);

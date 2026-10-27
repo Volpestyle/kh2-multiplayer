@@ -7563,15 +7563,30 @@ void OrbTick() {
     if (!OrbClientFollow()) return;
     g_orbDisplay.Receive(g_emissionLedger.TakeOrbs());
     if (!g_orbDisplay.Queued()) return;
+    const auto generation = WorldSessionGeneration(), epoch = g_host.epoch;
+    const auto delivery = g_bridge.DeliverySerial();
+    const auto transition = warp::TransitionSerial(), load = warp::LoadSerial();
+    if (!generation) return;
     const auto before = g_orbDisplay.Stats();
-    g_orbDisplay.Tick(manager, &struggleorbs::CreateDisplay, [](const struggleorbs::VanishRequest& request) {
-        const auto epoch = g_host.epoch;
+    std::array<struggleorbs::VanishRequest, struggleorbs::ClientDisplay::kPerTick> applied{};
+    std::size_t appliedCount = 0;
+    g_orbDisplay.Tick(manager, &struggleorbs::CreateDisplay, [&](const struggleorbs::VanishRequest& request) {
         const bool ok = struggleorbs::StartFlight(request);
-        if (ok && g_log && g_host.epoch == epoch && OrbClientFollow())
-            g_log("[struggle-orbs] applied epoch=%u collect orb=%u collector=%u netId=%u ok=1", epoch, request.id,
-                  static_cast<unsigned>(request.collector), request.netId);
+        // Tick owns its queue/records until it returns. Copy only: an authority helper
+        // can retire the session and Reset this display while Tick is iterating it.
+        if (ok) applied[appliedCount++] = request; // at most kPerTick native calls
         return ok;
     });
+    // Refresh first (it may reset the display), then compare the captured scope. A
+    // generation change during ANY flight discards every receipt from this tick.
+    if (!OrbClientFollow() || WorldSessionGeneration() != generation || g_host.epoch != epoch ||
+        g_bridge.DeliverySerial() != delivery || warp::TransitionSerial() != transition ||
+        warp::LoadSerial() != load || struggleorbs::Manager() != manager) return;
+    if (g_log) for (std::size_t i = 0; i < appliedCount; ++i) {
+        const auto& request = applied[i];
+        g_log("[struggle-orbs] applied epoch=%u collect orb=%u collector=%u netId=%u ok=1", epoch, request.id,
+              static_cast<unsigned>(request.collector), request.netId);
+    }
     const auto& after = g_orbDisplay.Stats();
     if (g_log && g_orbLogs < 400 && (after.createFailed != before.createFailed || after.vanishFailed != before.vanishFailed ||
                                      after.created / 16 != before.created / 16 || after.vanished != before.vanished)) {

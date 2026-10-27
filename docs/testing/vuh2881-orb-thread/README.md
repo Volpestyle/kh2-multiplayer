@@ -133,6 +133,38 @@ are attached to [VUH-2881](https://linear.app/vuhlp/issue/VUH-2881); raw checks 
 gate snapshots are in this worktree's `.local/review-*` files. No native affinity,
 visual flight/fade or clone brush-past claim follows from these offline results.
 
+### Sorrel's application-retirement finding
+
+The first review delta called `OrbClientFollow()` from the successful-flight
+callback inside `ClientDisplay::Tick`. That helper can observe a new runtime
+generation and retire the session, clearing the very display queue that Tick
+is iterating. Tick would then erase an invalid range. Comparing the epoch
+before that helper did not prevent retirement or suppress an earlier stale
+receipt from the same tick.
+
+The callback now only invokes the native flight and copies successful requests
+into a stack array bounded by Tick's 64-call budget. After Tick returns,
+`OrbTick` refreshes authority, then compares the captured generation, epoch,
+delivery, transition/load and manager before emitting any application receipts
+or display summary. A retired scope discards the whole batch. The display's
+callback contract explicitly forbids reentrant mutation/reset.
+
+The owned-memory `NativeHitClaimTest` runs the actual EnemySync callback. It
+creates two display orbs, queues both collects, and advances the live writer's
+generation during the second successful native-flight leaf. A reset guard
+rejects retirement before Tick consumes the queue, stopping a regression before
+the invalid erase. The reviewed code fails that guard and leaks the first
+application receipt; the fix safely retires the display and emits neither old
+receipt. Stable successful flights emit both receipts; failed flights emit none.
+The writer remains live and the seat remains a client throughout the race.
+This is a controlled native-leaf schedule, not a live game reproduction.
+
+Fresh serial/background Release and **CTest 280/280** passed in **274.41 s**,
+including all **44 Python files**. The focused production native harness passed
+**1,406 checks**. Red/green logs and gate snapshots remain in `.local/p1-*`;
+the portable receipt is attached to VUH-2881. Scenario/runner files are unchanged,
+so the prior 118/122 validation (four known baseline failures) is reused.
+
 ## Original candidate verification (historical)
 
 - `kh2coop_struggle_orbs_test`: adapter controls and three real producer threads

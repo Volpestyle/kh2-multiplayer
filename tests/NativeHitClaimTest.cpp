@@ -242,15 +242,26 @@ bool TakeStageEnd(StageEnd&) noexcept { return false; }
 bool ReplayStageEnd(const StageEnd&) noexcept { return false; }
 void ApplyStageEnd() noexcept {}
 }
-// VUH-2466: no orb manager in these harnesses (StruggleOrbsTest has the orb rules).
+// Owned native leaves; OrbTick and its display/application callbacks remain production.
 namespace kh2coop::inject::struggleorbs {
 void Pump(const Scope&) {}
-void ResetContext() {}
+void (*g_testOnReset)() = nullptr;
+void ResetContext() { if (g_testOnReset) g_testOnReset(); }
 
 std::uintptr_t g_testManager = 0;  // the orb manager the production OrbTick observes
+std::uintptr_t g_testDisplayRecord = 0;
+bool g_testFlightSuccess = false;
+unsigned g_testFlightCalls = 0;
+void (*g_testOnFlight)() = nullptr;
 std::uintptr_t Manager() { return g_testManager; }
-std::uintptr_t CreateDisplay(const CreateRequest&) { return 0; }
-bool StartFlight(const VanishRequest&) { return false; }
+std::uintptr_t CreateDisplay(const CreateRequest& request) {
+    return g_testDisplayRecord ? g_testDisplayRecord + request.id * 0x100 : 0;
+}
+bool StartFlight(const VanishRequest&) {
+    ++g_testFlightCalls;
+    if (g_testOnFlight) g_testOnFlight();
+    return g_testFlightSuccess;
+}
 }
 namespace kh2coop::inject::lifecycletrace {
 bool PopEvent(Event&) { return false; }
@@ -3458,6 +3469,67 @@ void TestStruggleOrbRows() {
     ResetSpawnEmissions();
 }
 
+// VUH-2881 / Sorrel P1: a live writer changes generation during successful native flight.
+// Exercise the actual EnemySync callback, including its authority retirement and logger.
+void TestOrbApplicationRetirement() {
+    namespace so = kh2coop::inject::struggleorbs;
+    for (unsigned mode = 0; mode < 3; ++mode) {
+        Reset(true); ResetSpawnEmissions();
+        g_lastRoomPacket = arrivalTarget;
+        so::g_testManager = 0xA000; so::g_testDisplayRecord = 0xB000;
+        so::g_testFlightSuccess = mode != 1; so::g_testFlightCalls = 0;
+        g_log = BaileyEndLog; baileyEndLogs.clear();
+        SpawnEmission birth{};
+        birth.kind = SpawnEmissionKind::OrbBirth; birth.orbMatch = 1; birth.orbId = 1;
+        auto second = birth; second.orbId = 2;
+        g_orbDisplay.Receive({birth, second}); OrbTick();
+        Check(g_orbDisplay.Shown() == 2 && g_orbDisplay.Queued() == 0,
+              "production OrbTick creates both owned display records before collection");
+        auto collect = birth; collect.kind = SpawnEmissionKind::OrbCollect; collect.collector = OrbCollector::Friend;
+        auto collectSecond = collect; collectSecond.orbId = 2;
+        g_orbDisplay.Receive({collect, collectSecond});
+        const auto before = g_orbDisplay.Stats();
+        if (mode == 2) {
+            so::g_testOnFlight = +[] {
+                if (so::g_testFlightCalls == 2) ++g_bridge.generation;
+            };
+            so::g_testOnReset = +[] {
+                // Stop a regressed implementation before its invalid vector erase runs.
+                // At the safe retirement boundary Tick consumed both rows and counted both flights.
+                if (g_orbDisplay.Queued() != 0 || g_orbDisplay.Shown() != 0)
+                    throw std::runtime_error("orb authority retirement re-entered an active display tick");
+            };
+        }
+        bool reentered = false;
+        try { OrbTick(); } catch (const std::runtime_error&) { reentered = true; }
+        so::g_testOnFlight = nullptr; so::g_testOnReset = nullptr;
+        Check(!reentered, "generation retirement occurs after the production display tick consumes its queue");
+        const auto applied = static_cast<unsigned>(std::count_if(baileyEndLogs.begin(), baileyEndLogs.end(), [](const auto& line) {
+            return line.find("[struggle-orbs] applied epoch=9 collect orb=") != std::string::npos;
+        }));
+        Check(so::g_testFlightCalls == 2, "production application callback reaches both native flight leaves");
+        if (mode == 0) {
+            Check(applied == 2 && g_orbDisplay.Stats().vanished == before.vanished + 2 &&
+                  g_orbDisplay.Queued() == 0 && g_orbDisplay.Shown() == 0,
+                  "stable successful flights emit both copied application receipts after Tick");
+        } else if (mode == 1) {
+            Check(applied == 0 && g_orbDisplay.Stats().vanishFailed == before.vanishFailed + 2 &&
+                  g_orbDisplay.Queued() == 0, "failed native flights emit no successful application receipt");
+        } else {
+            Check(applied == 0 && g_bridge.generation == 2 && g_activationGeneration == 2 &&
+                  g_activationOrderedGeneration == 0 && g_orderedDeliverySerial == 0 &&
+                  !g_host.epoch && !g_lastRoomPacket && g_orbDisplay.Queued() == 0 && g_orbDisplay.Shown() == 0 &&
+                  g_orbDisplay.Stats().reset == before.reset + 1 &&
+                  g_orbDisplay.Stats().vanished == before.vanished + 2,
+                  "successful-flight generation change safely retires display and discards ALL old application receipts");
+            Check(CurrentRole() == Role::Client && g_bridge.RuntimeWriter().pid == 123,
+                  "generation race keeps the writer live and the seat a client");
+        }
+        so::g_testManager = so::g_testDisplayRecord = 0; so::g_testFlightSuccess = false;
+        g_log = nullptr; ResetSpawnEmissions();
+    }
+}
+
 // VUH-2640 Leg A: the boss sit-out through the actual native host capture, friend admission, arena load,
 // two-frame convergence and result. The arena tuple, Thorn's object and mission are the reviewed row's.
 void ArenaWorld() {
@@ -4447,6 +4519,7 @@ int main(int argc,char** argv) try {
     TestMoraleBirthLifetime();
     TestScriptChildOwnerTransitions();
     TestStruggleOrbRows();
+    TestOrbApplicationRetirement();
     TestFieldCatalogTrace();
     TestThornRetainedEnd();
     TestBossSitOutNative(); // last: enables event control and leaves this process's mapping expired
