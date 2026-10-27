@@ -1,8 +1,70 @@
 # VUH-2881: Struggle orb worker receipts
 
-Source candidate; live acceptance remains with the lead. No game, desk, live,
-Steam/install or save action is part of this work.
-The review delta is based on main `aa0d64c` (VUH-2898's arrival wait).
+Landed on main at `4194ea7ca72d99ece361690acfe1e0d18a6f9ba8`, after Sorrel's
+exact-source approval. The single authorized PC1 Struggle qualification passed;
+the deliberate clone brush-past question remains open for the lead.
+The reviewed source is based on main `aa0d64c` (VUH-2898's arrival wait).
+
+## Live qualification: 2026-10-27
+
+Run `20261027-001127_net_prologue_struggle_orbs_1` passed all tightened predicates
+in **213.5 s**, from a clean serial Release build of main `4194ea7c`.
+Host `46464` booked **231 births and 215 collections**; all 215 received
+`(epoch, sequence, orb)` identities match the sent set. The friend logged **209
+successful native applications**, including **all 131 clone-owned collections**.
+Friend local suppression was nonzero: **30 drops / 24,101 picks**. Both seats
+reported zero overflow. Six wire collections lack flight receipts; same-batch
+birth/collect elision is consistent with that difference, but no per-ID elision
+receipt proves the accounting. The budget-capped display summaries are not final
+created/vanished totals.
+
+Actual per-site observations (last periodic counters; TID-change tracing is
+bounded, so worker lists are not complete lifetime thread censuses):
+
+| Site | Host | Friend |
+|---|---|---|
+| `NoteGameThread` | TID 233844; 6,600 entries, no foreign entries | TID 97996; 3,600 entries, no foreign entries |
+| `create` | 231 entries on 233844 | Unexercised; display uses the original native trampoline |
+| `init` | 231 entries on 233844 | 225 entries on 97996 |
+| `hit-drop` | 33 entries on 233844 | 30 entries on 97996 |
+| `drop`, `pick-b` | Unexercised | Unexercised |
+| `pick-a` | 29,035 entries, all foreign | 28,522 entries, all foreign |
+| `fly` | 215 entries, all foreign | 5 entries, all foreign, after mission-failure replay |
+
+Observed host pickup/flight worker TIDs: 95376, 127152, 132620, 186584, 205280,
+228676. Friend pickup workers: 47872, 137320, 189488, 195388, 218632, 248336;
+the five native flight entries used the first, second, fourth and fifth of those.
+The 209 mirrored display applications call the original flight trampoline,
+so they do not enter that detour. Thus **host `offThread=29250` and friend
+`offThread=28527` are expected observations**, exactly their foreign pickup plus
+flight entry counts. The exercised creation/drop hooks ran on the frame thread.
+
+[Reviewed six-second paired clip](https://uploads.linear.app/75f1d1f0-542b-4095-9967-fd7b27093472/f316165d-bff1-49d3-bf42-f351390b0be2/ad6b65e2-c5c5-4e3d-aa48-7bbad0d892a3):
+host left, friend right, showing orb motion during combat. This cuts seconds
+12–18 from each native capture and normalizes to 30 fps; independent game clocks
+are not synchronized. All 179 published frames were reviewed; the excerpt passes
+strict decoding. The retained full friend recording has a decoded-frame fault
+outside the published excerpt. The logs establish successful correlated calls;
+the clip does not establish an isolated clone brush-past miss rate.
+
+The match reached **host native failure** (`flags=15 result=2`); the friend replayed
+one `client fail ... ok=1`. No host end-trap line was logged, so this evidence
+does not claim a victory or native MissionEnd trap. The fixture permits failure.
+
+**Safety closure passed:** 541 install files and metadata unchanged; four protected
+saves backed up read-only and unchanged; 35 pre-existing main-checkout foreign
+files and pinned products unchanged; owned games/build processes gone and relay
+port free. Admission had 19,229 seconds physical idle, no HOLD and 27.3 GiB free.
+Two harmless pre-launch wrapper refusals and their closure proofs remain retained;
+the actual third job launched the scenario once. No Thorn run occurred.
+
+[Portable report, raw logs, collection identities and safety receipts](https://uploads.linear.app/75f1d1f0-542b-4095-9967-fd7b27093472/47b2b9fb-f7d9-424d-94d1-a976f0470c7f/d6fb902b-7197-4e28-98ee-2ddb36425c58)
+and the clip are attached to VUH-2881 and downloaded back byte-for-byte. The
+archive excludes actual save backups. Originals remain in this worktree's run
+directory; `.local/live-vuh2881/portable/result.json` records extraction and limits.
+The evidence-store CLI is unavailable in this seat, so the Linear archive is the
+portable record. Closure stays with the lead: clone collections work, but no
+deliberate isolated brush-past opportunity was measured for VUH-2865 question 1.
 
 ## What the historical run proves
 
@@ -213,9 +275,7 @@ record.
 
 ## Remaining qualification
 
-Independent inject review, then the lead's `net_prologue_struggle_orbs` rerun.
-The new per-site TID lines must name actual native hook threads, nonzero host
-collects must reach the friend as flights/fades, and the clone's brush-past
-question must be observed. Offline synthetic threads prove that the wrappers
-handle foreign callers, not which KH2 scheduler thread will enter them live.
-Saves must remain unchanged; no live acceptance or Thorn victory is claimed.
+Independent source review, landing and the single live Struggle scenario are
+complete. The clone's brush-past miss rate remains unmeasured; the lead decides
+whether to carry that observation in VUH-2865 or require another dedicated run.
+No additional live run is authorized by this result.
