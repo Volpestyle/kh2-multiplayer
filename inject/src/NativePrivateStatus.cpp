@@ -232,6 +232,14 @@ bool PartyProfile(Stamp& s) {
 std::atomic<bool> g_missingKits{};
 bool MissingKitScope() {std::uint8_t world=0xFF;return g_missingKits.load() && Read(g_base+0x717008,world) && world==2;}
 bool RoxasAllowed() {return playerkit::RemoteKitMemberActive() || partynative::KitsActive() || MissingKitScope();}
+// VUH-2911: the checked encounter site (Axel II) whose missing-party construction admitted its body. Its
+// encounter-only descriptor (dual-wield Roxas 0x323) counts only while NOW is still exactly that site; any
+// other load (the native Continue to 02/15 d99) ends it, so no other room or global gate ever admits it.
+std::atomic<const routespawn::MissingPartySite*> g_encounterSite{};
+bool EncounterScope() {
+    const auto* site=g_encounterSite.load(std::memory_order_acquire);std::array<std::uint8_t,10> now{};
+    return site && MissingKitScope() && Read(g_base+0x717008,now) && now==site->location;
+}
 int KeyForKit(std::uint16_t kit) {return kh2coop::kitStatusKey(kit);} // the reviewed kit table
 // Party kits: the clones' key multiset equals the keys of the kits the observer wrote.
 bool PartyKeysMatch(const std::array<int,2>& keys,unsigned count) {
@@ -242,9 +250,10 @@ bool PartyKeysMatch(const std::array<int,2>& keys,unsigned count) {
     return count==2 && a && b && ((keys[0]==a && keys[1]==b) || (keys[0]==b && keys[1]==a));
 }
 int CloneDescriptorKey(uintptr_t p) {
-    std::uint32_t id=0;std::uint16_t key=0;std::uint8_t type=255;std::int8_t form=-1;std::array<char,8> name{};
+    // VUH-2911: 16 of the objentry's 32 model-name bytes, so P_EX110_BTLF (13 with its NUL) compares in full.
+    std::uint32_t id=0;std::uint16_t key=0;std::uint8_t type=255;std::int8_t form=-1;std::array<char,16> name{};
     if(!lifetime::DescriptorInImage(g_base,p) || !Read(p,id) || !Read(p+4,type) || !Read(p+0x4C,key) || !Read(p+0x57,form) || type!=0 || !Read(p+8,name))return 0; // form: per kit row (the table)
-    return kh2coop::kitDescriptorKey(id,type,key,form,name.data(),name.size(),RoxasAllowed()); // the reviewed kit table
+    return kh2coop::kitDescriptorKey(id,type,key,form,name.data(),name.size(),RoxasAllowed(),EncounterScope()); // the reviewed kit table
 }
 bool SoraDescriptor(uintptr_t p) {return CloneDescriptorKey(p)==1;}
 // The constructor's form argument is the descriptor's +0x57 byte (3DF930 case 0 and its raw566 path
@@ -382,8 +391,11 @@ uintptr_t __fastcall Factory(std::uint32_t id,const float* point,float yaw) {
         g_party={};if(unbound)BindFault(canonical?15:11);
     }
     // VUH-2464: a missing-party scope selects exactly its own direct clone object (Sora 84, or the
-    // prologue's remote profile); any other construction inside it stays ordinary.
-    auto* enclosing=ordinary && id<=0xFFFF && kh2coop::qualifiedKit(static_cast<std::uint16_t>(id)) ? Current(anchor) : nullptr;
+    // prologue's remote profile); any other construction inside it stays ordinary. VUH-2911: an encounter
+    // body only inside its own site's scope.
+    const bool body=id<=0xFFFF && (kh2coop::qualifiedKit(static_cast<std::uint16_t>(id)) ||
+        (kh2coop::encounterKit(static_cast<std::uint16_t>(id)) && EncounterScope()));
+    auto* enclosing=ordinary && body ? Current(anchor) : nullptr;
     if(enclosing && enclosing->missingSlot && g_missing[enclosing->missingSlot-1].cloneObject!=id)enclosing=nullptr;
     if(enclosing && enclosing->missingSlot) {
         if(enclosing->factoryId!=0 || !enclosing->selected || enclosing->constructor || enclosing->used ||
@@ -781,7 +793,9 @@ void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper 
     if(!spawn){Fault();SetLastError(error);return nullptr;}
     Stamp stamp{},entrance{}; ProducerWorldContext context{};
     std::array<std::uint8_t,64> original{};
-    const int cloneKey=KeyForKit(cloneObject),localKey=site.localKey;
+    // VUH-2911: at an encounter site the clone may be its encounter body (the local's key is the caller's).
+    const bool encounterClone=site.prologue && site.encounterBody && cloneObject==site.encounterBody;
+    const int cloneKey=kh2coop::bodyStatusKey(cloneObject,encounterClone),localKey=site.localKey;
     const bool kitsAdmitted=cloneObject==84 || (site.prologue && cloneKey);
     const bool admitted=spawn && g_bcAutomatic && g_ready.load() && playerkit::MissingPartyReady() && kitsAdmitted &&
         StampNow(stamp) && stamp.now==site.location && stamp.load && stamp.load!=UINT32_MAX &&
@@ -799,6 +813,8 @@ void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper 
     missing.record=original;
     missing.cloneObject=cloneObject;missing.cloneKey=cloneKey;missing.localKey=localKey;
     if(site.prologue)g_missingKits=true; // before construction: the Roxas descriptors become selectable in TT
+    // VUH-2911: before construction too: the encounter body (clone, local or both) is selectable at this NOW only.
+    if(site.prologue && site.encounterBody)g_encounterSite.store(&site,std::memory_order_release);
     const std::uint32_t direct=cloneObject;std::memcpy(missing.record.data(),&direct,sizeof(direct));
     Selection selection{};selection.selected=true;selection.stamp=stamp;
     selection.serial=g_serial.fetch_add(1)+1;selection.missingSlot=g_missingBudget.count;missing.serial=selection.serial;
@@ -885,6 +901,7 @@ static bool PuppetVerdict(uintptr_t actor,bool& decided) {
 }
 bool MissingPartyPuppetAllowed(uintptr_t actor) {bool decided=false;return PuppetVerdict(actor,decided);}
 bool MissingPartyKitScope(){return MissingKitScope();}
+bool MissingPartyEncounterScope(){return EncounterScope();}
 bool MissingPartyClone(uintptr_t actor) {
     if(!actor)return false;
     for(unsigned i=g_missingBudget.count;i>0;--i)

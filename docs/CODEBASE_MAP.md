@@ -63,7 +63,7 @@ Loaded into the KH2 process by `kh2ctl launch`/`inject` (Cheat Engine is a fallb
 | `src/PrologueParty.cpp`, `src/PrologueParty.hpp` | Profile/readiness exchange, checked prologue party sites, owner-seat identity and vitals publication; see [party setup](PARTY_SETUP.md) |
 | `src/CloneNeutralInput.inl` (command hook) | Prevents extra player-class actors from consuming the local command menu twice; [native guest Magic](NATIVE_GUEST_MAGIC.md) |
 | `src/Warp.cpp` | Room warp requests via the game's transition function |
-| `src/CombatAdmission.hpp`, `src/CombatAdmissionNative.hpp` | VUH-2897: Axel I combat-admission barrier. The host defers its intro's group 0/1 releases (3BF2E0), freezes BOSS/ZAKO, and releases on friends' challenge ACKs or a 15 s failed-barrier fallback; re-arms on the route back after a game over (VUH-2906); owns the 3BF2E0 detour (`docs/testing/vuh2897-axel-arrival/BARRIER.md`) |
+| `src/CombatAdmission.hpp`, `src/CombatAdmissionNative.hpp` | VUH-2897: Axel II combat-admission barrier. The host defers its intro's group 0/1 releases (3BF2E0), freezes BOSS/ZAKO, and releases on friends' challenge ACKs or a 15 s failed-barrier fallback; re-arms on the route back after a game over (VUH-2906); owns the 3BF2E0 detour (`docs/testing/vuh2897-axel-arrival/BARRIER.md`) |
 | `src/PlayerKit.cpp` | VUH-1513 default-off (`KH2COOP_PLAYER_KIT=0x5A`) player kit: legacy standalone kit path through MEMT resolver `3E2EB0`; current prologue selection uses PrologueParty/PrologueSeats separately (docs/PLAYER_KITS.md) |
 | `src/SaveGuard.cpp` | Redirects write opens under the KH2 save folder to a sandbox, denies deletes/moves/copies (installed first at init) |
 | `src/CrashDump.cpp` | Minidump on unhandled exceptions, chained ahead of the game's filter |

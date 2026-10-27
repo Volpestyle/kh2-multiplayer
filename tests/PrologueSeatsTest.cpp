@@ -4,6 +4,7 @@
 #include "kh2coop/NetworkClient.hpp"
 #include "kh2coop/BlockedExitPolicy.hpp"
 #include "kh2coop/EventScenes.hpp"
+#include "kh2coop/PartyLayout.hpp"
 #include "kh2coop/PrologueSeats.hpp"
 #include "kh2coop/RouteSpawnPolicy.hpp"
 #include "kh2coop/SessionHost.hpp"
@@ -448,7 +449,8 @@ void site() {
           MissingPartySiteAt(BasementHall134Location) != hall2,
           "the Basement Hall after the post-Axel chain (door 50, evt2) is a checked prologue site (VUH-2572)");
     check(MissingPartyAbort(0x3A7B1B, 1, 0) && MissingPartyAbort(0x3A7B1B, 14, 0) && !MissingPartyAbort(0x3A7B1B, 4, 11) &&
-          !MissingPartyAbort(0x3A7B1C, 14, 0), "the fatal base-allocation contract covers Sora and Roxas form0 only");
+          !MissingPartyAbort(0x3A7B1C, 14, 0) && MissingPartyAbort(0x3A7B1B, 14, 10) && !MissingPartyAbort(0x3A7B1B, 1, 10),
+          "the fatal base-allocation contract covers Sora form0 and Roxas form0/10 (dual-wield) only");
     check(prologue::ProfileQualified(0x5A) && prologue::ProfileQualified(0x54) && !prologue::ProfileQualified(0x5B) &&
           !prologue::ProfileQualified(0x323) && !prologue::ProfileQualified(0x1234),
           "VUH-1512: Roxas and Sora are admitted to the prologue layout, nothing else");
@@ -456,6 +458,68 @@ void site() {
           prologue::ProfileRefusal(0x323) && prologue::ProfileRefusal(0x1234), "every refused profile has a reason");
     check(std::string_view(prologue::HoldName(prologue::Hold::Unpinned)) == "unpinned-field" &&
           std::string_view(prologue::HoldName(prologue::Hold::RemoteUnbound)) == "remote-unbound", "every hold has its logged reason");
+}
+
+// VUH-2911: Axel II (02/14 btl137) is a checked site whose native member 0 is dual-wield Roxas 0x323. The row stays
+// unqualified: only that site's encounter scope admits it, for default-Roxas seats; Sora keeps Sora.
+void encounter() {
+    using namespace routespawn;
+    const auto* axel = MissingPartySiteFor(BasementHall137Location, 808738658, 0x3FF727, BasementHall137Header,
+                                           BasementHall137Records);
+    check(axel && axel->prologue && axel->encounterBody == 0x323 && axel->localObject == 90 && axel->localKey == 14 &&
+          std::string_view(axel->name) == "tt20-137" && BasementHall137Records.size() == 4 * 64 && BasementHall137Header[2] == 67 &&
+          BasementHall137Header[4] == 4 && MissingPartySiteAt(BasementHall137Location) == axel,
+          "Axel II evt137 (headerId 67, four records) is a checked prologue site with the encounter body 0x323");
+    check(SitePlayerRecordAt(*axel, 0) && !SitePlayerRecordAt(*axel, 1) && !SitePlayerRecordAt(*axel, 3) &&
+          BasementHall137Records[3 * 64] == 0x51, "its raw566 is record 0; record 3 is Axel (B_EX110 81), never a clone template");
+    bool bits = true;
+    for (std::size_t i = 0; i < BasementHall137Records.size(); ++i) {
+        auto r = BasementHall137Records; r[i] ^= 1;
+        bits = bits && !MissingPartySiteFor(BasementHall137Location, 808738658, 0x3FF727, BasementHall137Header, r);
+    }
+    for (std::size_t i = 0; i < BasementHall137Header.size(); ++i) {
+        auto h = BasementHall137Header; h[i] ^= 1;
+        bits = bits && !MissingPartySiteFor(BasementHall137Location, 808738658, 0x3FF727, h, BasementHall137Records);
+    }
+    check(bits && !MissingPartySiteFor(BasementHall137Location, 808738659, 0x3FF727, BasementHall137Header, BasementHall137Records) &&
+          !MissingPartySiteFor(BasementHall134Location, 808738658, 0x3FF727, BasementHall137Header, BasementHall137Records),
+          "every changed Axel II header or record bit, package or room refuses its site");
+    unsigned encounters = 0;
+    for (const auto& s : MissingPartySites) encounters += s.encounterBody != 0;
+    check(encounters == 1, "Axel II is the only site with an encounter body; every other site builds the selected profile");
+    check(EncounterSiteAt(BasementHall137Location, 0x323) == axel && !EncounterSiteAt(BasementHall137Location, 0x5A) &&
+          !EncounterSiteAt(BasementHall137Location, 0) && !EncounterSiteAt(BasementHall134Location, 0x323) &&
+          !EncounterSiteAt({2, 0x15, 99, 0, 2, 0, 0, 0, 0, 0}, 0x323) && !EncounterSiteAt({2, 0x14, 0, 0, 0x89, 0, 0x89, 0, 0x8A, 0}, 0x323),
+          "the encounter scope is that exact NOW only: not the Hall, the Computer Room after Continue, or another program");
+    check(prologue::SiteBody(0x5A, 0x323) == 0x323 && prologue::SiteBody(0x54, 0x323) == 0x54 && prologue::SiteBody(0x5A, 0) == 0x5A &&
+          prologue::SiteBody(0x54, 0) == 0x54 && prologue::NativeSiteBody(0x323) == 0x323 && prologue::NativeSiteBody(0) == 0x5A,
+          "a default Roxas takes the encounter body there, Sora keeps Sora, and other sites keep the selection");
+    // Mixed seats at Axel II: each seat's own body and its clone of the other seat.
+    check(prologue::SiteBody(0x5A, axel->encounterBody) == 0x323 && prologue::SiteBody(0x54, axel->encounterBody) == 0x54,
+          "Roxas + Sora: the Roxas seat's local and its clone on the Sora seat are 0x323; the Sora seat stays 0x54 on both");
+    // The kit table: 0x323 is never qualified, and its encounter admission needs the scope, its form, key and full name.
+    check(!qualifiedKit(0x323) && !kitStatusKey(0x323) && !qualifiedKitByRoster(2) && !soloQualifiedKit(0x323) &&
+          !partyKitAllowed(0x323) && !prologue::ProfileQualified(0x323), "no global gate admits 0x323");
+    const auto* btlf = encounterKit(0x323);
+    check(btlf && btlf->form == 10 && btlf->statusKey == 14 && btlf->neoMoveset == 10 && std::string_view(btlf->name) == "P_EX110_BTLF" &&
+          !encounterKit(0x5A) && !encounterKit(0x54) && !encounterKit(0x5B), "only dual-wield Roxas is an encounter row");
+    check(!bodyKit(0x323, false) && bodyKit(0x323, true) == btlf && bodyKit(0x5A, false) == qualifiedKit(0x5A) &&
+          bodyStatusKey(0x323, false) == 0 && bodyStatusKey(0x323, true) == 14 && !bodyKit(0x5B5B, true),
+          "a body resolves to an encounter row only while its scope admits it");
+    const char btlfName[16] = "P_EX110_BTLF";
+    check(kitDescriptorKey(0x323, 0, 14, 10, btlfName, sizeof(btlfName), true, true) == 14, "admitted: scope, form 10, key 14, full name");
+    check(!kitDescriptorKey(0x323, 0, 14, 10, btlfName, sizeof(btlfName), true, false) &&
+          !kitDescriptorKey(0x323, 0, 14, 10, btlfName, sizeof(btlfName), false, true) &&
+          !kitDescriptorKey(0x323, 0, 14, 0, btlfName, sizeof(btlfName), true, true) &&
+          !kitDescriptorKey(0x323, 0, 1, 10, btlfName, sizeof(btlfName), true, true) &&
+          !kitDescriptorKey(0x323, 1, 14, 10, btlfName, sizeof(btlfName), true, true) &&
+          !kitDescriptorKey(0x323, 0, 14, 10, btlfName, 8, true, true) &&
+          !kitDescriptorKey(0x323, 0, 14, 10, "P_EX110", 8, true, true),
+          "refused without the scope or the TT kit scope, with another form, key or type, or with the name cut at 8 bytes");
+    check(kitDescriptorKey(0x5A, 0, 14, 0, "P_EX110", 8, true, true) == 14 && kitDescriptorKey(0x54, 0, 1, 0, "P_EX100", 8, false, true) == 1,
+          "the scope changes nothing for the qualified rows");
+    check(kitNeutralDescriptor(0x323, 0, btlfName, 32, true, true) && !kitNeutralDescriptor(0x323, 0, btlfName, 32, true, false) &&
+          !kitNeutralDescriptor(0x323, 0, btlfName, 8, true, true), "neutral input admits the dual-wield clone only in scope, by its full name");
 }
 
 void network() {
@@ -585,4 +649,4 @@ void playedHere() {
               prologue::PlayedHereRelease(true, false, Hold::None) == P::Keep,
           "a lost binding releases nothing else");
 }
-int main() { if (enet_initialize()) return 2; codec(); unpinned(); soloWait(); blockedExit(); policy(); site(); playedHere(); network(); enet_deinitialize(); std::cout << "failures=" << failures << '\n'; return failures ? 1 : 0; }
+int main() { if (enet_initialize()) return 2; codec(); unpinned(); soloWait(); blockedExit(); policy(); site(); encounter(); playedHere(); network(); enet_deinitialize(); std::cout << "failures=" << failures << '\n'; return failures ? 1 : 0; }

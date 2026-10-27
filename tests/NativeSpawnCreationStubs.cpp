@@ -19,8 +19,8 @@ void* SpawnMissingParty(const void*,void*,NativeWrapper,LogFn,const routespawn::
 }
 // VUH-2464: no prologue seats headless; a prologue site refuses before any creation.
 namespace kh2coop::inject::prologueparty {
-bool CloneProfile(std::uint16_t& object, const char*& reason) { object = 0; reason = "headless"; return false; }
-bool LocalBody(std::uint16_t& object, std::uint16_t& statusKey) { object = 0; statusKey = 0; return false; }
+bool CloneProfile(std::uint16_t, std::uint16_t& object, const char*& reason) { object = 0; reason = "headless"; return false; }
+bool LocalBody(std::uint16_t, std::uint16_t& object, std::uint16_t& statusKey) { object = 0; statusKey = 0; return false; }
 void ColorDuplicate(std::uintptr_t, std::uint16_t, std::uint16_t) {}
 bool ProfilesSettled(std::uint32_t) { return true; }
 bool PrologueScope() { return false; }

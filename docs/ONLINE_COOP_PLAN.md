@@ -317,7 +317,8 @@ is the Day 5 Sandlot skirmish (02/05 btl87) and Axel II is the Mansion fight
 (02/14 btl137). VUH-2910's shared-HP scenario and ledger are in
 `docs/PROLOGUE_ENCOUNTERS.md` (Day 5 Sandlot).
 
-Day 6 must qualify `P_EX110_BTLF` for local and remote construction, weapons,
+Day 6 must qualify `P_EX110_BTLF` (VUH-2911: checked site `tt20-137` builds it for both
+default Roxases, local and clone, under an encounter-only scope; `ROXAS_DUAL_WIELD_FORM.md`) for local and remote construction, weapons,
 status, attack and downed poses (`docs/ROXAS_DUAL_WIELD_FORM.md`). Give both default
 Roxases the scripted dual-wield opportunity; it is not a permanent form unlock.
 Mixed selections keep their gameplay kit except for an explicit mandatory

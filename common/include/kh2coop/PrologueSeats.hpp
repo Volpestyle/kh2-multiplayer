@@ -33,6 +33,15 @@ inline const char* ProfileRefusal(std::uint16_t profile) {
     }
     return "not a playable profile of this build (Donald/Goofy: VUH-1514, Riku: VUH-1513)";
 }
+// VUH-2911: the body an agreed profile builds at a checked site. A site with a scripted encounter body (Axel II's
+// dual-wield Roxas 0x323, RouteSpawnPolicy encounterBody) gives it to every default-Roxas seat, its local and its
+// clone alike; another admitted profile (Sora) keeps its own body there. The selection itself never changes, so the
+// next site builds the selected profile again.
+inline std::uint16_t SiteBody(std::uint16_t profile, std::uint16_t encounterBody) {
+    return encounterBody && profile == DEFAULT_PROFILE ? encounterBody : profile;
+}
+// The story body the game resolves as member 0 at that site: the encounter body, else the prologue's Roxas.
+inline std::uint16_t NativeSiteBody(std::uint16_t encounterBody) { return encounterBody ? encounterBody : DEFAULT_PROFILE; }
 // The refused character as the on-screen note names it.
 inline const char* ProfileDisplayName(std::uint16_t profile) {
     switch (profile) {

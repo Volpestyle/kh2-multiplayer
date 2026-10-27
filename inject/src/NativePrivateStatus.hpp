@@ -111,6 +111,9 @@ bool MissingPartyPuppetAllowed(std::uintptr_t actor);
 // VUH-2464: a prologue site admitted a non-Sora clone this process and NOW is in TT: qualified kit
 // descriptors (Roxas) count as clones for neutral input and private status there.
 bool MissingPartyKitScope();
+// VUH-2911: an encounter site (Axel II) admitted its encounter body and NOW is still exactly that site:
+// its encounter-only descriptor (dual-wield Roxas 0x323) counts like a qualified kit there, nowhere else.
+bool MissingPartyEncounterScope();
 // VUH-2464: `actor` is a bound missing-party clone that is still current (MissingPartyPuppetAllowed
 // for a known entry). Unknown actors are false here, unlike MissingPartyPuppetAllowed.
 bool MissingPartyClone(std::uintptr_t actor);

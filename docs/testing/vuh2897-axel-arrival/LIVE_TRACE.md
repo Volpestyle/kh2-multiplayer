@@ -208,10 +208,10 @@ build, with the trace flag on both seats. Judge from the raw `[combat-admission]
    hold it there.
 5. **Saves.** Saves and install are unchanged (the standard closure).
 6. **No event wait.** No `release-waiting-event` or `release-via` row is expected in
-   Axel I. If one appears, record the event context and
+   Axel II. If one appears, record the event context and
    the time until `admission-release`.
 
-7. **Route back after a game over (VUH-2906).** Game over in Axel I, then Continue. The
+7. **Route back after a game over (VUH-2906).** Game over in Axel II, then Continue. The
    host logs `continue-retry … to=02/15 door=99 map=2 btl=0 evt=0 … armed=0` (live on
    `4edbff6`). Walk the corridor back to Axel. The `02/13 btl134` request arms a second
    `deferred group=0` under a new incarnation and challenge. Both seats arrive before the

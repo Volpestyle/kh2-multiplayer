@@ -28,14 +28,17 @@ struct KitProfile {
     bool playerClass;         // PLAYER-type row: may be a clone or a local
     bool qualified;           // admitted by every gate; flipped only with its own live fixture
     bool soloQualified;       // also the solo KH2COOP_PLAYER_KIT path (no party kits); its own solo run
+    bool encounter;           // VUH-2911: never qualified; admitted only inside a checked encounter site's own scope
 };
 
 inline constexpr std::uint16_t KIT_SORA = 0x54;
 inline constexpr KitProfile kKits[] = {
-    {0x54, 0, "P_EX100", 1, 1, 0, true, true, true},             // Sora: VUH-1519/1786 live
-    {0x5A, 1, "P_EX110", 14, 9, 0, true, true, true},            // Roxas: solo 20261006-233415, party kits 20261007-090953
-    {0x323, 2, "P_EX110_BTLF", 14, 10, 10, true, false, false},  // Roxas dual-wield: form machinery (VUH-1509) first
-    {0x5B, 3, "P_EX200", 4, 28, 11, true, true, false},          // Mickey: party kits fixture-03 PASS (20261007-115923); no solo run
+    {0x54, 0, "P_EX100", 1, 1, 0, true, true, true, false},             // Sora: VUH-1519/1786 live
+    {0x5A, 1, "P_EX110", 14, 9, 0, true, true, true, false},            // Roxas: solo 20261006-233415, party kits 20261007-090953
+    // Roxas dual-wield: the native Axel II body (02/14 btl137, VUH-2911). Never a selectable kit or free form
+    // (VUH-1509); only that site's encounter scope admits it (RouteSpawnPolicy encounterBody).
+    {0x323, 2, "P_EX110_BTLF", 14, 10, 10, true, false, false, true},
+    {0x5B, 3, "P_EX200", 4, 28, 11, true, true, false, false},          // Mickey: party kits fixture-03 PASS (20261007-115923); no solo run
 };
 
 // The party plan packs a roster code into 3 bits with 7 reserved for "invalid" (PartyNative KIT_CODE_INVALID):
@@ -52,6 +55,21 @@ inline const KitProfile* qualifiedKit(std::uint16_t member) {
 inline const KitProfile* soloQualifiedKit(std::uint16_t member) {
     const auto* k = qualifiedKit(member);
     return k && k->soloQualified ? k : nullptr;
+}
+// VUH-2911: an encounter-only player-class row (never qualified), or nullptr.
+inline const KitProfile* encounterKit(std::uint16_t member) {
+    for (const auto& k : kKits) if (k.member == member && k.playerClass && k.encounter && !k.qualified) return &k;
+    return nullptr;
+}
+// The row a missing-party body builds with: a qualified kit, or an encounter row while that encounter's
+// scope admits it (`encounterAllowed`). Every global gate keeps using qualifiedKit.
+inline const KitProfile* bodyKit(std::uint16_t member, bool encounterAllowed) {
+    if (const auto* k = qualifiedKit(member)) return k;
+    return encounterAllowed ? encounterKit(member) : nullptr;
+}
+inline int bodyStatusKey(std::uint16_t member, bool encounterAllowed) {
+    const auto* k = bodyKit(member, encounterAllowed);
+    return k ? k->statusKey : 0;
 }
 // The qualified player-class profile with this roster/plan code, or nullptr.
 inline const KitProfile* qualifiedKitByRoster(std::uint8_t roster) {
@@ -70,26 +88,29 @@ inline bool kitNameIs(const KitProfile& k, const char* name, std::size_t availab
 // Private-status admission (pure): the status key of a qualified player-class descriptor (type 0;
 // id + key + name + FORM of one row: the descriptor form byte must equal the row's base form), else 0.
 // Every non-Sora row needs `nonSoraAllowed` (party kits or the VUH-1513 remote kit member active here).
+// An encounter row also needs `encounterAllowed` (VUH-2911: its own site's scope, NOW still that site).
 // Core over any table, so checks can evaluate a candidate row before it is qualified.
 template <std::size_t N>
 inline int kitDescriptorKeyIn(const KitProfile (&table)[N], std::uint32_t id, std::uint8_t type, std::uint16_t key,
-                              std::int8_t form, const char* name, std::size_t available, bool nonSoraAllowed) {
+                              std::int8_t form, const char* name, std::size_t available, bool nonSoraAllowed,
+                              bool encounterAllowed = false) {
     if (type != 0) return 0;
     for (const auto& k : table)
-        if (k.playerClass && k.qualified && k.member == id && k.statusKey == key &&
+        if (k.playerClass && (k.qualified || (encounterAllowed && k.encounter)) && k.member == id && k.statusKey == key &&
             static_cast<std::uint8_t>(form) == k.form && kitNameIs(k, name, available) &&
             (k.member == KIT_SORA || nonSoraAllowed)) return key;
     return 0;
 }
 inline int kitDescriptorKey(std::uint32_t id, std::uint8_t type, std::uint16_t key, std::int8_t form,
-                            const char* name, std::size_t available, bool nonSoraAllowed) {
-    return kitDescriptorKeyIn(kKits, id, type, key, form, name, available, nonSoraAllowed);
+                            const char* name, std::size_t available, bool nonSoraAllowed, bool encounterAllowed = false) {
+    return kitDescriptorKeyIn(kKits, id, type, key, form, name, available, nonSoraAllowed, encounterAllowed);
 }
 // Clone-neutral-input admission (pure): same rows, matched on id, type 0 and name (no key read).
-inline bool kitNeutralDescriptor(std::uint32_t id, std::uint8_t type, const char* name, std::size_t available, bool nonSoraAllowed) {
+inline bool kitNeutralDescriptor(std::uint32_t id, std::uint8_t type, const char* name, std::size_t available, bool nonSoraAllowed,
+                                 bool encounterAllowed = false) {
     if (type != 0) return false;
     for (const auto& k : kKits)
-        if (k.playerClass && k.qualified && k.member == id && kitNameIs(k, name, available) &&
+        if (k.playerClass && (k.qualified || (encounterAllowed && k.encounter)) && k.member == id && kitNameIs(k, name, available) &&
             (k.member == KIT_SORA || nonSoraAllowed)) return true;
     return false;
 }

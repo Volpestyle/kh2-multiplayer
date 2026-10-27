@@ -14,8 +14,9 @@ native-Sora clone puppets stay blocked. A launcher selector is a follow-up; for
 now `kh2ctl launch` and scenario `launch` steps pass the environment through.
 
 Qualified scope: **world 4 (Hollow Bastion, including GoA `04/1A`) and kits 0x5A (Roxas)
-and 0x5B (Mickey) only**. World 5 and dual-wield Roxas (`0x323`) each need their own
-fixture before being allowed. Mickey is qualified for **party kits only** (`soloQualified=false`):
+and 0x5B (Mickey) only**. World 5 needs its own fixture before being allowed. Dual-wield Roxas
+(`0x323`) is never a selectable kit: it is the native Axel II encounter body, admitted only at
+its own checked site (VUH-2911, `ROXAS_DUAL_WIELD_FORM.md`). Mickey is qualified for **party kits only** (`soloQualified=false`):
 a solo `KH2COOP_PLAYER_KIT=0x5B` refuses at install with `[playerkit] REFUSED: … qualified for party
 kits only …` until a solo Mickey run passes. The VUH-1513 remote-kit-member mode still shows any
 non-Roxas roster as Sora (`PlayerKit.cpp`), which fails safe.
@@ -34,6 +35,11 @@ non-Roxas roster as Sora (`PlayerKit.cpp`), which fails safe.
   - Mickey is 11 (OpenKH `Objentry.Form.Default`, the non-Sora characters' base form, not a drive form).
   - Dual-wield Roxas is 10 (`RoxasDualWield`).
   - The factory passes the same byte as the constructor's form argument (`3DF930` case 0 and its raw566 path), and the constructor passes it on to the status allocator (`3C0620` from `3A7B1B`). Promotion, selection and allocation therefore require the argument to equal the descriptor's byte, not 0. Mickey trial-2 (run 20261007-112653) failed on exactly this: his form-11 build was never promoted (bindFault 15).
+- **Encounter rows (VUH-2911):** a row with `encounter=true` (dual-wield Roxas `0x323`) is never
+  `qualified`. `bodyKit`/`bodyStatusKey` and the descriptor checks admit it only with
+  `encounterAllowed`, which the DLL grants after the Axel II site `tt20-137` builds it and only while
+  NOW is still that site. Its form is 10 and its model name `P_EX110_BTLF` is longer than 8 bytes, so
+  descriptor name checks read more of the objentry's 32 name bytes.
 - **Prologue (VUH-2464):** the Roxas prologue builds no kit through member writes. Its first field
   adds the remote seat's Roxas as a private missing-party clone before the native story Roxas
   (`PARTY_SETUP.md`, "Prologue layout"). `kh2coop/PrologueSeats.hpp` admits only Roxas to that

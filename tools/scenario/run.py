@@ -1255,9 +1255,13 @@ def step_crash(ctx: Context, step: dict) -> dict:
 
 
 def step_kh2ctl(ctx: Context, step: dict) -> dict:
-    """Any kh2ctl command against one instance, e.g. ["overlay", "on"]."""
+    """Any kh2ctl command against one instance, e.g. ["overlay", "on"]. `as` saves its JSON reply
+    (VUH-2911: a hit damage's hpBefore/hpAfter)."""
     args = ctx.eval(step["argsExpr"]) if "argsExpr" in step else step["args"]
-    return kh2ctl(*map(str, args), pid=ctx.inst(step.get("instance", 0)).pid)
+    result = kh2ctl(*map(str, args), pid=ctx.inst(step.get("instance", 0)).pid)
+    if step.get("as"):
+        ctx.saved[step["as"]] = result
+    return result
 
 
 def step_hit_all(ctx: Context, step: dict) -> dict:
@@ -1849,6 +1853,51 @@ def step_revive_guard(ctx: Context, step: dict) -> dict:
     name = step.get("as", "revive_guard")
     ctx.saved[name] = guard.events
     return {"events": guard.events, "keepAwaySteps": guard.keepAwaySteps, "openError": guard.openError}
+
+
+CONTINUE_RETRY = re.compile(r"\[combat-admission\] continue-retry from=(\S+) btl=(\d+) to=(\S+) door=(\d+) map=(\d+) "
+                            r"btl=(\d+) evt=(\d+) transition=(\d+) armed=(\d+)")
+GAME_OVER_TASK_RVA, MENU_RVA, GAME_OVER_MENU = 0x2AE8050, 0x7435D0, 8
+
+
+def step_press_continue(ctx: Context, step: dict, *, _read=None, _press=None, _log=None) -> dict:
+    """VUH-2911: the host's native Continue after a full-party Game Over (the D17 retry, VUH-2906 run
+    20261027-071731). Waits for the game-over task and menu 8 on `instance` (default 0) and presses Cross,
+    whose default cursor is Continue there, at most `presses` times `gapMs` apart, until the product's
+    continue-retry receipt appears. Refuses a log that already holds one, never presses after it, and fails
+    without it. The receipt (destination [world, room, door, map, btl, evt], armed) is saved `as`."""
+    inst = ctx.inst(step.get("instance", 0))
+    read = _read or (lambda: kh2ctl("peek", "--rva", f"0x{GAME_OVER_TASK_RVA:X}:u64,0x{MENU_RVA:X}:u8",
+                                    pid=inst.pid)["samples"][0])
+    press = _press or (lambda: kh2ctl("player-press", "--button", "cross", "--duration-ms", "150", pid=inst.pid))
+    log = _log or (lambda: (LOGS / f"kh2coop_inject_{inst.pid}.log").read_text(encoding="utf-8", errors="replace"))
+    if CONTINUE_RETRY.search(log()):
+        raise StepFailed("press_continue: the host log already holds a continue-retry; one Continue per step")
+    inputs, deadline = [], time.monotonic() + step.get("timeoutMs", 30000) / 1000
+    while time.monotonic() < deadline and len(inputs) < int(step.get("presses", 5)):
+        ctx.check_all()
+        if CONTINUE_RETRY.search(log()):
+            break
+        sample = read()
+        task, menu = int(str(sample[f"0x{GAME_OVER_TASK_RVA:X}"]), 0), int(str(sample[f"0x{MENU_RVA:X}"]), 0)
+        if not task or menu != GAME_OVER_MENU:
+            ctx.sleep(0.2)
+            continue
+        inputs.append({"task": f"0x{task:X}", "menu": menu, "response": press()})
+        ctx.sleep(step.get("gapMs", 3000) / 1000)
+    m = CONTINUE_RETRY.search(log())
+    result = {"inputs": inputs, "retryRow": m.group(0) if m else None}
+    if m:
+        result.update(source=m[1], destination=[int(v, 16) for v in m[3].split("/")] + [int(m[n]) for n in (4, 5, 6, 7)],
+                      transition=int(m[8]), armed=int(m[9]))
+    name = step.get("as", "retry")
+    path = ctx.run_dir / f"{name}.json"
+    path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    ctx.artifacts.append(path.name)
+    ctx.saved[name] = result
+    if not m:
+        raise StepFailed(f"press_continue: no continue-retry receipt after {len(inputs)} guarded press(es)")
+    return result
 
 
 DOWNED_CHANNEL_MAGIC, DOWNED_CHANNEL_VERSION, DOWNED_CHANNEL_SIZE = 0x4E574448, 7, 360
@@ -2559,9 +2608,12 @@ def step_progress_snapshot(ctx: Context, step: dict, *, _read=None) -> dict:
     name = step.get("as", "progress")
     read = _read or kh2ctl
     evidence = {"instances": {}}
+    # VUH-2911: opt-in extra SAVE ranges, e.g. the drive-form rows ("forms", 0x32F4, 0x230) a dual-wield
+    # clone's status +0x254 references; the default ranges stay unchanged for every other scenario.
+    extra = tuple((str(label), int(offset), int(length)) for label, offset, length in step.get("extraRanges", []))
     for index in step.get("instances", [step.get("instance", 0)]):
         ranges = {}
-        for label, offset, length in (*PROGRESS_RANGES, *PERSONAL_RANGES):
+        for label, offset, length in (*PROGRESS_RANGES, *PERSONAL_RANGES, *extra):
             fields = [(0x9A98B0 + offset + n, min(8, length - n)) for n in range(0, length, 8)]
             raw = bytearray()
             # PC1 refused the observed64/128-field helper invocations,
@@ -5390,7 +5442,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "fight": step_fight,
          "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check, "coop_verdict": step_coop_verdict,
          "hp_ledger": step_hp_ledger,
-         "revive_guard": step_revive_guard, "downed_kill": step_downed_kill,
+         "revive_guard": step_revive_guard, "downed_kill": step_downed_kill, "press_continue": step_press_continue,
          "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "pilot_wait": step_pilot_wait, "pilot_until": step_pilot_until, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,

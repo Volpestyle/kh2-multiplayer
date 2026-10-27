@@ -1,4 +1,4 @@
-# Axel I combat-admission barrier (VUH-2897)
+# Axel II combat-admission barrier (VUH-2897)
 
 The host no longer starts Axel's fight while a friend is still loading. When the host's
 Mansion → Axel intro ends, the host keeps its own player and party frozen and also freezes
@@ -17,7 +17,7 @@ The barrier is offline-qualified only. Kestrel runs the live checks listed at th
   offline, client, already-published and every other room path stay native.
 - **Re-arm after a game over (VUH-2906).** The game over's Continue retry is a room
   request too (`Warp.cpp`, run `20261019-142129`), issued while the game-over task
-  `2AE8050` is live. In Axel I it lands at the Computer Room checkpoint: live on `4edbff6`,
+  `2AE8050` is live. In Axel II it lands at the Computer Room checkpoint: live on `4edbff6`,
   `continue-retry from=02/14 btl=137 to=02/15 door=99 map=2 btl=0 evt=0 … armed=0`
   (as in run `20261019-151151` from the Basement Hall). The Continue itself never arms. The
   route back reaches Axel through the ordinary `02/13 btl134` request, which arms like the

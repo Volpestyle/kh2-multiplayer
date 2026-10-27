@@ -59,6 +59,8 @@ static bool KitsActive() { return g_kits; }
 namespace privatestatus {
 static bool g_missingKits = false; // VUH-2464 prologue kit scope
 static bool MissingPartyKitScope() { return g_missingKits; }
+static bool g_encounter = false; // VUH-2911 Axel II encounter scope
+static bool MissingPartyEncounterScope() { return g_encounter; }
 }  // namespace privatestatus
 #include "CloneNeutralInput.inl"
 }  // namespace inject
@@ -257,6 +259,16 @@ static int Run(bool on) {
             CHECK(Q(prologueClone + 0xDB8) == entry0 && cloneneutral::g_stats->neutralized == 3);
             privatestatus::g_missingKits = true; cloneneutral::Gate(prologueClone);
             CHECK(Q(prologueClone + 0xDB8) == neutral && cloneneutral::g_stats->neutralized == 4);
+            // VUH-2911: Axel II's dual-wield Roxas clone (0x323, P_EX110_BTLF) needs its own encounter scope,
+            // even under the TT kit scope and party kits.
+            const uintptr_t btlf = descriptor(0x1000500, 0x323, 0, "P_EX110_BTLF");
+            const uintptr_t encounterClone = actor(11, btlf, entry0);
+            partynative::g_kits = true; cloneneutral::Gate(encounterClone);
+            CHECK(Q(encounterClone + 0xDB8) == entry0 && cloneneutral::g_stats->neutralized == 4);
+            partynative::g_kits = false;
+            privatestatus::g_encounter = true; cloneneutral::Gate(encounterClone);
+            CHECK(Q(encounterClone + 0xDB8) == neutral && cloneneutral::g_stats->neutralized == 5);
+            privatestatus::g_encounter = false;
             privatestatus::g_missingKits = false;
         }
         std::uint8_t zero[0x40] {};

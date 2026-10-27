@@ -29,14 +29,15 @@ void NoteSent(const SeatState& sent, std::uint64_t nowMs);
 void Receive(const SeatState& m);
 
 // Missing-party ingress at a prologue site (load time, game thread): the clone's object, or false
-// with a hold reason when the roster's profiles are not agreed.
-bool CloneProfile(std::uint16_t& object, const char*& reason);
-// VUH-1512: the body this seat's own local player takes at a prologue site (its agreed profile and that
-// kit's status key), or false before agreement.
-bool LocalBody(std::uint16_t& object, std::uint16_t& statusKey);
+// with a hold reason when the roster's profiles are not agreed. VUH-2911: `encounterBody` is the site's
+// (RouteSpawnPolicy); a default-Roxas remote then builds as that body (prologue::SiteBody).
+bool CloneProfile(std::uint16_t encounterBody, std::uint16_t& object, const char*& reason);
+// VUH-1512: the body this seat's own local player takes at a prologue site (its agreed profile, or the site's
+// encounter body for a default-Roxas seat, and that body's status key), or false before agreement.
+bool LocalBody(std::uint16_t encounterBody, std::uint16_t& object, std::uint16_t& statusKey);
 // VUH-1512, member resolver post-hook (the area load's loading thread): at a checked prologue site, a seat
-// whose agreed profile is not the story Roxas gets that body as resolved member 0, so the authored player
-// record builds it. Scripted events and every other load keep the native member.
+// whose body is not the site's story body (Roxas, or Axel II's dual-wield Roxas) gets its body as resolved
+// member 0, so the authored player record builds it. Scripted events and every other load keep the native member.
 void ResolveLocal(std::uintptr_t resolvedMembers);
 // VUH-1512, missing-party ingress after a bound construction (game thread): a clone of this seat's own body
 // takes its owner seat's color through the actor's native model color bytes (+0x4D8..0x4DA, read each
@@ -47,7 +48,8 @@ void NoteConstruction(const std::array<std::uint8_t, 10>& location, bool bound, 
                       std::uintptr_t clone = 0);
 
 // Any thread: the Roxas prologue is live here (seats requested, NOW in TT and the resolved member 0
-// is native story Roxas, or this seat's chosen body that ResolveLocal set for this location). Puppets then drive only bound missing-party clones: the prologue has no
+// is native story Roxas, the encounter body of the checked site at this NOW (VUH-2911), or this seat's
+// chosen body that ResolveLocal set for this location). Puppets then drive only bound missing-party clones: the prologue has no
 // party, and its events build their own player-class Roxas actors that must never be driven.
 bool PrologueScope();
 // Input collector (any thread): neutralize slot-0 raw input while the published hold applies.

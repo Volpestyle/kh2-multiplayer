@@ -366,20 +366,23 @@ void Receive(const SeatState& m) {
     }
 }
 
-bool CloneProfile(std::uint16_t& object, const char*& reason) {
+bool CloneProfile(std::uint16_t encounterBody, std::uint16_t& object, const char*& reason) {
     object = 0;
     if (!g_requested) { reason = "prologue-off"; return false; }
     Hold hold = Hold::None;
     if (!prologue::RemoteProfile(g_seats, object, hold)) { reason = prologue::HoldName(hold); return false; }
-    reason = "agreed";
+    object = prologue::SiteBody(object, encounterBody);
+    reason = encounterBody && object == encounterBody ? "agreed-encounter" : "agreed";
     return true;
 }
 
-bool LocalBody(std::uint16_t& object, std::uint16_t& statusKey) {
+bool LocalBody(std::uint16_t encounterBody, std::uint16_t& object, std::uint16_t& statusKey) {
     object = 0; statusKey = 0;
     Hold hold = Hold::None;
     if (!g_requested || !prologue::LocalProfile(g_seats, object, hold)) { object = 0; return false; }
-    const int key = kitStatusKey(object);
+    object = prologue::SiteBody(object, encounterBody);
+    // VUH-2911: the encounter body is admitted only as its own site's body (never a qualified kit).
+    const int key = bodyStatusKey(object, encounterBody && object == encounterBody);
     if (key <= 0) { object = 0; return false; }
     statusKey = static_cast<std::uint16_t>(key);
     return true;
@@ -388,10 +391,12 @@ bool LocalBody(std::uint16_t& object, std::uint16_t& statusKey) {
 namespace {
 bool OtherBody(std::uint16_t& other, std::array<std::uint8_t, 10>& now) {
     other = 0;
-    if (!g_requested || !ReadNow(now) || !PrologueSite(now)) return false;
+    const auto* site = g_requested && ReadNow(now) ? PrologueSite(now) : nullptr;
+    if (!site) return false;
     std::uint16_t local = 0, key = 0, remote = 0;
     const char* reason = nullptr;
-    if (!LocalBody(local, key) || !CloneProfile(remote, reason) || remote == local) return false;
+    if (!LocalBody(site->encounterBody, local, key) || !CloneProfile(site->encounterBody, remote, reason) || remote == local)
+        return false;
     other = remote;
     return true;
 }
@@ -400,21 +405,25 @@ bool OtherBody(std::uint16_t& other, std::array<std::uint8_t, 10>& now) {
 void ResolveLocal(std::uintptr_t resolvedMembers) {
     if (!g_requested || !resolvedMembers) return;
     std::array<std::uint8_t, 10> now {};
-    if (!ReadNow(now) || !PrologueSite(now)) return;
+    const auto* site = ReadNow(now) ? PrologueSite(now) : nullptr;
+    if (!site) return;
+    // VUH-2911: Axel II resolves its scripted dual-wield Roxas as member 0; a seat with another body (Sora)
+    // keeps that body there, and a default Roxas keeps the native encounter body.
+    const std::uint16_t native = prologue::NativeSiteBody(site->encounterBody);
     std::uint16_t body = 0, key = 0;
-    if (!LocalBody(body, key) || body == prologue::DEFAULT_PROFILE) return;
+    if (!LocalBody(site->encounterBody, body, key) || body == native) return;
     bool replaced = false;
     __try {
         auto* member0 = reinterpret_cast<std::uint16_t*>(resolvedMembers);
-        if (*member0 == prologue::DEFAULT_PROFILE) { *member0 = body; replaced = true; }
+        if (*member0 == native) { *member0 = body; replaced = true; }
     } __except (EXCEPTION_EXECUTE_HANDLER) { return; }
     if (!replaced) return;
     std::uint64_t low = 0; std::uint16_t high = 0;
     std::memcpy(&low, now.data(), 8); std::memcpy(&high, now.data() + 8, 2);
     g_bodyAtHigh.store(high, std::memory_order_relaxed);
     g_bodyAtLow.store(low, std::memory_order_release);
-    if (g_log) g_log("[prologue] local body at=%02X/%02X evt=%u: member 0 Roxas -> chosen 0x%X (status key %u)",
-                     now[0], now[1], LocationOf(now).evt, body, key);
+    if (g_log) g_log("[prologue] local body at=%02X/%02X evt=%u: member 0 0x%X -> chosen 0x%X (status key %u)",
+                     now[0], now[1], LocationOf(now).evt, native, body, key);
 }
 
 void ColorDuplicate(std::uintptr_t clone, std::uint16_t cloneObject, std::uint16_t localObject) {
@@ -485,7 +494,10 @@ bool PrologueScope() {
     // VUH-1512: this seat's chosen body, set by ResolveLocal for the load at this exact NOW.
     std::array<std::uint8_t, 10> now {};
     std::uint64_t low = 0; std::uint16_t high = 0;
-    if (member0 != g_localProfile || !ReadNow(now)) return false;
+    if (!ReadNow(now)) return false;
+    // VUH-2911: the encounter body the game itself resolves at its own checked site (Axel II).
+    if (routespawn::EncounterSiteAt(now, member0)) return true;
+    if (member0 != g_localProfile) return false;
     std::memcpy(&low, now.data(), 8); std::memcpy(&high, now.data() + 8, 2);
     return g_bodyAtLow.load(std::memory_order_acquire) == low && g_bodyAtHigh.load(std::memory_order_relaxed) == high;
 }

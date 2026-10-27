@@ -152,6 +152,8 @@ void bailey() {
     check(MissingPartyAbort(0x3A7B1B,1,0),"only observed normal Sora base allocation has fatal fallback");
     check(!MissingPartyAbort(0x3C0432,1,0)&&!MissingPartyAbort(0x3A7B1A,1,0),"fresh initializer and other callers remain Fault-only");
     check(!MissingPartyAbort(0x3A7B1B,2,0)&&!MissingPartyAbort(0x3A7B1B,1,1),"other status keys and forms remain Fault-only");
+    check(MissingPartyAbort(0x3A7B1B,14,10)&&!MissingPartyAbort(0x3A7B1B,1,10)&&!MissingPartyAbort(0x3A7B1B,14,11)&&
+          !MissingPartyAbort(0x3A7B1B,14,1)&&!MissingPartyAbort(0x3A7B1C,14,10),"VUH-2911: Roxas key14 form10 (dual-wield) only");
     MissingPartyBinding b{1,2,3,4,2,true,false,true,true,true};
     check(Bound(b),"distinct private clone and canonical ordinary local with both native attachments");
     auto c=b;c.clone=0;check(!Bound(c),"null clone refused");

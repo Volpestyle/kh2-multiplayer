@@ -2,7 +2,7 @@
 // ============================================================================
 // VUH-2897: combat-admission barrier, owner-thread state machine.
 //
-// In Axel I's room the host's destination intro releases frozen groups 0 and 1
+// In Axel II's room the host's destination intro releases frozen groups 0 and 1
 // (3AC750 teardown -> 3BF2E0(0) from 3ACC03, 3BF2E0(1) from 3ACC0D) about 5.7 s
 // before the friend has played its own intro. The barrier defers exactly those
 // two native calls on the host, keeping the native freezes already in force,
@@ -41,7 +41,7 @@ struct Destination {
     std::uint16_t world = 0, room = 0, door = 0, map = 0, battle = 0, event = 0;
     bool operator==(const Destination&) const = default;
 };
-// The only admitted handoff: Mansion: Basement Corridor (btl134) -> Axel I.
+// The only admitted handoff: Mansion: Basement Corridor (btl134) -> Axel II.
 constexpr Destination AxelTarget {2, 0x14, 0, 137, 137, 137};
 inline bool AxelSource(const Destination& d) { return d.world == 2 && d.room == 0x13 && d.battle == 134; }
 
@@ -197,7 +197,7 @@ public:
 
     // Host's own native request (before it is forwarded). Arms only the exact
     // Mansion -> Axel request; any other request disarms. A game over's Continue
-    // in Axel I lands at the Computer Room checkpoint (02/15, live on 4edbff6), so
+    // in Axel II lands at the Computer Room checkpoint (02/15, live on 4edbff6), so
     // a retry reaches Axel through this same request again: a new load, lease and
     // challenge, with the previous lease retired by the reload (S2, VUH-2906).
     void NoteRequest(const Destination& from, const Destination& to, std::uint32_t transition) {

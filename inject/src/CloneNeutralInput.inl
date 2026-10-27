@@ -104,8 +104,10 @@ static bool SoraDescriptor(uintptr_t actor) {
     const char* name = reinterpret_cast<const char*>(obj + offsets::objentry::NAME);
     // The reviewed kit table: Sora always; any other qualified kit (Roxas: live run 084248 showed a
     // never-neutralized Roxas clone) only while party kits are active on this machine.
-    // VUH-2464: the Roxas prologue layout's clone is a Roxas too.
-    return kh2coop::kitNeutralDescriptor(id, type, name, 8, partynative::KitsActive() || privatestatus::MissingPartyKitScope());
+    // VUH-2464: the Roxas prologue layout's clone is a Roxas too. VUH-2911: the whole 32-byte objentry model
+    // name field is in bounds, so a longer name (P_EX110_BTLF) compares in full.
+    return kh2coop::kitNeutralDescriptor(id, type, name, 32, partynative::KitsActive() || privatestatus::MissingPartyKitScope(),
+                                         privatestatus::MissingPartyEncounterScope());
 }
 
 static bool CanonicalActor(uintptr_t actor) {

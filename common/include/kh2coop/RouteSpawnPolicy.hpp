@@ -135,6 +135,8 @@ inline constexpr auto TramCommon95Records=Bytes("3602000075190fc5000000801f09cac
 // group containing the authored raw566 selected by the native entrance. The added clone copies that record with only its
 // objectId changed; the authored call still builds the canonical local (`localObject`, status key
 // `localKey`). `prologue` sites take the clone from the remote seat's latched profile; Bailey keeps Sora.
+// VUH-2911: `encounterBody` is the scripted body the game itself resolves as member 0 there (Axel II's dual-wield
+// Roxas 0x323). A default-Roxas seat takes it for its local and its clone (prologue::SiteBody); 0 elsewhere.
 struct MissingPartySite {
     std::array<std::uint8_t,10> location;
     std::uint32_t key;
@@ -142,6 +144,7 @@ struct MissingPartySite {
     std::uint16_t localObject,localKey;
     bool prologue;
     const char* name;
+    std::uint16_t encounterBody=0;
 };
 // The same-room event reloads that follow: event 104 (Armor Shop) reloads tt07 as evt97 (TT07_MS103,
 // b_42 group132), event 106 (Accessory Shop) as evt99 (TT07_MS105, b_44 group176). Both seats logged
@@ -285,6 +288,13 @@ inline constexpr auto UsualSpot2Records=Bytes("3602000000009643ad2729b80000c8420
 inline constexpr std::array<std::uint8_t,10> Serenity155Location{2,0x20,0,0,0x9B,0,0x9B,0,0x9B,0};
 inline constexpr auto Serenity155Header=Bytes("0100450003000000000000000000000000000000000000000000000000000000000000000000000000000000");
 inline constexpr auto Serenity155Records=Bytes("360200007bc35bc3000000807b2792c200000000cd697cbf0000000000000800000000000000000000000000000000000000000000000000000000000000000037020000145ba2c200000080aa82cac200000000cd697cbf0000000000000900000000000000000000000000000000000000000000000000000000000000000038020000ea953fc3000000806604834200000000cd697cbf0000000000000a000000000000000000000000000000000000000000000000000000000000000000");
+// VUH-2911: Axel II, the Day 6 Mansion fight, Basement Hall evt137 (TT20_MS603, headerId 67: raw566, the absent
+// raw567/568 and B_EX110 81). The game resolves member 0 to dual-wield Roxas 0x323 here (members 323/5C/5D/819).
+// 24 byte-identical receipts from both seats (runs 20261027-051908, -071731 and their batches, FM-02 route).
+inline constexpr std::array<std::uint8_t,10> BasementHall137Location{2,0x14,0,0,0x89,0,0x89,0,0x89,0};
+inline constexpr auto BasementHall137Header=Bytes("0100430004000000000000000000000000000000000000000000000000000000000000000000000000000000");
+inline constexpr auto BasementHall137Records=Bytes("3602000000000000000000800000394300000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000000370200000000c8420000008000808e4300000000000000000000000000000d000000000000000000000000000000000000000000000000000000000000000000380200000000c8c20000008000808e4300000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000000051000000ccab123800000080000025c300000000db0f49c00000000003000f000000000000000000000000000000000000000000000000000000000000000000");
+inline constexpr std::uint16_t DualWieldRoxas=0x323;
 inline constexpr MissingPartySite MissingPartySites[]{
     {BaileyLocation,808738658,BaileyHeader,BaileyRecords,84,1,false,"hb08-bailey"},
     {TramCommon95Location,808738658,TramCommon95Header,TramCommon95Records,90,14,true,"tt07-95"},
@@ -318,6 +328,7 @@ inline constexpr MissingPartySite MissingPartySites[]{
     {BackAlley4Location,808804197,BackAlley4Header,BackAlley4Records,90,14,true,"tt03-4"},
     {BasementHall2Location,808804197,BasementHall2Header,BasementHall2Records,90,14,true,"tt19-2"},
     {TwilightThorn157Location,808738658,TwilightThorn157Header,TwilightThorn157Records,90,14,true,"tt34-157"},
+    {BasementHall137Location,808738658,BasementHall137Header,BasementHall137Records,90,14,true,"tt20-137",DualWieldRoxas},
 };
 // VUH-2578: at these sites both seats' players stand on the same raw566 point, so each seat's clone is
 // driven exactly onto the local player. In the Woods the push-out sent both players to the tunnel mouth
@@ -354,9 +365,16 @@ inline const MissingPartySite* MissingPartySiteAt(const std::array<std::uint8_t,
     return nullptr;
 }
 // Only this observed base-constructor allocation has the fatal fallback contract: Sora (key1) and,
-// for the prologue's Roxas (key14, the same player-class base constructor), form0 only.
+// for the prologue's Roxas (key14, the same player-class base constructor), form0. VUH-2911: Axel II's
+// dual-wield Roxas is the same base constructor (3A7A40 passes actor+0xDE0, the descriptor's form 10, to
+// 3C0620 from 3A7B1B), so key14 also covers form10; no other form is a missing-party body.
 inline bool MissingPartyAbort(std::uintptr_t caller,int key,int form) {
-    return caller==0x3A7B1B && (key==1 || key==14) && form==0;
+    return caller==0x3A7B1B && ((key==1 && form==0) || (key==14 && (form==0 || form==10)));
+}
+// VUH-2911: the site whose encounter body this is, at exactly that NOW (nullptr anywhere else).
+inline const MissingPartySite* EncounterSiteAt(const std::array<std::uint8_t,10>& location,std::uint16_t body) {
+    const auto* site=MissingPartySiteAt(location);
+    return site && body && site->encounterBody==body ? site : nullptr;
 }
 struct MissingPartyBinding {
     std::uintptr_t clone{},local{},cloneStatus{},localStatus{},canonical{};

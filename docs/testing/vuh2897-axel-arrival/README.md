@@ -1,4 +1,4 @@
-# Axel I arrival delay: log analysis and proposed combat barrier (VUH-2897)
+# Axel II arrival delay: log analysis and proposed combat barrier (VUH-2897)
 
 Analysis only; rebased onto main `aa0d64c` for the source qualification below.
 No build, test binary, game, desk job, or live run was started for this work.
@@ -83,7 +83,7 @@ but its exact native boundary timestamps remain an instrumentation gap.
 
 - `EnemySync.cpp::QueueHostBeginInstance` reserves the next room after a load.
   `HostBeginInstance` waits for `SafeNativeGameplay()` and
-  `progresssync::HostReady()` for ordinary rooms. Axel I is such a room.
+  `progresssync::HostReady()` for ordinary rooms. Axel II is such a room.
   Only then does it send `RoomTransition` and log `host arrived`.
 - `ProgressSync.cpp::Tick` samples host progress only in safe gameplay.
   In 194738, host lines 2797–2798 sample the intro's progress changes
