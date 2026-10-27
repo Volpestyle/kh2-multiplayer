@@ -176,7 +176,7 @@ void exits() {
         {"replaced seat", Outcome::SeatReplaced, [](NativeView&, SessionView& s, Machine&) { s.connection[1] = 999; }, 2000},
         {"reconnected seat delivery", Outcome::SeatReplaced, [](NativeView&, SessionView& s, Machine&) { s.delivery[2] = 777; }, 2000},
         {"host downing", Outcome::HostDowned, [](NativeView&, SessionView& s, Machine&) { s.hostDowned = true; }, 2000},
-        {"peer downing", Outcome::PeerDowned, [](NativeView&, SessionView& s, Machine&) { s.peerDowned = true; }, 2000},
+        {"peer downing", Outcome::PeerDowned, [](NativeView&, SessionView& s, Machine&) { s.peerDownedEpoch[0] = 5; }, 2000},
         {"session retirement", Outcome::SessionRetired, [](NativeView&, SessionView& s, Machine&) { s.generation = 5; }, 2000},
         {"host delivery retired", Outcome::SessionRetired, [](NativeView&, SessionView& s, Machine&) { s.hostDelivery = 71; }, 2000},
         {"role lost", Outcome::SessionRetired, [](NativeView&, SessionView& s, Machine&) { s.host = false; }, 2000},
@@ -384,6 +384,102 @@ void releaseWaits() {
               "after the freezing event only the lease's own 3/4 are released");
     }
 }
+// VUH-2906: the game over's Continue retry into Axel's room re-arms a fresh lease. The retry is a new
+// load, so the previous lease is retired by it (S2) and its challenge and epoch never admit the new one.
+void continueRetry() {
+    constexpr std::uint32_t RetryTransition = Transition + 5, RetryLoad = Load + 1;
+    constexpr std::uint64_t RetryChallenge = Challenge + 7;
+    auto retryIntro = [] { auto v = Intro0(); v.load = RetryLoad; v.transition = RetryTransition; return v; };
+    auto retryAfter = [] { auto v = AfterIntro(); v.load = RetryLoad; v.transition = RetryTransition; return v; };
+    ForwardWhy why;
+    {   Machine m;
+        m.NoteRequest(AxelTarget, AxelTarget, RetryTransition);
+        check(!m.Requested(), "without the game-over task an Axel -> Axel request never arms");
+        m.NoteRequest(AxelTarget, Mansion, RetryTransition, true);
+        check(!m.Requested(), "a Continue retry to another room (a checkpoint elsewhere) never arms");
+        m.NoteRequest(AxelTarget, AxelTarget, RetryTransition, true);
+        check(m.Requested(), "a Continue retry into Axel's room arms");
+        m.NoteRequest(Mansion, Mansion, RetryTransition + 1);
+        check(!m.Requested(), "any later request disarms it");
+    }
+    {   // First arrival admitted and released; later a game over and Continue into the room.
+        Machine m; Hold(m);
+        const auto first = m.Current().incarnation;
+        (void)Acks(m, 1);
+        auto a = m.Service(AfterIntro(), Session(), 2000);
+        check(a.kind == Action::Release && m.NoteReleased(a.incarnation, a.groups), "setup: the first lease released");
+        m.NoteRequest(AxelTarget, AxelTarget, RetryTransition, true);
+        check(m.NoteLoad(RetryLoad, RetryTransition, 30000).kind == Action::None && m.Armed(),
+              "the retry's load binds the Continue request");
+        check(m.OnUnfreeze(0, ReleaseGroup0Caller, retryIntro(), Session(), 31000, RetryChallenge, why) == Decision::Defer,
+              "the retried intro's group 0 release is deferred");
+        const auto& l = m.Current();
+        check(l.incarnation == first + 1 && l.challenge == RetryChallenge && l.load == RetryLoad &&
+              l.transition == RetryTransition && l.deferredMs == 31000 && !l.epoch && !l.owned && l.seats[1].required,
+              "a fresh lease: new incarnation, challenge, load, transition and deadline");
+        check(m.OwnCandidates(retryIntro()) == OwnableGroups && m.NoteOwned(l.incarnation, OwnableGroups),
+              "the retry owns BOSS/ZAKO again");
+        check(m.OnUnfreeze(1, ReleaseGroup1Caller, retryIntro(), Session(), 31000, 0, why) == Decision::Defer,
+              "and defers group 1");
+        check(m.Ack(1, 101, 201, 5, AxelTarget, Challenge) == AckResult::Challenge, "the first lease's ACK is refused");
+        check(m.PublicationChallenge(retryAfter()) == RetryChallenge && m.NotePublished(6, RetryChallenge),
+              "the retry publishes its own challenge, epoch 6");
+        check(m.Ack(1, 101, 201, 5, AxelTarget, RetryChallenge) == AckResult::Epoch &&
+              m.Ack(1, 101, 201, 6, AxelTarget, Challenge) == AckResult::Challenge && m.Held(),
+              "neither the old epoch nor the old challenge admits the retry");
+        check(m.Service(retryAfter(), Session(), 31000 + DeadlineMs - 1).kind == Action::None && m.Held(),
+              "the retry's deadline runs from its own deferral");
+        a = m.Service(retryAfter(), Session(), 31000 + DeadlineMs);
+        check(a.kind == Action::Release && a.groups == 0b11011 && m.Current().outcome == Outcome::Deadline,
+              "the retry's deadline releases 0, 1, 3, 4 in one ordered pass");
+    }
+    {   // A co-op game over means the whole party was down, so at the retried intro the friend is still
+        // downed in the same 02/14 under the previous epoch. That never ends the retry's hold; a downing
+        // in the retry's own published epoch does.
+        Machine m;
+        m.NoteRequest(AxelTarget, AxelTarget, RetryTransition, true);
+        (void)m.NoteLoad(RetryLoad, RetryTransition, 30000);
+        (void)m.OnUnfreeze(0, ReleaseGroup0Caller, retryIntro(), Session(), 31000, RetryChallenge, why);
+        (void)m.NoteOwned(m.Current().incarnation, OwnableGroups);
+        (void)m.OnUnfreeze(1, ReleaseGroup1Caller, retryIntro(), Session(), 31000, 0, why);
+        auto s = Session(); s.peerDownedEpoch[0] = 5;
+        check(m.Service(retryAfter(), s, 31100).kind == Action::None && m.Held(),
+              "a friend still downed in the previous epoch does not end the unpublished retry hold");
+        check(m.NotePublished(6, RetryChallenge), "the retry publishes epoch 6");
+        check(m.Service(retryAfter(), s, 31200).kind == Action::None && m.Held(),
+              "nor the published one");
+        s.peerDownedEpoch[1] = 6;
+        const auto a = m.Service(retryAfter(), s, 31300);
+        check(a.kind == Action::Release && m.Current().outcome == Outcome::PeerDowned,
+              "a downing in the retry's own epoch releases it");
+    }
+    {   // Continue while the first lease is still held: released before the request is forwarded, then re-armed.
+        Machine m; Hold(m);
+        m.BeforeNativeTransition(9000);
+        auto v = AfterIntro(); v.transition = RetryTransition; v.pending = true;
+        const auto a = m.Service(v, Session(), 9000);
+        check(a.kind == Action::Release && a.groups == 0b11011 && m.Current().outcome == Outcome::Transition &&
+              m.NoteReleased(a.incarnation, a.groups), "a held lease is released before the Continue is forwarded");
+        m.NoteRequest(AxelTarget, AxelTarget, RetryTransition, true);
+        check(m.NoteLoad(RetryLoad, RetryTransition, 10000).kind == Action::None && m.Armed(), "then the retry arms");
+        check(m.OnUnfreeze(0, ReleaseGroup0Caller, retryIntro(), Session(), 11000, RetryChallenge, why) == Decision::Defer &&
+              m.Current().incarnation == 2, "and its intro starts the second lease");
+    }
+    {   // The first lease's release still blocked by an event when the retry's load lands: S2 retires it
+        // without any release, and the retry still arms a fresh lease.
+        Machine m; Hold(m);
+        m.BeforeNativeTransition(9000);
+        auto v = AfterIntro(); v.eventContext = 0x9000;
+        check(m.Service(v, Session(), 9000).kind == Action::None, "setup: the first release waits on an event");
+        m.NoteRequest(AxelTarget, AxelTarget, RetryTransition, true);
+        const auto a = m.NoteLoad(RetryLoad, RetryTransition, 10000);
+        check(a.kind == Action::Retire && a.incarnation == 1 && m.Current().retiredWithoutRelease && m.Armed(),
+              "the retry's load retires the old lease without a release (S2) and binds the retry");
+        check(m.OnUnfreeze(0, ReleaseGroup0Caller, retryIntro(), Session(), 11000, RetryChallenge, why) == Decision::Defer &&
+              m.Current().incarnation == 2 && !m.Current().retiredWithoutRelease, "the retried intro starts a fresh lease");
+        check(m.Ack(1, 101, 201, 5, AxelTarget, Challenge) == AckResult::Challenge, "the retired lease's ACK is refused");
+    }
+}
 } // namespace
 
 int main() {
@@ -394,6 +490,7 @@ int main() {
     publication();
     ownedGroups();
     releaseWaits();
+    continueRetry();
     std::printf("%u checks, %u failures\n", checks, failures);
     return failures ? 1 : 0;
 }

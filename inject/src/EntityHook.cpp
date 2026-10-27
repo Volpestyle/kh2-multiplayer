@@ -3996,22 +3996,25 @@ static bool PuppetCommandsRestricted() { return g_anyPuppetActive; }
 
 // VUH-2897: combat-admission providers. A fresh downed pose from a puppet in this room is a peer
 // downing; the game thread is the one that registered itself from the entity-head frame.
-static bool AdmissionPeerDowned() {
+// Each puppet's fresh downed pose in this room, by the room epoch it was downed in (the lease
+// counts only its own epoch: VUH-2906's Continue reloads the same room a downed friend is still in).
+static void AdmissionPeerDowned(combatadmission::SessionView& s) {
     std::uint8_t world = 0, room = 0;
     __try {
         world = *reinterpret_cast<const volatile std::uint8_t*>(g_exeBase + offsets::WORLD_ID);
         room = *reinterpret_cast<const volatile std::uint8_t*>(g_exeBase + offsets::ROOM_ID);
-    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return; }
+    std::size_t n = 0;
     for (const auto& d : g_puppets) {
         const auto& a = d.pose.pose;
-        if (d.have && g_frameCounter - d.poseFrame <= 30 && (a.flags & kh2coop::AvatarDowned) && a.downedEpisode &&
-            a.worldId == world && a.roomId == room) return true;
+        if (n < s.peerDownedEpoch.size() && d.have && g_frameCounter - d.poseFrame <= 30 &&
+            (a.flags & kh2coop::AvatarDowned) && a.downedEpisode && a.downedEpoch && a.worldId == world &&
+            a.roomId == room) s.peerDownedEpoch[n++] = a.downedEpoch;
     }
-    return false;
 }
 static bool AdmissionSession(combatadmission::SessionView& s) {
     if (!enemysync::CombatAdmissionSession(s)) return false;
-    s.peerDowned = AdmissionPeerDowned();
+    AdmissionPeerDowned(s);
     return true;
 }
 static bool AdmissionIdentity(std::uint32_t& load, std::uint32_t& transition, bool& pending) {

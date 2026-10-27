@@ -309,7 +309,7 @@ std::uint16_t ActionableNativeReaction(std::uint16_t raw) noexcept;
 // AvatarBridge::SetLocalDownedState); ReviveOwnerGate::Consume judges against it.
 void NoteLocalDownedState(const LocalDownedState& state) noexcept;
 // VUH-2897, game thread: session facts for the combat-admission barrier (CombatAdmission.hpp).
-// peerDowned is left false; EntityHook's puppet poses supply it.
+// peerDownedEpoch is left empty; EntityHook's puppet poses supply it.
 bool CombatAdmissionSession(combatadmission::SessionView& out) noexcept;
 // VUH-2495, host, game thread: the native stat funnel (0x3D2EB0) left `actor` at `hp`. An announced
 // enemy brought to 0 retains a terminal receipt. Pending deaths drain before mission state even

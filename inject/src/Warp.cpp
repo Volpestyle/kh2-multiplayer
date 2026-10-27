@@ -268,6 +268,12 @@ bool FieldDoor() {
                *reinterpret_cast<const uintptr_t*>(g_exeBase + RVA_GAMEOVER_TASK) == 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
+// The game over's Continue retry: its room request runs while the game-over task is live.
+bool GameOverRetry() {
+    __try {
+        return *reinterpret_cast<const uintptr_t*>(g_exeBase + RVA_GAMEOVER_TASK) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
 
 void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t fade,
                                         int mode, std::uint8_t flag, int extra) {
@@ -296,12 +302,13 @@ void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t 
     }
     BeginTransition();
     {   // VUH-2897: release a held admission while the old room's native identity still matches,
-        // then arm only the exact Mansion -> Axel request. Never forwards the request later.
+        // then arm only the exact Mansion -> Axel request, or (VUH-2906) the game over's Continue
+        // retry into the exact Axel room. Never forwards the request later.
         const auto from = ReadLocation();
         combatadmission::NoteHostRequest({from.worldId, from.roomId, from.door, from.mapProgram, from.battleProgram,
                                           from.eventProgram},
                                          {to->world, to->room, to->door, to->map, to->battle, to->event},
-                                         g_transitionSerial);
+                                         g_transitionSerial, GameOverRetry());
     }
     const bool travel = TravelWorld(to->world) && !g_travelRequested;
     if (TravelWorld(to->world)) g_travelRequested = true;

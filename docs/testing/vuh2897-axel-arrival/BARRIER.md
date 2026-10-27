@@ -15,6 +15,20 @@ The barrier is offline-qualified only. Kestrel runs the live checks listed at th
 - **Arm:** only the authenticated host's own native request from `02/13 btl134` to
   `02/14 door0 map137 btl137 evt137`, bound to that transition and its load. Solo,
   offline, client, already-published and every other room path stay native.
+- **Re-arm on Continue (VUH-2906).** The game over's Continue retry is a room request too
+  (`Warp.cpp`, run `20261019-142129`), issued while the game-over task `2AE8050` is live.
+  A retry whose destination is exactly that Axel room arms like the first arrival: a
+  new lease, incarnation and challenge, its own 15 s deadline, ownership and ordered
+  release. The retry is a new load, so S2 retires any earlier lease without a release.
+  Its challenge and epoch never admit the new one. A co-op game over means the whole party
+  was down, so at the retried intro the friend is still downed in the same `02/14`. A peer
+  downing therefore counts only under the lease's own published epoch (the pose's
+  `downedEpoch`); before VUH-2906 any fresh downed pose in the room counted. Every Continue
+  retry logs
+  `continue-retry … to=… armed=`, armed or not. A Continue that lands at a checkpoint
+  elsewhere does not arm here. In run `20261019-151151` a Basement Hall game over continued
+  at the Computer Room (`02/15 door 99`). The route back then reaches Axel through the
+  ordinary `02/13 btl134` request, which arms as before.
 - **Defer:** only the intro teardown's two group releases, `3BF2E0(0)` returning to
   `3ACC03` and `3BF2E0(1)` returning to `3ACC0D` (3AC750 case 9 inside 3AC000). Both run
   in one native call on the owner thread, while the intro's event context is still set.
@@ -69,7 +83,7 @@ wins; later ones cannot rewrite it.
 | `deadline` | 15 000 ms from the first deferral, monotonic; ACK traffic never extends it |
 | `seat-left` / `seat-replaced` | a required slot's connection is gone or changed, or its delivery changed |
 | `session-retired` | generation, host delivery or host role changed |
-| `host-downed` / `peer-downed` | the host's own downed publication (serviced in the same call), or a fresh downed pose of a puppet in this room |
+| `host-downed` / `peer-downed` | the host's own downed publication (serviced in the same call), or a fresh downed pose of a puppet in this room, downed under the lease's own published epoch |
 | `native-transition` | any host native request (door, Continue, retry): released before the request is forwarded |
 | `native-cleared` | native code cleared 0/1 itself (a room script or a later event's own teardown); the owned 3/4 are still released |
 | `shutdown` | DLL shutdown: an unloader thread only signals, and waits up to 500 ms for the owner |
@@ -107,8 +121,9 @@ request that never loaded would have left Roxas and Axel frozen with no recovery
 **Reload (S2, static).** `3BF810` zeroes dword `2A171E8` (groups 0–31). It is called only
 from `39CA10`, which runs in `152CD0`, the task at the end of every field-build load task
 `152680`. That zeroing comes before the new room's intro installs, in the same function.
-A stale lease is therefore retired, never replayed into the new room. Continue is inferred
-to take the same path (every static field build does), not traced.
+A stale lease is therefore retired, never replayed into the new room. Continue is a room
+request, so it reaches that field build as well (inferred from the shared request path, not
+traced to `152CD0`).
 
 ## Owner thread and liveness (S1)
 

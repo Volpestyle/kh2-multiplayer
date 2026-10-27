@@ -211,5 +211,14 @@ build, with the trace flag on both seats. Judge from the raw `[combat-admission]
    Axel I. If one appears, record the event context and
    the time until `admission-release`.
 
+7. **Continue retry (VUH-2906).** Game over in Axel I, then Continue. The host logs
+   `continue-retry … to=…` with the retry's exact destination.
+   - If it is `02/14 door=0 map=137 btl=137 evt=137` (armed=1), a second `deferred group=0`
+     follows under a new incarnation and challenge. It must not be decided `peer-downed`
+     by the friend's downing from before the game over. Both seats arrive before the first
+     Axel hit, and saves are unchanged.
+   - If it names another room or shape (armed=0), record it: that retry is outside the
+     re-arm, and its route back is checked instead.
+
 Downing, Continue, disconnect and reload exits are covered offline and need no dedicated
 run, unless one happens naturally.

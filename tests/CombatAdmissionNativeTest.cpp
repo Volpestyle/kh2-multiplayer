@@ -220,9 +220,19 @@ int main() {
     // A BOSS bit the game set before the lease armed survives release.
     HoldOnce(0b01011);
     Check(cd::machine.Current().owned == 0b10000 && *mask == 0b11011, "only the free ZAKO bit is owned");
-    session.peerDowned = true; ca::Service(); session.peerDowned = false;
+    session.hostDowned = true; ca::Service(); session.hostDowned = false;
     Check(Groups() == std::vector<std::uintptr_t>{0, 1, 4} && *mask == 0b01000,
-          "peer downing releases; the game's own BOSS bit stays set");
+          "a downing releases; the game's own BOSS bit stays set");
+
+    // A peer downing in this lease's own published room releases; one from an earlier epoch never does.
+    output.clear();
+    HoldOnce();
+    ca::NotePublished(9, ca::PublicationChallenge());
+    session.peerDownedEpoch[0] = 8; ca::Service();
+    Check(natives.empty() && ca::Live(), "a peer still downed in the previous room's epoch does not end the hold");
+    session.peerDownedEpoch[0] = 9; ca::Service(); session.peerDownedEpoch[0] = 0;
+    Check(Groups() == std::vector<std::uintptr_t>{0, 1, 3, 4} && Has("outcome=peer-downed"),
+          "a peer downed in this lease's room releases through the one path");
 
     // Continue / new request while held: released before the request is noted.
     output.clear();
@@ -240,6 +250,38 @@ int main() {
     Check(Groups() == std::vector<std::uintptr_t>{0, 1, 3, 4} && !ca::Live(),
           "the request's own pass releases although its transition is already pending");
     pendingTransition = false;
+
+    // VUH-2906: host downed, game over, Continue into Axel's room: a fresh lease and challenge.
+    {   output.clear();
+        HoldOnce();
+        const auto firstChallenge = ca::PublicationChallenge();
+        const auto firstIncarnation = cd::machine.Current().incarnation;
+        ca::NotePublished(7, firstChallenge);
+        session.hostDowned = true; ca::Service(); session.hostDowned = false;
+        Check(Groups() == std::vector<std::uintptr_t>{0, 1, 3, 4} && !ca::Live() && Has("outcome=host-downed"),
+              "setup: the host's downing released the first lease");
+        ++transition; pendingTransition = true;
+        ca::NoteHostRequest(ca::AxelTarget, ca::AxelTarget, transition, true);
+        Check(Has("continue-retry from=02/14 btl=137 to=02/14 door=0 map=137 btl=137 evt=137") && Has("armed=1"),
+              "the Continue retry into Axel's room is logged with its destination and arms");
+        ++load; ca::NoteLoad(load, transition); pendingTransition = false;
+        SetNow(ca::AxelTarget); SetEventContext(0x7000); *mask = 3; natives.clear();
+        RunTeardown(); SetEventContext(0);
+        const auto retryChallenge = ca::PublicationChallenge();
+        Check(natives.empty() && *mask == 0b11011 && cd::machine.Current().incarnation == firstIncarnation + 1 &&
+              retryChallenge && retryChallenge != firstChallenge,
+              "the retried intro is held again, 3/4 owned, under a new incarnation and challenge");
+        ca::NotePublished(8, retryChallenge);
+        Check(ca::Ack(1, 101, 201, 7, ca::AxelTarget, firstChallenge) == ca::AckResult::Challenge && natives.empty(),
+              "the first lease's ACK cannot release the retry");
+        Check(ca::Ack(1, 101, 201, 8, ca::AxelTarget, retryChallenge) == ca::AckResult::Accepted &&
+              Groups() == std::vector<std::uintptr_t>{0, 1, 3, 4} && *mask == 0 && !ca::Live(),
+              "the retry's own ACK releases 0, 1, 3, 4");
+        // Without the game-over task, an Axel -> Axel request still never arms.
+        output.clear();
+        ca::NoteHostRequest(ca::AxelTarget, ca::AxelTarget, transition + 1);
+        Check(!cd::machine.Requested() && !Has("continue-retry"), "an ordinary Axel -> Axel request neither arms nor logs");
+    }
 
     // Reload landed first: retired, nothing replayed into the new room.
     output.clear();

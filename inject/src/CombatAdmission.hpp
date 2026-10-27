@@ -73,7 +73,8 @@ struct SessionView {
     std::array<std::uint64_t, MaxSlots> connection {}, delivery {};
     bool publicationPending = false;   // this load's room is not yet published
     bool hostDowned = false;
-    bool peerDowned = false;
+    // Each puppet's fresh downed pose in this room: the room epoch it was downed in, 0 if none.
+    std::array<std::uint32_t, MaxSlots> peerDownedEpoch {};
 };
 
 enum class Phase : std::uint8_t { Idle, Held, Releasing, Done };
@@ -195,10 +196,16 @@ public:
     bool Held() const { return lease_.phase == Phase::Held; }
 
     // Host's own native request (before it is forwarded). Arms only the exact
-    // Mansion -> Axel request; any other request disarms.
-    void NoteRequest(const Destination& from, const Destination& to, std::uint32_t transition) {
+    // Mansion -> Axel request, or the game over's Continue retry into the exact
+    // Axel room (VUH-2906; the retry is a room request, issued while the game-over
+    // task is live). Any other request disarms. A retry is a new load, so it gets
+    // a new lease and challenge; the previous lease is retired by that load (S2).
+    void NoteRequest(const Destination& from, const Destination& to, std::uint32_t transition,
+                     bool continueRetry = false) {
         armed_ = {};
-        if (AxelSource(from) && to == AxelTarget) { armed_.transition = transition; armed_.requested = true; }
+        if ((AxelSource(from) || continueRetry) && to == AxelTarget) {
+            armed_.transition = transition; armed_.requested = true;
+        }
     }
     // Native load finalizers returned. Binds an armed request to its load and
     // retires (never replays) a lease from an older load: the native load path
@@ -385,6 +392,7 @@ public:
         return missing;
     }
     bool Armed() const { return armed_.bound; }
+    bool Requested() const { return armed_.requested; }
 
 private:
     struct Armed {
@@ -410,7 +418,11 @@ private:
                 return Outcome::SeatReplaced;
         }
         if (s.hostDowned) return Outcome::HostDowned;
-        if (s.peerDowned) return Outcome::PeerDowned;
+        // A peer downing counts only in this lease's own published room. A friend still downed in the
+        // room it has not left yet (a game over before the Continue retry reloads the same 02/14) has
+        // the previous epoch and never ends the retry's hold.
+        for (const auto epoch : s.peerDownedEpoch)
+            if (lease_.epoch && epoch == lease_.epoch) return Outcome::PeerDowned;
         if (lease_.epoch && !MissingSeats()) return Outcome::Arrived;
         if (now - lease_.deferredMs >= DeadlineMs) return Outcome::Deadline;
         return Outcome::None;

@@ -187,9 +187,11 @@ inline void __fastcall Unfreeze(std::uintptr_t group) {
 inline bool Installed() noexcept { return detail::installed.load(std::memory_order_acquire); }
 inline bool Live() noexcept { return detail::live.load(std::memory_order_acquire); }
 
-// Host native request, owner thread, before it is forwarded.
+// Host native request, owner thread, before it is forwarded. `continueRetry`: the
+// game-over task is live, so this is its Continue retry (VUH-2906).
 // Every entry point below runs inside a native or owner callback: it preserves LastError.
-inline void NoteHostRequest(const Destination& from, const Destination& to, std::uint32_t nextTransition) {
+inline void NoteHostRequest(const Destination& from, const Destination& to, std::uint32_t nextTransition,
+                            bool continueRetry = false) {
     if (!Installed() || !detail::Owner()) return;
     const auto error = GetLastError();
     const auto now = detail::Now();
@@ -199,7 +201,12 @@ inline void NoteHostRequest(const Destination& from, const Destination& to, std:
         axeltrace::Point("admission-decided", static_cast<std::uintptr_t>(detail::machine.Current().outcome));
         detail::ServiceOwner(now); // release while the old native identity still matches
     }
-    detail::machine.NoteRequest(from, to, nextTransition);
+    detail::machine.NoteRequest(from, to, nextTransition, continueRetry);
+    // Every Continue retry's exact destination, armed or not: its shape in Axel I is a live check.
+    if (continueRetry && detail::log)
+        detail::log("[combat-admission] continue-retry from=%02X/%02X btl=%u to=%02X/%02X door=%u map=%u btl=%u evt=%u "
+                    "transition=%u armed=%u", from.world, from.room, from.battle, to.world, to.room, to.door, to.map,
+                    to.battle, to.event, nextTransition, detail::machine.Requested() ? 1u : 0u);
     SetLastError(error);
 }
 inline void NoteLoad(std::uint32_t load, std::uint32_t transition) {
