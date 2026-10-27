@@ -97,18 +97,103 @@ void Lower(wchar_t* text) {
     }
 }
 
-// Relative names are resolved against the current directory first, so a
-// save opened by a bare file name from inside the save folder still counts.
-bool IsGuardedPath(LPCWSTR path) {
+// The final path of `path`, lower-cased with '\' separators: 8.3 names
+// expanded, junctions and symlinks followed, a "\\?\" prefix dropped. A part
+// that doesn't exist yet is resolved through its nearest existing ancestor
+// and appended as spelled. Only drive-letter paths are opened (never a device
+// such as a HID or a pipe), through the unhooked CreateFileW, with no access.
+// False when the path can't be resolved; callers then use its spelling.
+bool ResolvedLower(LPCWSTR path, wchar_t (&out)[1024]) {
     if (!path) return false;
     wchar_t full[1024];
+    const DWORD n = GetFullPathNameW(path, 1024, full, nullptr);
+    if (n == 0 || n >= 1024) return false;
+    const wchar_t* body = std::wcsncmp(full, L"\\\\?\\", 4) == 0 ? full + 4 : full;
+    if (!std::iswalpha(body[0]) || body[1] != L':' || body[2] != L'\\') return false;
+    const auto open = g_createFileW ? g_createFileW : &CreateFileW;  // before Install hooks, the real one
+    std::wstring prefix(body), rest;
+    for (int depth = 0; depth < 64; ++depth) {
+        HANDLE file = open(prefix.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            wchar_t final[1024];
+            const DWORD length = GetFinalPathNameByHandleW(file, final, 1024, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+            CloseHandle(file);
+            if (length == 0 || length >= 1024) return false;
+            std::wstring result = final;
+            if (result.rfind(L"\\\\?\\UNC\\", 0) == 0) result = L"\\\\" + result.substr(8);
+            else if (result.rfind(L"\\\\?\\", 0) == 0) result = result.substr(4);
+            result += rest;
+            if (result.size() >= 1024) return false;
+            wcscpy_s(out, result.c_str());
+            Lower(out);
+            return true;
+        }
+        const DWORD error = GetLastError();
+        const size_t slash = prefix.find_last_of(L'\\');
+        if ((error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) || slash == std::wstring::npos ||
+            slash < 3) {
+            return false;
+        }
+        rest = prefix.substr(slash) + rest;
+        prefix.resize(slash);
+    }
+    return false;
+}
+
+// What a path is to the guard. Saves (and the self-test directory) are
+// matched by spelling exactly as before VUH-2775. An installed asset is
+// matched on the resolved path when `resolve` is set (write opens and the
+// destructive APIs), so an 8.3 name or a junction alias of KH2ReSource is
+// still the install; its spelling also counts. `full` and `tail` give the
+// path used for the twin and where its part below the guarded root starts.
+enum class Kind { None, Save, Asset, AssetRoot };
+
+Kind Classify(LPCWSTR path, bool resolve, wchar_t (&full)[1024], size_t& tail) {
+    if (!path) return Kind::None;
     const DWORD n = GetFullPathNameW(path, 1024, full, nullptr);
     if (n == 0 || n >= 1024) {
         wcsncpy_s(full, path, _TRUNCATE);
     }
-    Lower(full);
-    return std::wcsstr(full, kSaveFolder) != nullptr || AssetRootEnd(full) != nullptr ||
-           (g_testDir[0] && std::wcsstr(full, g_testDir) == full);
+    wchar_t lowered[1024];
+    wcscpy_s(lowered, full);
+    Lower(lowered);
+    if (const wchar_t* hit = std::wcsstr(lowered, kSaveFolder)) {
+        tail = (hit - lowered) + (sizeof(kSaveFolder) / sizeof(wchar_t) - 1);
+        return Kind::Save;
+    }
+    wchar_t resolved[1024];
+    const wchar_t* asset = lowered;
+    if (resolve && ResolvedLower(path, resolved) && AssetRootEnd(resolved)) {
+        wcscpy_s(full, resolved);
+        asset = resolved;
+    }
+    if (const wchar_t* end = AssetRootEnd(asset)) {
+        if (*end == L'\0' || end[1] == L'\0') return Kind::AssetRoot;  // the root itself has no twin
+        tail = (end - asset) + 1;
+        return Kind::Asset;
+    }
+    if (g_testDir[0] && std::wcsstr(lowered, g_testDir) == lowered) {
+        tail = std::wcslen(g_testDir);
+        return Kind::Save;
+    }
+    return Kind::None;
+}
+
+// Relative names are resolved against the current directory first, so a
+// save opened by a bare file name from inside the save folder still counts.
+bool IsGuardedPath(LPCWSTR path) {
+    wchar_t full[1024];
+    size_t tail = 0;
+    return Classify(path, true, full, tail) != Kind::None;
+}
+
+// The pre-VUH-2775 predicate (save folder or self-test directory, by
+// spelling), which alone decides whether the save sandbox is usable.
+bool IsSavePath(LPCWSTR path) {
+    wchar_t full[1024];
+    size_t tail = 0;
+    return Classify(path, false, full, tail) == Kind::Save;
 }
 
 // ANSI paths (the game's own imports are mostly the A variants).
@@ -148,46 +233,15 @@ void Deny(const char* api, LPCWSTR path) {
 
 wchar_t g_sandbox[MAX_PATH] = {};
 std::atomic<std::uint32_t> g_redirected {0};
+// Whether install-asset twins may use the sandbox: false when it is missing,
+// a reparse point, or resolves under an asset root or the save folder. Saves
+// keep using the sandbox either way.
+bool g_assetTwinsOk = false;
+// Serializes asset twin initialization, so concurrent first opens copy once.
+SRWLOCK g_twinLock = SRWLOCK_INIT;
 
-// Full path of `path` and the offset where its part below the guarded root
-// starts (the root is the save folder, an installed asset root or the
-// self-test directory). `asset` is set for an installed asset, whose tail
-// starts after the root's separator. The asset root itself has no tail and
-// so no twin: RouteOpen then denies a write open of it and passes reads.
-bool GuardedTail(LPCWSTR path, wchar_t (&full)[1024], size_t& tail, bool& asset) {
-    if (!path) return false;
-    const DWORD n = GetFullPathNameW(path, 1024, full, nullptr);
-    if (n == 0 || n >= 1024) return false;
-    wchar_t lowered[1024];
-    wcscpy_s(lowered, full);
-    Lower(lowered);
-    asset = false;
-    if (const wchar_t* hit = std::wcsstr(lowered, kSaveFolder)) {
-        tail = (hit - lowered) + (sizeof(kSaveFolder) / sizeof(wchar_t) - 1);
-        return true;
-    }
-    if (const wchar_t* end = AssetRootEnd(lowered)) {
-        if (*end == L'\0' || end[1] == L'\0') return false;  // the root itself
-        tail = (end - lowered) + 1;
-        asset = true;
-        return true;
-    }
-    if (g_testDir[0] && std::wcsstr(lowered, g_testDir) == lowered) {
-        tail = std::wcslen(g_testDir);
-        return true;
-    }
-    return false;
-}
-
-// Sandbox twin of a guarded path. Its parent directories are created only
-// for a write, so reads of unredirected assets leave the sandbox alone.
-bool SandboxTwin(LPCWSTR path, wchar_t (&twin)[1024], bool create) {
-    wchar_t full[1024];
-    size_t tail = 0;
-    bool asset = false;
-    if (!g_sandbox[0] || !GuardedTail(path, full, tail, asset)) return false;
-    if (swprintf_s(twin, L"%s%s%s", g_sandbox, asset ? kAssetTwins : L"", full + tail) < 0) return false;
-    if (!create) return true;
+// Creates the parent directories of a sandbox twin.
+void CreateParents(wchar_t (&twin)[1024]) {
     for (wchar_t* p = twin + std::wcslen(g_sandbox) + 1; *p; ++p) {
         if (*p == L'\\' || *p == L'/') {
             const wchar_t keep = *p;
@@ -196,11 +250,24 @@ bool SandboxTwin(LPCWSTR path, wchar_t (&twin)[1024], bool create) {
             *p = keep;
         }
     }
-    return true;
 }
 
 bool Exists(LPCWSTR path) {
     return GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
+}
+
+// An asset twin path is used only if nothing from the sandbox root down to
+// the twin is a reparse point and the twin doesn't resolve into a guarded
+// original: a junctioned install-assets would otherwise write the install.
+bool TwinPathSafe(const wchar_t* twin) {
+    const std::wstring path(twin);
+    for (size_t end = std::wcslen(g_sandbox);; end = path.find(L'\\', end + 1)) {
+        const DWORD attributes = GetFileAttributesW(path.substr(0, end).c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+        if (end == std::wstring::npos) break;
+    }
+    wchar_t resolved[1024];
+    return ResolvedLower(twin, resolved) && !AssetRootEnd(resolved) && !std::wcsstr(resolved, kSaveFolder);
 }
 
 // ---- Asset twin cleanup ---------------------------------------------------
@@ -330,22 +397,91 @@ void LogRedirect(const char* api, LPCWSTR from, LPCWSTR to) {
     }
 }
 
+// Copies an installed asset to its twin under g_twinLock. The copy goes to a
+// ".partial" name first and is renamed into place only when complete, so a
+// twin that exists is always a whole copy. False (nothing published) on any
+// failure.
+bool CopyAssetTwin(LPCWSTR path, const wchar_t* twin) {
+    wchar_t partial[1040];
+    if (swprintf_s(partial, L"%s.partial", twin) < 0) return false;
+    DeleteFileW(partial);  // a stale partial from an earlier failure; never guarded
+    // The trampolines the public CopyFileW/MoveFileExW call internally, so no
+    // hook judges the guard's own copy.
+    if (!g_copyFileExW(path, partial, nullptr, nullptr, nullptr, 0) ||
+        !g_moveFileWithProgressW(partial, twin, nullptr, nullptr, 0)) {
+        const DWORD error = GetLastError();
+        DeleteFileW(partial);
+        if (g_log) g_log("[saveguard] asset twin copy failed: error %lu", error);
+        return false;
+    }
+    if (g_log) {
+        char narrow[600] = {};
+        WideCharToMultiByte(CP_UTF8, 0, twin, -1, narrow, sizeof(narrow) - 1, nullptr, nullptr);
+        g_log("[saveguard] asset twin ready: %s", narrow);
+    }
+    return true;
+}
+
+// An installed asset: a write goes to its twin (a whole copy made once), and
+// a read follows an existing twin. Any doubt about the twin fails a write
+// rather than letting it reach the install.
+bool RouteAsset(const char* api, LPCWSTR path, const wchar_t* below, bool write, DWORD disposition,
+                wchar_t (&twin)[1024]) {
+    if (!g_assetTwinsOk || swprintf_s(twin, L"%s%s%s", g_sandbox, kAssetTwins, below) < 0) {
+        twin[0] = L'\0';
+        if (write) Deny(api, path);
+        return write;
+    }
+    if (!write && !Exists(twin)) return false;  // the common case: no twin, read the install
+    AcquireSRWLockExclusive(&g_twinLock);
+    bool route = true;
+    if (!write) {
+        route = TwinPathSafe(twin);  // an unsafe twin path: read the install itself, which is harmless
+    } else {
+        CreateParents(twin);
+        const bool keepsContents = disposition == OPEN_EXISTING || disposition == OPEN_ALWAYS;
+        if (TwinPathSafe(twin) &&
+            (Exists(twin) || !keepsContents || !Exists(path) || CopyAssetTwin(path, twin))) {
+            LogRedirect(api, path, twin);
+        } else {
+            twin[0] = L'\0';
+            Deny(api, path);
+        }
+    }
+    ReleaseSRWLockExclusive(&g_twinLock);
+    return route;
+}
+
 // Decides where an open of `path` goes. Returns false to open `path`
-// itself; true with `twin` filled to open the sandbox twin instead.
+// itself; true with `twin` filled to open the sandbox twin instead, or
+// empty to fail the open.
 bool RouteOpen(const char* api, LPCWSTR path, DWORD access, DWORD disposition,
                wchar_t (&twin)[1024]) {
     twin[0] = L'\0';
-    if (!IsGuardedPath(path)) return false;
     const bool write = IsWriteOpen(access, disposition);
-    if (!SandboxTwin(path, twin, write)) {
+    wchar_t full[1024];
+    size_t tail = 0;
+    const Kind kind = Classify(path, write, full, tail);
+    if (kind == Kind::None) return false;
+    if (kind == Kind::AssetRoot) {  // the KH2ReSource root itself: no twin
+        if (write) Deny(api, path);
+        return write;
+    }
+    if (kind == Kind::Asset) return RouteAsset(api, path, full + tail, write, disposition, twin);
+    // A save: routed exactly as before VUH-2775.
+    if (!g_sandbox[0] || swprintf_s(twin, L"%s%s", g_sandbox, full + tail) < 0) {
+        twin[0] = L'\0';
         if (write) Deny(api, path);  // no sandbox: fail closed
         return write;
     }
+    if (write) CreateParents(twin);
     const bool twinExists = Exists(twin);
     if (!write && !twinExists) return false;  // plain read of the real save
     const bool keepsContents = disposition == OPEN_EXISTING || disposition == OPEN_ALWAYS;
     if (write && !twinExists && keepsContents && Exists(path)) {
-        g_copyFileW(path, twin, TRUE);  // trampoline; the destination isn't guarded
+        // CopyFileW's own CopyFileExW call is hooked, and a sandbox under
+        // KH2ReSource is guarded for assets; the save copy calls past it.
+        g_copyFileExW(path, twin, nullptr, nullptr, nullptr, COPY_FILE_FAIL_IF_EXISTS);
     }
     if (write) LogRedirect(api, path, twin);
     return true;
@@ -404,6 +540,30 @@ BOOL WINAPI HookedRemoveDirectoryA(LPCSTR path) {
         return FALSE;
     }
     return g_removeDirectoryA(path);
+}
+
+// Path-based attribute writes (handle-based ones need write access, which
+// RouteOpen already covers). The asset pruner runs before these hooks.
+using SetFileAttributesWFn = BOOL(WINAPI*)(LPCWSTR, DWORD);
+using SetFileAttributesAFn = BOOL(WINAPI*)(LPCSTR, DWORD);
+SetFileAttributesWFn g_setFileAttributesW = nullptr;
+SetFileAttributesAFn g_setFileAttributesA = nullptr;
+
+BOOL WINAPI HookedSetFileAttributesW(LPCWSTR path, DWORD attributes) {
+    if (IsGuardedPath(path)) {
+        Deny("SetFileAttributesW", path);
+        return FALSE;
+    }
+    return g_setFileAttributesW(path, attributes);
+}
+
+BOOL WINAPI HookedSetFileAttributesA(LPCSTR path, DWORD attributes) {
+    const Wide wide(path);
+    if (IsGuardedPath(wide.get())) {
+        Deny("SetFileAttributesA", wide.get());
+        return FALSE;
+    }
+    return g_setFileAttributesA(path, attributes);
 }
 
 BOOL WINAPI HookedDeleteFileW(LPCWSTR path) {
@@ -636,13 +796,28 @@ bool Install(LogFn log) {
         MultiByteToWideChar(CP_ACP, 0, dir, -1, wide, MAX_PATH - 1);
         wchar_t joined[MAX_PATH] = {};
         swprintf_s(joined, L"%s\\save_sandbox_%lu", wide, GetCurrentProcessId());
+        // Whether saves may use the sandbox is decided as before VUH-2775.
         if (GetFullPathNameW(joined, MAX_PATH, g_sandbox, nullptr) == 0 ||
             !(CreateDirectoryW(g_sandbox, nullptr) || GetLastError() == ERROR_ALREADY_EXISTS) ||
-            IsGuardedPath(g_sandbox)) {
+            IsSavePath(g_sandbox)) {
             g_sandbox[0] = L'\0';  // no sandbox: write opens fail closed
         }
+        // Asset twins additionally need a sandbox that is no link and lies
+        // outside every asset root and the save folder, however it's spelled.
+        wchar_t lowered[1024] = {}, resolved[1024] = {};
+        if (g_sandbox[0]) {
+            wcscpy_s(lowered, g_sandbox);
+            Lower(lowered);
+        }
+        const DWORD attributes = g_sandbox[0] ? GetFileAttributesW(g_sandbox) : INVALID_FILE_ATTRIBUTES;
+        g_assetTwinsOk = attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+                         !AssetRootEnd(lowered) && ResolvedLower(g_sandbox, resolved) && !AssetRootEnd(resolved) &&
+                         !std::wcsstr(resolved, kSaveFolder);
+        if (g_sandbox[0] && !g_assetTwinsOk && g_log) {
+            g_log("[saveguard] sandbox unusable for install-asset twins; asset writes are denied");
+        }
     }
-    if (g_sandbox[0]) PruneAssetTwins(g_sandbox);
+    if (g_assetTwinsOk) PruneAssetTwins(g_sandbox);
     bool ok = true;
     ok &= HookApi(L"kernelbase", "CreateFileW", reinterpret_cast<void*>(&HookedCreateFileW), &g_createFileW);
     ok &= HookApi(L"kernelbase", "CreateFileA", reinterpret_cast<void*>(&HookedCreateFileA), &g_createFileA);
@@ -662,6 +837,10 @@ bool Install(LogFn log) {
                   &g_removeDirectoryW);
     ok &= HookApi(L"kernelbase", "RemoveDirectoryA", reinterpret_cast<void*>(&HookedRemoveDirectoryA),
                   &g_removeDirectoryA);
+    ok &= HookApi(L"kernelbase", "SetFileAttributesW", reinterpret_cast<void*>(&HookedSetFileAttributesW),
+                  &g_setFileAttributesW);
+    ok &= HookApi(L"kernelbase", "SetFileAttributesA", reinterpret_cast<void*>(&HookedSetFileAttributesA),
+                  &g_setFileAttributesA);
     if (g_log) {
         char sandbox[MAX_PATH] = {};
         WideCharToMultiByte(CP_UTF8, 0, g_sandbox, -1, sandbox, MAX_PATH - 1, nullptr, nullptr);

@@ -18,7 +18,10 @@
 // <sandbox>\install-assets\<path below KH2ReSource> (a full copy of the
 // original, about 63 MB for a post-boss movie) and later reads of that file
 // follow the twin. The installed file is never opened for writing, and the
-// KH2ReSource root itself can't be moved or removed. Install prunes
+// KH2ReSource root itself can't be moved or removed. Asset writes match the
+// resolved path (8.3, junction and \\?\ aliases); a twin is published only as
+// a whole copy, and any doubt about it fails the write (VUH-2763 review). A
+// sandbox under KH2ReSource disables asset twins only. Install prunes
 // install-assets twins from all but the newest six finished sandboxes, within
 // a fixed work and time budget.
 // ============================================================================

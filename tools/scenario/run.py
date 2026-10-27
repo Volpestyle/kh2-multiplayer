@@ -2763,7 +2763,9 @@ def step_test_enemy_hp(ctx: Context, step: dict) -> dict:
     actor = rows[0]
     status = int(actor["status"], 16)
     base = int(str(kh2ctl("peek", "--rva", "0x717008:u8", pid=pid)["moduleBase"]), 0)
-    keys = [f"0x{(status + offset - base) & ((1 << 64) - 1):X}" for offset in (0, 4)]
+    if status < base:  # kh2ctl peek reads only base+RVA and refuses an RVA that would wrap
+        raise StepFailed(f"test_enemy_hp: status 0x{status:X} is below the module base 0x{base:X}")
+    keys = [f"0x{status + offset - base:X}" for offset in (0, 4)]
     def read():
         sample = kh2ctl("peek", "--rva", ",".join(f"{k}:i32" for k in keys), pid=pid)["samples"][0]
         return int(sample[keys[0]]), int(sample[keys[1]])

@@ -84,6 +84,19 @@ class MovieTwinsTest(unittest.TestCase):
                 self.assertTrue(outside.exists())
                 self.assertEqual(receipt["deleted"], [])
 
+    def test_refuses_a_symlinked_sandbox_root(self):
+        # Rhea's repro (ddc42716): a symlinked sandbox root once deleted an outside .mp4 and exited 0.
+        outside = self.write(self.root / "outside/install-assets/zmovie/en/me4.mp4", "not a twin")
+        try:
+            os.symlink(self.root / "outside", self.logs / f"save_sandbox_{DEAD}", target_is_directory=True)
+        except OSError:
+            self.skipTest("this account can't create symlinks (the junction cases still run)")
+        self.addCleanup(os.rmdir, self.logs / f"save_sandbox_{DEAD}")
+        code, receipt = TWINS.clean(self.logs, [DEAD])
+        self.assertEqual(code, 2)
+        self.assertTrue(outside.exists())
+        self.assertEqual(receipt["deleted"], [])
+
     def test_refuses_a_logs_root_outside_the_allowed_roots(self):
         with mock.patch.object(TWINS, "allowed_logs", return_value=False):
             self.assertEqual(TWINS.clean(self.logs, [DEAD])[0], 2)

@@ -1,9 +1,13 @@
 // Starts only copies of this harmless executable. All file writes are in a
 // uniquely owned temp directory; no game process, save, network or Steam API.
 #include "../tools/kh2ctl/src/preinject.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
+#include <functional>
+#include <thread>
 #include <vector>
 #include <iostream>
 #include <stdexcept>
@@ -34,6 +38,72 @@ int wmain(int argc, wchar_t** argv) {
         const BOOL deleted = DeleteFileA(fs::path(argv[2]).string().c_str());
         Write(argv[3], ((deleted ? "deleted|" : "blocked|") + readBack).c_str());
         return deleted ? 3 : 0;
+    }
+    if (argc >= 5 && std::wstring(argv[1]) == L"--ops") {
+        // argv[2]: marker; then (op, path) pairs, each reported in order (VUH-2763 review controls).
+        //   rw    fopen r+b, write "patched!" at 0       -> wrote|failed
+        //   ow    CreateFileW GENERIC_WRITE OPEN_ALWAYS   -> opened|failed
+        //   attr  SetFileAttributesW READONLY|HIDDEN      -> set|denied
+        //   attrA SetFileAttributesA READONLY|HIDDEN      -> set|denied
+        //   race  8 threads at once: r+b, read the last 8 bytes, write "patched!" at 0 -> race:<tails seen>
+        std::string out;
+        for (int i = 3; i + 1 < argc; i += 2) {
+            const std::wstring op = argv[i];
+            const wchar_t* path = argv[i + 1];
+            std::string result;
+            if (op == L"rw") {
+                FILE* file = nullptr;
+                const bool opened = _wfopen_s(&file, path, L"r+b") == 0 && file;
+                const bool wrote = opened && fwrite("patched!", 1, 8, file) == 8;
+                result = opened && fclose(file) == 0 && wrote ? "wrote" : "failed";
+            } else if (op == L"ow") {
+                HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, 0, nullptr);
+                result = file != INVALID_HANDLE_VALUE ? "opened" : "failed";
+                if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+            } else if (op == L"attr") {
+                result = SetFileAttributesW(path, FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN) ? "set" : "denied";
+            } else if (op == L"attrA") {
+                result = SetFileAttributesA(fs::path(path).string().c_str(), FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN)
+                             ? "set" : "denied";
+            } else if (op == L"race") {
+                std::vector<std::string> tails(8);
+                std::vector<std::thread> threads;
+                HANDLE start = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+                for (int t = 0; t < 8; ++t) {
+                    threads.emplace_back([&, t] {
+                        WaitForSingleObject(start, INFINITE);
+                        // A scanner can briefly hold a freshly written file (error 32); the game's own
+                        // movie writer retries such a failure too (VUH-2763 capture, 0xc01c0004).
+                        FILE* file = nullptr;
+                        for (int attempt = 0; attempt < 40; ++attempt) {
+                            if (_wfopen_s(&file, path, L"r+b") == 0 && file) break;
+                            if (GetLastError() != ERROR_SHARING_VIOLATION) break;
+                            Sleep(50);
+                        }
+                        if (!file) {
+                            tails[t] = "open-failed-" + std::to_string(GetLastError());
+                            return;
+                        }
+                        char tail[9] {};
+                        fseek(file, -8, SEEK_END);
+                        tails[t] = fread(tail, 1, 8, file) == 8 ? tail : "short";
+                        fseek(file, 0, SEEK_SET);
+                        fwrite("patched!", 1, 8, file);
+                        fclose(file);
+                    });
+                }
+                SetEvent(start);
+                for (auto& thread : threads) thread.join();
+                CloseHandle(start);
+                std::sort(tails.begin(), tails.end());
+                tails.erase(std::unique(tails.begin(), tails.end()), tails.end());
+                result = "race:";
+                for (const auto& tail : tails) result += tail + ";";
+            }
+            out += (out.empty() ? "" : "|") + result;
+        }
+        Write(argv[2], out.c_str());
+        return 0;
     }
     if (argc == 4 && std::wstring(argv[1]) == L"--movie-child") {
         // argv[2]: an installed cipher movie, played the way the game does (VUH-2763): a read, the decrypt
@@ -256,6 +326,126 @@ int wmain(int argc, wchar_t** argv) {
                               L"zmovie" / L"en" / L"me4.mp4";
             Check(Read(twin) == std::string("restored") + (original + 8), "movie twin holds the copy plus both writes");
         }
+    }
+    // Review controls (VUH-2763, Rhea ddc42716): each fails without its fix.
+    auto runOps = [&](const std::vector<std::wstring>& ops, const fs::path& marker,
+                      const std::function<void(DWORD)>& beforeResume) {
+        std::wstring command = L"\"" + std::wstring(exe) + L"\" --ops \"" + marker.wstring() + L"\"";
+        for (const auto& op : ops) command += L" \"" + op + L"\"";
+        STARTUPINFOW startup {};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION info {};
+        if (!CreateProcessW(exe, command.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED, nullptr, root.c_str(),
+                            &startup, &info))
+            throw std::runtime_error("offline ops child creation failed");
+        const DWORD pid = info.dwProcessId;
+        if (beforeResume) beforeResume(pid);
+        Child child(info);
+        const auto error = child.ProtectAndResume([&](DWORD id) { return InjectDll(id, dll); }, 10000);
+        const bool exited = error.empty() && WaitForSingleObject(info.hProcess, 30000) == WAIT_OBJECT_0;
+        return std::make_pair(exited, pid);
+    };
+    auto twinOf = [&](DWORD pid, const wchar_t* name) {
+        return logs / (L"save_sandbox_" + std::to_wstring(pid)) / L"install-assets" / L"zmovie" / L"en" / name;
+    };
+    auto guardLog = [&](const fs::path& dir, DWORD pid) {
+        return Read(dir / (L"preinject_guard_" + std::to_wstring(pid) + L".log"));
+    };
+    {
+        // 1. Aliases of the installed root: a junction with no KH2ReSource component, an 8.3 name, and "\\?\".
+        for (const wchar_t* name : {L"a1.mp4", L"a2.mp4", L"a3.mp4"}) Write(asset / name, "ORIGINAL-alias");
+        const auto alias = root / L"alias";
+        const std::wstring junction = L"cmd /c mklink /J \"" + alias.wstring() + L"\" \"" + asset.wstring() + L"\" >nul";
+        Check(_wsystem(junction.c_str()) == 0 && fs::exists(alias / L"a1.mp4"), "alias junction to the movie folder");
+        wchar_t shortName[MAX_PATH] {};
+        GetShortPathNameW((asset / L"a2.mp4").c_str(), shortName, MAX_PATH);
+        const bool shortNames = std::wstring(shortName).find(L'~') != std::wstring::npos;
+        if (!shortNames) std::cout << "NOTE 8.3 names are disabled on this volume; the short-name case is not exercised\n";
+        const std::wstring extended = L"\\\\?\\" + (asset / L"a3.mp4").wstring();
+        const auto marker = root / "alias.marker";
+        auto [exited, pid] = runOps({L"rw", (alias / L"a1.mp4").wstring(), L"rw",
+                                     shortNames ? std::wstring(shortName) : (asset / L"a2.mp4").wstring(), L"rw", extended},
+                                    marker, nullptr);
+        Check(exited && Read(marker) == "wrote|wrote|wrote", "aliased movie writes succeed");
+        Check(Read(asset / L"a1.mp4") == "ORIGINAL-alias" && Read(asset / L"a2.mp4") == "ORIGINAL-alias" &&
+                  Read(asset / L"a3.mp4") == "ORIGINAL-alias",
+              "junction, 8.3 and \\\\?\\ aliases of an installed movie never write the install");
+        Check(Read(twinOf(pid, L"a1.mp4")) == "patched!-alias" && Read(twinOf(pid, L"a2.mp4")) == "patched!-alias" &&
+                  Read(twinOf(pid, L"a3.mp4")) == "patched!-alias",
+              "aliased movie writes land on the resolved twin");
+        RemoveDirectoryW(alias.c_str());  // the junction only, never its target
+    }
+    {
+        // 2. The current sandbox's install-assets is a junction back to the installed root: fail closed.
+        Write(asset / L"b.mp4", "ORIGINAL-b");
+        const auto marker = root / "junction.marker";
+        fs::path planted;
+        auto [exited, pid] = runOps({L"rw", (asset / L"b.mp4").wstring()}, marker, [&](DWORD id) {
+            const auto sandbox = logs / (L"save_sandbox_" + std::to_wstring(id));
+            fs::create_directories(sandbox);
+            planted = sandbox / L"install-assets";
+            const std::wstring link = L"cmd /c mklink /J \"" + planted.wstring() + L"\" \"" +
+                                      (root / L"STEAM" / L"juefigs" / L"KH2ReSource").wstring() + L"\" >nul";
+            _wsystem(link.c_str());
+        });
+        Check(fs::exists(planted / L"zmovie" / L"en" / L"b.mp4"), "planted install-assets junction resolves to the install");
+        Check(exited && Read(marker) == "failed" && Read(asset / L"b.mp4") == "ORIGINAL-b",
+              "a junctioned install-assets is refused and the installed movie is unchanged");
+        RemoveDirectoryW(planted.c_str());
+        (void)pid;
+    }
+    {
+        // 3a. Eight threads open the same movie for writing at once: one whole copy, every opener sees it.
+        std::string big(32 << 20, 'x');
+        big.replace(big.size() - 8, 8, "TAILTAIL");
+        std::ofstream(asset / L"big.mp4", std::ios::binary).write(big.data(), static_cast<std::streamsize>(big.size()));
+        const auto marker = root / "race.marker";
+        auto [exited, pid] = runOps({L"race", (asset / L"big.mp4").wstring()}, marker, nullptr);
+        const auto text = guardLog(logs, pid);
+        size_t ready = 0;
+        for (size_t at = text.find("asset twin ready"); at != std::string::npos; at = text.find("asset twin ready", at + 1))
+            ++ready;
+        Check(exited && Read(marker) == "race:TAILTAIL;" && ready == 1,
+              "concurrent first opens copy the movie once and all see the whole copy");
+        Check(Read(asset / L"big.mp4") == big && fs::file_size(twinOf(pid, L"big.mp4")) == big.size(),
+              "raced movie: install unchanged, twin complete");
+        // 3b. The copy fails (source locked): an OPEN_ALWAYS write fails and publishes no twin.
+        Write(asset / L"c.mp4", "ORIGINAL-c");
+        HANDLE lock = CreateFileW((asset / L"c.mp4").c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        const auto failMarker = root / "copyfail.marker";
+        auto [failExited, failPid] = runOps({L"ow", (asset / L"c.mp4").wstring()}, failMarker, nullptr);
+        if (lock != INVALID_HANDLE_VALUE) CloseHandle(lock);
+        const auto failedTwin = twinOf(failPid, L"c.mp4");
+        Check(failExited && Read(failMarker) == "failed" && !fs::exists(failedTwin) &&
+                  !fs::exists(failedTwin.wstring() + L".partial") && Read(asset / L"c.mp4") == "ORIGINAL-c",
+              "a failed twin copy fails the open, leaves no twin and never reaches the install");
+    }
+    {
+        // 4. Path-based attribute writes on an installed movie are denied.
+        Write(asset / L"d.mp4", "ORIGINAL-d");
+        const DWORD before = GetFileAttributesW((asset / L"d.mp4").c_str());
+        const auto marker = root / "attr.marker";
+        auto [exited, pid] = runOps({L"attr", (asset / L"d.mp4").wstring(), L"attrA", (asset / L"d.mp4").wstring()},
+                                    marker, nullptr);
+        Check(exited && Read(marker) == "denied|denied" && GetFileAttributesW((asset / L"d.mp4").c_str()) == before,
+              "SetFileAttributesW/A on an installed movie are denied; attributes unchanged");
+        (void)pid;
+    }
+    {
+        // 5. A log directory under KH2ReSource: saves still route to the sandbox; asset writes fail closed.
+        const auto inside = root / L"STEAM" / L"juefigs" / L"KH2ReSource" / L"logs";
+        fs::create_directories(inside);
+        Write(guarded / L"e.png", "original-save");
+        Write(asset / L"e.mp4", "ORIGINAL-e");
+        SetEnvironmentVariableW(L"KH2COOP_LOG_DIR", inside.c_str());
+        const auto marker = root / "insidelogs.marker";
+        auto [exited, pid] = runOps({L"rw", (guarded / L"e.png").wstring(), L"rw", (asset / L"e.mp4").wstring()},
+                                    marker, nullptr);
+        SetEnvironmentVariableW(L"KH2COOP_LOG_DIR", logs.c_str());
+        const auto saveTwin = inside / (L"save_sandbox_" + std::to_wstring(pid)) / L"Steam" / L"test" / L"e.png";
+        Check(exited && Read(marker) == "wrote|failed" && Read(guarded / L"e.png") == "original-save" &&
+                  Read(saveTwin) == "patched!-save" && Read(asset / L"e.mp4") == "ORIGINAL-e",
+              "logs under KH2ReSource keep save routing; asset writes are denied");
     }
     fs::remove_all(root); // exactly the temp directory successfully created above
     return failures ? 1 : 0;

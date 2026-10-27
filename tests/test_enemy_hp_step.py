@@ -12,7 +12,8 @@ spec = importlib.util.spec_from_file_location("enemy_hp_runner", ROOT / "tools/s
 RUN = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(RUN)
 
-BASE, STATUS = 0x140000000, 0x2B000000
+# Retained Thorn descriptors have status pointers above the image base.
+BASE, STATUS = 0x7FF6A0000000, 0x7FF6C2B40000
 THORN = {"address": "0x2A000000", "objectId": 307, "objectType": 12, "status": f"0x{STATUS:X}", "hp": 300, "maxHp": 300}
 
 
@@ -26,9 +27,11 @@ class FakeGame:
     def __call__(self, *args, pid=None, **_):
         if args[0] == "peek":
             fields = [field.split(":")[0] for field in args[2].split(",")]
+            # Like CmdPeek: an RVA that would overflow base+RVA is refused (the runner raises on it).
+            if any(BASE + int(key, 16) >= 2**64 for key in fields):
+                raise RUN.StepFailed("kh2ctl peek: peek failed to read RVA")
             return {"moduleBase": hex(BASE),
-                    # kh2ctl adds the RVA to the module base modulo 2**64 (heap below the image).
-                    "samples": [{key: self.memory.get((BASE + int(key, 16)) % 2**64, 0) for key in fields}]}
+                    "samples": [{key: self.memory.get(BASE + int(key, 16), 0) for key in fields}]}
         if args[0] == "poke":
             address, value = int(args[2], 16), int(args[6])
             self.pokes.append((pid, address, args[4], value))
@@ -74,6 +77,13 @@ class EnemyHpStepTest(unittest.TestCase):
             with self.subTest(message), self.assertRaisesRegex(RUN.StepFailed, message):
                 self.run_step(game, context(actors), hp=hp)
             self.assertEqual(game.pokes, [])
+
+    def test_refuses_a_status_below_the_image(self):
+        game = FakeGame()
+        below = dict(THORN, status=f"0x{BASE - 0x1000:X}")
+        with self.assertRaisesRegex(RUN.StepFailed, "below the module base"):
+            self.run_step(game, context([below]))
+        self.assertEqual(game.pokes, [])
 
     def test_failed_readback_is_reported(self):
         with self.assertRaisesRegex(RUN.StepFailed, "readback"):

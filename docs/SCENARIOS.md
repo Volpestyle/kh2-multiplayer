@@ -1819,7 +1819,16 @@ Three layers:
     the launch acknowledgement, it's capped: it ranks at most 256 sandboxes
     (more than that and it prunes nothing), recurses at most 16 levels, and
     stops after 1024 removals or one second, leaving the rest for a later
-    install. Saved files in those sandboxes stay. Twins are copies of
+    install. Saved files in those sandboxes stay. Write opens and the
+    destructive APIs (now including `SetFileAttributesA/W`) match the asset
+    root on the resolved path (`GetFinalPathNameByHandleW`), so 8.3, junction
+    and `\\?\` aliases count; saves still match by spelling exactly as
+    before. Twin setup is serialized and copies to a `.partial` name that is
+    renamed into place only when complete; a failed copy, a reparse point
+    anywhere from the sandbox down, or a twin resolving into a guarded
+    original fails the write instead of reaching the install. A sandbox under
+    `KH2ReSource` disables only asset twins; saves keep their sandbox
+    (VUH-2763 review). Twins are copies of
     copyrighted assets: never publish them. A live run deletes its own at
     closure with `python -B tools/rig/movie_twins.py clean --logs
     build/rig/logs --pid <owned pid>` and records the JSON in `closure.json`;
