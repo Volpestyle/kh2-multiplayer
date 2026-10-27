@@ -3382,7 +3382,9 @@ wave 1 and accepted a wave 2 that had already begun. The expression helper
   names;
 - the line where each seat first names that episode;
 - each seat's first line about the wave's object;
-- the downed seat's later hold end, revive or return for that episode.
+- the downed seat's later hold end, revive or return for that episode, or for
+  a re-mint of it before any new downing (`docs/DOWNED_REVIVE.md`, "Episodes":
+  after 30 s without a request the same downing ends under the re-minted number).
 
 It returns `ok`/`why`, `episodeSeen`, `waveStarted` and `ended`. The variants
 stop wave 1 at two of its four deaths, refuse to continue if wave 2 has started,

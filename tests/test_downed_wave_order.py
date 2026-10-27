@@ -103,6 +103,33 @@ class CheckerTest(unittest.TestCase):
             self.assertFalse(r["ok"])
             self.assertFalse(r["ended"])
 
+    def test_end_under_a_remint_of_the_same_downing(self):
+        # Live runs 20261026-194057/-194738: 30 s without a request re-minted the episode, and the
+        # encounter-defeat return and revive named the re-mint.
+        remint = "[downed] episode re-minted reason=no-accepted-request episode=70ECF08300000002 remints=1"
+        ends = ["[downed] return encounter-defeat self episode=70ECF08300000002 result=5 owed=1",
+                "[downed] revive episode=70ECF08300000002 actor=7FF627445600 hp=1/22 target=5 logical=1 frame=7639"]
+        for downed in (0, 1):
+            for end in ends:
+                host, friend = traces(downed, "good")
+                seat = [host, friend]
+                seat[downed] = seat[downed].replace(ended()[0], remint + "\n" + end)
+                r = ORDER.wave_order(seat, downed, MARK)
+                self.assertTrue(r["ok"], r["why"])
+                self.assertEqual(r["episode"], EP)
+                self.assertEqual(r["episodes"], [EP, "70ECF08300000002"])
+
+    def test_a_remint_after_a_new_downing_is_not_this_downings_end(self):
+        later = ["[downed] gate intercept mode=4 logical=1 episode=70ECF08300000003 actor=7FF627445600 hp=1 delta=-1 -> engine hp 1, dead bit clear room=2/20/0/137/137/137 frame=10391",
+                 "[downed] episode re-minted reason=no-accepted-request episode=70ECF08300000004 remints=2",
+                 "[downed] revive episode=70ECF08300000004 actor=7FF627445600 hp=1/22 target=5 logical=1 frame=11000"]
+        host, friend = traces(1, "good")
+        friend = friend.replace(ended()[0], "\n".join(later))
+        r = ORDER.wave_order([host, friend], 1, MARK)
+        self.assertFalse(r["ok"])
+        self.assertFalse(r["ended"])
+        self.assertEqual(r["episodes"], [EP])
+
     def test_exactly_one_forced_kill(self):
         host, friend = traces(1, "good")
         friend = friend + "\n" + kill("70ECF08300000002")[0]

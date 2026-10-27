@@ -13,8 +13,11 @@ line), which is the only order a seat's own log can establish:
   each logs its first line about the wave's object (`objectId=309` / `objectId 309`: a host
   manifest or difficulty scale line, a client local spawn or binding line). Any such line first
   means the wave had already started on that seat, and the downing proves nothing about it;
-- the episode's end is a later downed-seat line naming E: its logical hold ending, a revive,
-  or a return.
+- the episode's end is a later downed-seat line naming E, or a re-mint of E: its logical hold
+  ending, a revive, or a return. While still downed the owner re-mints the episode after 30 s
+  without an accepted request (docs/DOWNED_REVIVE.md, "Episodes"); the same downing then ends
+  under the re-minted number (live runs 20261026-194057 and -194738). A later intercept is a
+  new downing, so re-mints are collected only up to it.
 """
 from __future__ import annotations
 
@@ -22,6 +25,7 @@ import re
 
 KILL = re.compile(r"\[downed\] kill actor=")
 INTERCEPT = re.compile(r"\[downed\] gate intercept mode=\d+ .*?episode=([0-9A-Fa-f]+)\b")
+REMINT = re.compile(r"\[downed\] episode re-minted reason=\S+ episode=([0-9A-Fa-f]+)\b")
 END = r"\[downed\] (?:logical hold ended reason=\d+ episode={e}\b|revive episode={e}\b|return (?!owed ).*episode={e}\b|owed return kind=\d+ episode={e}\b)"
 
 
@@ -40,9 +44,21 @@ def _first(lines: list[str], start: int, pattern: re.Pattern | str) -> int | Non
     return None
 
 
+def _episodes(lines: list[str], intercept: int, episode: str) -> list[str]:
+    """The downing's episode and its re-mints, up to the next intercept (a new downing)."""
+    chain = [episode]
+    for i in range(intercept + 1, len(lines)):
+        if INTERCEPT.search(lines[i]):
+            break
+        m = REMINT.search(lines[i])
+        if m:
+            chain.append(m.group(1).upper())
+    return chain
+
+
 def wave_order(texts: list[str], downed: int, marker: str, wave_object: int = 309) -> dict:
     """texts[i] is seat i's log. Returns the evidence and ok/why; never raises on a bad trace."""
-    out = {"ok": False, "why": "", "episode": None, "downed": downed, "seats": [], "ended": False,
+    out = {"ok": False, "why": "", "episode": None, "episodes": [], "downed": downed, "seats": [], "ended": False,
            "episodeSeen": [False] * len(texts), "waveStarted": [False] * len(texts)}
     if downed not in range(len(texts)) or len(texts) != 2:
         out["why"] = "two seats and a downed seat index are required"
@@ -81,7 +97,9 @@ def wave_order(texts: list[str], downed: int, marker: str, wave_object: int = 30
         line = out["seats"][seat]["episodeLine"]
         first_wave = out["seats"][seat]["firstWave"]
         out["episodeSeen"][seat] = line is not None and (first_wave is None or line < first_wave)
-    ended = _first(d, intercept[0], END.format(e=episode))
+    chain = _episodes(d, intercept[0], episode)
+    out["episodes"] = chain
+    ended = _first(d, intercept[0], END.format(e="(?:" + "|".join(chain) + ")"))
     out["seats"][downed]["episodeEnd"] = ended
     out["ended"] = ended is not None
     for seat in (downed, other):
@@ -100,7 +118,7 @@ def wave_order(texts: list[str], downed: int, marker: str, wave_object: int = 30
         out["why"] = f"seat {downed}'s wave started before the forced kill"
         return out
     if not out["ended"]:
-        out["why"] = f"episode {episode} has no hold end, revive or return on seat {downed}"
+        out["why"] = f"episode {episode} (or a re-mint of it) has no hold end, revive or return on seat {downed}"
         return out
     out["ok"] = True
     out["why"] = "the downing preceded the wave on both seats and its episode ended"
