@@ -985,6 +985,25 @@ def step_coop_verdict(ctx: Context, step: dict) -> dict:
             "arrivalWait": wait, "lastRoom": last}
 
 
+def step_hp_ledger(ctx: Context, step: dict) -> dict:
+    """VUH-2910: one host boss HP pool, joined to each seat's hits (tools/scenario/boss_hp_ledger.py).
+    `marks` names saved [hostLines, friendLines] entries (`log_count('', i)`); `phases` use those names.
+    Writes `<as>.json`; fails the step unless `require` is false."""
+    host, friend = step.get("host", 0), step.get("friend", 1)
+    text = lambda i: (LOGS / f"kh2coop_inject_{ctx.inst(i).pid}.log").read_text(encoding="utf-8", errors="replace")
+    marks = {"marks": {name: ctx.saved[name] for name in step["marks"]}, "phases": step.get("phases", []),
+             "window": step.get("window", [step["marks"][0], step["marks"][-1]]), "program": step.get("program", 87)}
+    result = _boss_hp_ledger.ledger(text(host), text(friend), int(step["objectId"]), marks)
+    name = step.get("as", "hp_ledger")
+    path = ctx.run_dir / f"{name}.json"
+    path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    ctx.artifacts.append(path.name)
+    ctx.saved[name] = result
+    if step.get("require", True) and not result["pass"]:
+        raise StepFailed(f"hp ledger: {result['problems'][:6]}")
+    return {k: result[k] for k in ("pass", "problems", "hp", "counts", "phases")}
+
+
 def step_hang_check(ctx: Context, step: dict) -> dict:
     """Turns an instance's stalled-frame hang check off or on, for screens that may
     stop the field frame counter, such as the World Map (VUH-2341)."""
@@ -5370,6 +5389,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "press": step_press, "wait": step_wait, "wait_until": step_wait_until, "checkpoint": step_checkpoint,
          "fight": step_fight,
          "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check, "coop_verdict": step_coop_verdict,
+         "hp_ledger": step_hp_ledger,
          "revive_guard": step_revive_guard, "downed_kill": step_downed_kill,
          "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "pilot_wait": step_pilot_wait, "pilot_until": step_pilot_until, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
@@ -5395,6 +5415,12 @@ _coop_verdict_spec = _importlib_util.spec_from_file_location(
     "kh2coop_coop_verdict", Path(__file__).with_name("coop_verdict.py"))
 _coop_verdict = _importlib_util.module_from_spec(_coop_verdict_spec)
 _coop_verdict_spec.loader.exec_module(_coop_verdict)
+
+# VUH-2910: the boss HP ledger (pure, over the seats' logs).
+_boss_hp_ledger_spec = _importlib_util.spec_from_file_location(
+    "kh2coop_boss_hp_ledger", Path(__file__).with_name("boss_hp_ledger.py"))
+_boss_hp_ledger = _importlib_util.module_from_spec(_boss_hp_ledger_spec)
+_boss_hp_ledger_spec.loader.exec_module(_boss_hp_ledger)
 
 # VUH-2869: the forced-downing/wave ordering checker (pure, over the seats' logs).
 _downed_order_spec = _importlib_util.spec_from_file_location(
@@ -5758,7 +5784,7 @@ def validate_scenario(scenario: dict) -> None:
                 "runtime": ("role",), "record": ("as",), "record_stop": ("as",),
                 "reconnect_mark": ("as",), "runtime_pause": ("instance", "after"),
                 "reconnect_check": ("after",),
-                "align_courtyard_exit": ("blockedExpr",), "checkpoint": ("name",)}
+                "align_courtyard_exit": ("blockedExpr",), "checkpoint": ("name",), "hp_ledger": ("objectId", "marks")}
     for number, step in enumerate(scenario["steps"]):
         prefix = f"step {number}"
         if not isinstance(step, dict) or step.get("do") not in STEPS:

@@ -1,0 +1,222 @@
+{
+ "name": "net_prologue_axel_sandlot_hp",
+ "description": "VUH-2910, PC1 loopback from FM-01 with a host warp to Axel I, the Day 5 Sandlot skirmish (02/05 btl87, site tt05-87, B_EX110_SKIRMISH 2229). Rehearsal warp: not native entry or route evidence. Shipped defaults, no protect; KH2COOP_ENEMY_MIRROR_TRACE and KH2COOP_TRACE_HITS are diagnostics only. One bounded interleaved round: both seats run the scenario fight bot for up to 10 s, stopping early once a host hit and a friend claim have both landed, filmed on both seats with 12 s clips. PC1's rig saves are Critical (22-HP Roxas, 6-damage Axel hits), and solo rounds ended in a native game over within about 10 s (shakes 02-05), so host-only and friend-only evidence comes from runs 20261027-093915 and 20261027-092525. The judged window opens at the friend's take-over. boss_hp_ledger joins every host Axel HP change to one host native hit or one friend claim application, checks that the friend's puppet hits zero on the host and the friend's own hits never change its copy, that the friend's brain stays skipped, that both seats settle on the host's HP and max HP, and that each player takes a native Axel hit. No victory. No save.",
+ "playerDefaults": true,
+ "protect": [],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "slotMoves": -2,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+    "KH2COOP_TRACE_HITS": "1"
+   }
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "slotMoves": -2,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+    "KH2COOP_TRACE_HITS": "1"
+   }
+  },
+  {
+   "do": "assert",
+   "expr": "room(0)[0] == 2 and room(1)[0] == 2",
+   "message": "the rehearsal save must load Twilight Town on both seats"
+  },
+  {
+   "do": "relay",
+   "port": 27849,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[enemysync] client arrived epoch=', 1) > 0",
+   "timeoutMs": 60000
+  },
+  {
+   "do": "hang_check",
+   "instance": 0,
+   "on": false
+  },
+  {
+   "do": "hang_check",
+   "instance": 1,
+   "on": false
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[prologue] unpinned start', 0) > 0 and log_count('[prologue] unpinned start', 1) > 0",
+   "timeoutMs": 60000,
+   "pollMs": 500
+  },
+  {
+   "do": "warp",
+   "instance": 0,
+   "world": 2,
+   "room": 5,
+   "door": 0,
+   "map": 87,
+   "btl": 87,
+   "evt": 87
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0)[1] == 5",
+   "timeoutMs": 60000,
+   "pollMs": 200
+  },
+  {
+   "do": "wait",
+   "ms": 10000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "intro_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "intro_friend"
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('control released at=02/05 evt=87 site=tt05-87', 0) > 0 and log_count('control released at=02/05 evt=87 site=tt05-87', 1) > 0",
+   "timeoutMs": 120000,
+   "pollMs": 500
+  },
+  {
+   "do": "assert",
+   "expr": "all(len([a for a in actors(i) if a['name'] == 'P_EX110']) == 2 for i in (0, 1))",
+   "message": "both seats must hold both Roxases at tt05-87"
+  },
+  {
+   "do": "save",
+   "as": "boss_start",
+   "expr": "[[(a['hp'], a.get('maxHp')) for a in [a for a in actors(i) if a['name'] == 'B_EX110_SKIRMISH' and a.get('hp', 0) > 0]] for i in (0, 1)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(len(seat) == 1 for seat in saved['boss_start'])",
+   "message": "each seat must hold exactly one living Axel"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len(log_matches(r'\\[enemy-mirror\\] take-over frame=\\d+ netId=\\d+ .*?objectId=2229', 1)) > 0",
+   "timeoutMs": 20000,
+   "pollMs": 250
+  },
+  {
+   "do": "save",
+   "as": "m_start",
+   "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
+   "do": "save",
+   "as": "hp_start",
+   "expr": "([a['hp'] for a in actors(0) if a['name'] == 'B_EX110_SKIRMISH'] or [-1])[0]"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1
+   ],
+   "seconds": 10,
+   "reach": 120,
+   "as": "interleaved",
+   "until": "(lambda hp, c: len(c) > 0 and saved['hp_start'] - hp > sum(int(r['b']) - int(r['a']) for r in c))(([a['hp'] for a in actors(0) if a['name'] == 'B_EX110_SKIRMISH'] or [0])[0], log_matches(r'\\[enemysync\\] host hit claim .*?objectId=2229 .*?beforeHp=(?P<b>\\d+) afterHp=(?P<a>\\d+) nativeOk=1', 0))",
+   "clips": [
+    {
+     "instance": 0,
+     "seconds": 12,
+     "fps": 30,
+     "name": "interleaved_host"
+    },
+    {
+     "instance": 1,
+     "seconds": 12,
+     "fps": 30,
+     "name": "interleaved_friend"
+    }
+   ]
+  },
+  {
+   "do": "save",
+   "as": "m_end",
+   "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
+   "do": "wait",
+   "ms": 4000
+  },
+  {
+   "do": "save",
+   "as": "boss_settled",
+   "expr": "[[(a['hp'], a.get('maxHp')) for a in [a for a in actors(i) if a['name'] == 'B_EX110_SKIRMISH' and a.get('hp', 0) > 0]] for i in (0, 1)]"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "settled_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "settled_friend"
+  },
+  {
+   "do": "hp_ledger",
+   "objectId": 2229,
+   "marks": [
+    "m_start",
+    "m_end"
+   ],
+   "as": "ledger",
+   "require": false,
+   "phases": [
+    {
+     "name": "interleaved",
+     "from": "m_start",
+     "to": "m_end",
+     "host": true,
+     "friend": true
+    }
+   ]
+  },
+  {
+   "do": "assert",
+   "expr": "len(saved['boss_settled'][0]) == 1 and saved['boss_settled'][0] == saved['boss_settled'][1]",
+   "message": "after delivery settles both seats must show one living Axel with the host's HP and max HP"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['ledger']['pass']",
+   "message": "the boss HP ledger must join every HP change to exactly one hit"
+  },
+  {
+   "do": "coop_verdict",
+   "as": "verdict",
+   "require": true
+  }
+ ]
+}
