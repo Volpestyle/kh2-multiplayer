@@ -107,6 +107,28 @@ class ExtraRangesTest(unittest.TestCase):
             RUN.step_progress_snapshot(ctx, {"instances": [0], "as": "plain"}, _read=read)
             self.assertNotIn("forms", ctx.saved["plain"]["instances"]["0"]["ranges"])
 
+    def test_only_reads_just_those_ranges_and_sees_byte_16(self):
+        memory, calls = {}, []
+
+        def read(*args, pid=None):
+            specs = args[2].split(",")
+            calls.append(len(specs))
+            return {"samples": [{s.split(":")[0]: memory.get(int(s.split(":")[0], 16), 0) for s in specs}]}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = context(tmp)
+            step = {"instances": [0], "as": "before", "only": ["characters", "forms"], "extraRanges": [["forms", 0x32F4, 0x230]]}
+            RUN.step_progress_snapshot(ctx, step, _read=read)
+            self.assertEqual(sorted(ctx.saved["before"]["instances"]["0"]["ranges"]), ["characters", "forms"])
+            self.assertEqual(sum(calls), 0xE04 // 8 + 1 + 0x230 // 8)  # every byte of both, nothing else
+            memory[0x9A98B0 + 0x24F0 + 0x10] = 0x7F  # byte 16 of the first character record
+            RUN.step_progress_snapshot(ctx, {**step, "as": "after", "compare": "before"}, _read=read)
+            diffs = ctx.saved["after"]["instances"]["0"]["diffs"]
+            self.assertEqual(diffs["characters"], [{"saveOffset": 0x2500, "before": 0, "after": 0x7F}])
+            self.assertEqual(diffs["forms"], [])
+            with self.assertRaises(RUN.StepFailed):
+                RUN.step_progress_snapshot(ctx, {"instances": [0], "only": ["character"]}, _read=read)
+
 
 if __name__ == "__main__":
     unittest.main()

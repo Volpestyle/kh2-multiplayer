@@ -1,0 +1,716 @@
+{
+ "name": "net_prologue_mansion_axel_form_sora_friend",
+ "description": "FM-02 rehearsal route (the committed Computer Room -> Basement Hall pilot, both Dusk waves) into Axel II, 02/14 btl137 (checked site tt20-137). A default Roxas seat builds the native encounter body 0x323 (P_EX110_BTLF) for its local and for its clone on the other seat, with both keyblades; a Sora seat keeps Sora for both. Inside the host's combat-admission hold (proven around the window, else a setup failure), one synthetic 1-HP native hit lands on each seat's clone: the observer's own HP, every SAVE character record (SAVE+0x24F0, 0xE04) and every drive-form row (SAVE+0x32F4, 0x230: the row a dual-wield status +0x254 references) must be byte-identical just before and just after the hits. Each owner then moves, jumps and attacks alone, filmed on both seats; each owner is downed once (DownedSpike fixture Kill) and revived by the other seat; then both are downed and the host takes the native Continue to the Computer Room 02/15 d99, where each seat holds only its selected body: no dual-wield body, keyblade pair or old clone. Video-only paired clips (lead amendment). Rehearsal save, no save. Selections: host 0x5A, friend 0x54.",
+ "playerDefaults": true,
+ "protect": [],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "slotMoves": -1,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+    "KH2COOP_DOWNED_SPIKE_FIXTURE": "1"
+   }
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "slotMoves": -1,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+    "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
+    "KH2COOP_PROFILE": "0x54"
+   }
+  },
+  {
+   "do": "assert",
+   "expr": "room(0)[0] == 2 and room(1)[0] == 2",
+   "message": "the rehearsal save must load Twilight Town on both seats"
+  },
+  {
+   "do": "save",
+   "as": "boot_vitals",
+   "expr": "[{'hp': [a['hp'] for a in actors(i) if int(a['address'],16) == int(peek('0x2A105D0','u64',i),16)][0], 'difficulty': peek('0x9ABD48','u8',i)} for i in (0, 1)]"
+  },
+  {
+   "do": "progress_snapshot",
+   "instances": [
+    0,
+    1
+   ],
+   "as": "save_boot",
+   "extraRanges": [
+    [
+     "forms",
+     13044,
+     560
+    ]
+   ]
+  },
+  {
+   "do": "relay",
+   "port": 27846,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[enemysync] client arrived epoch=', 1) > 0",
+   "timeoutMs": 60000
+  },
+  {
+   "do": "hang_check",
+   "instance": 0,
+   "on": false
+  },
+  {
+   "do": "hang_check",
+   "instance": 1,
+   "on": false
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[prologue] unpinned start', 0) > 0 and log_count('[prologue] unpinned start', 1) > 0",
+   "timeoutMs": 60000,
+   "pollMs": 500
+  },
+  {
+   "do": "pilot",
+   "instance": 0,
+   "route": "tools/rig/route_pilot/routes/fm02_computer_to_hall.json",
+   "seconds": 120,
+   "name": "host_hall",
+   "input": "pad",
+   "allowStuck": true
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('control released at=02/13 evt=134 site=tt19-134', 0) > 0 and log_count('control released at=02/13 evt=134 site=tt19-134', 1) > 0",
+   "timeoutMs": 90000,
+   "pollMs": 500
+  },
+  {
+   "do": "save",
+   "as": "deaths_before",
+   "expr": "log_count('[enemysync] host death epoch', 0)"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1
+   ],
+   "seconds": 240,
+   "reach": 250,
+   "as": "hall",
+   "until": "log_count('[enemysync] host death epoch', 0) >= saved['deaths_before'] + 6"
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0) == [2, 20, 0, 137, 137, 137] and location(1) == [2, 20, 0, 137, 137, 137]",
+   "timeoutMs": 90000,
+   "pollMs": 250
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[missing-party] born site=tt20-137 bound=1 ', 0) > 0 and log_count('[missing-party] born site=tt20-137 bound=1 ', 1) > 0",
+   "timeoutMs": 30000,
+   "pollMs": 100
+  },
+  {
+   "do": "save",
+   "as": "window_open",
+   "expr": "[log_count('[combat-admission] deferred group=1 ', 0), log_count('[combat-admission] released ', 0)]"
+  },
+  {
+   "do": "progress_snapshot",
+   "instances": [
+    0,
+    1
+   ],
+   "as": "hit_before",
+   "only": [
+    "characters",
+    "forms"
+   ],
+   "extraRanges": [
+    [
+     "forms",
+     13044,
+     560
+    ]
+   ]
+  },
+  {
+   "do": "save",
+   "as": "probe_before",
+   "expr": "[(lambda xs, c: {'local': [a['hp'] for a in xs if int(a['address'],16) == c][0], 'clone': [a['address'] for a in xs if a['name'] == 'P_EX100' and int(a['address'],16) != c][0]})(actors(0), int(peek('0x2A105D0','u64',0),16)), (lambda xs, c: {'local': [a['hp'] for a in xs if int(a['address'],16) == c][0], 'clone': [a['address'] for a in xs if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != c][0]})(actors(1), int(peek('0x2A105D0','u64',1),16))]"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "as": "hit0",
+   "argsExpr": "['hit', 'damage', '--victim', saved['probe_before'][0]['clone'], '--amount', '1']"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "as": "hit1",
+   "argsExpr": "['hit', 'damage', '--victim', saved['probe_before'][1]['clone'], '--amount', '1']"
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "save",
+   "as": "probe_after",
+   "expr": "[(lambda xs, c: {'local': [a['hp'] for a in xs if int(a['address'],16) == c][0], 'clone': [a['address'] for a in xs if a['name'] == 'P_EX100' and int(a['address'],16) != c][0]})(actors(0), int(peek('0x2A105D0','u64',0),16)), (lambda xs, c: {'local': [a['hp'] for a in xs if int(a['address'],16) == c][0], 'clone': [a['address'] for a in xs if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != c][0]})(actors(1), int(peek('0x2A105D0','u64',1),16))]"
+  },
+  {
+   "do": "progress_snapshot",
+   "instances": [
+    0,
+    1
+   ],
+   "as": "hit_after",
+   "compare": "hit_before",
+   "only": [
+    "characters",
+    "forms"
+   ],
+   "extraRanges": [
+    [
+     "forms",
+     13044,
+     560
+    ]
+   ]
+  },
+  {
+   "do": "save",
+   "as": "window_close",
+   "expr": "log_count('[combat-admission] released ', 0)"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['window_open'][0] > saved['window_open'][1] and saved['window_close'] == saved['window_open'][1]",
+   "message": "SETUP FAILURE, not a form result: the host's combat-admission hold (Axel frozen) did not cover the whole clone-hit window; rerun"
+  },
+  {
+   "do": "assert",
+   "expr": "all(saved['hit%d' % i]['ok'] and saved['hit%d' % i]['hpAfter'] == saved['hit%d' % i]['hpBefore'] - 1 for i in (0, 1))",
+   "message": "the synthetic native hit must damage each seat's clone by exactly 1"
+  },
+  {
+   "do": "assert",
+   "expr": "all(saved['probe_after'][i]['local'] == saved['probe_before'][i]['local'] for i in (0, 1)) and all(saved['hit_after']['instances'][k]['diffs'][r] == [] for k in ('0', '1') for r in ('characters', 'forms'))",
+   "message": "a hit on a clone changed its observer's own HP, a SAVE character record byte (SAVE+0x24F0..0x32F4) or a drive-form row byte"
+  },
+  {
+   "do": "save",
+   "as": "census_axel",
+   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
+  },
+  {
+   "do": "save",
+   "as": "form_roots",
+   "expr": "[[{'actor': a['address'], 'local': int(a['address'],16) == int(peek('0x2A105D0','u64',0),16), 'form': peek_at(int(a['address'],16) + 0xDE0, 'u8', 0), 'root': peek_at(int(a['status'],16) + 0x254, 'u64', 0)} for a in actors(0) if a['name'] == 'P_EX110_BTLF'], [{'actor': a['address'], 'local': int(a['address'],16) == int(peek('0x2A105D0','u64',1),16), 'form': peek_at(int(a['address'],16) + 0xDE0, 'u8', 1), 'root': peek_at(int(a['status'],16) + 0x254, 'u64', 1)} for a in actors(1) if a['name'] == 'P_EX110_BTLF']]"
+  },
+  {
+   "do": "progress_snapshot",
+   "instances": [
+    0,
+    1
+   ],
+   "as": "save_posthit",
+   "compare": "save_boot",
+   "extraRanges": [
+    [
+     "forms",
+     13044,
+     560
+    ]
+   ]
+  },
+  {
+   "do": "save",
+   "as": "axel_log",
+   "expr": "[[m['l'] for m in log_matches(r'(?P<l>\\[(?:missing-party\\] born|prologue\\] (?:construction|control released|local body|duplicate))[^\\n]*)', i)][-8:] for i in (0, 1)]"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "axel_form_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "axel_form_friend"
+  },
+  {
+   "do": "assert",
+   "expr": "all(log_count('[missing-party] born site=tt20-137 bound=1 ', i) == 1 and log_count('[prologue] construction at=02/14 evt=137', i) >= 1 for i in (0, 1)) and len(log_matches(r'born site=tt20-137 bound=1 clone=\\S+ cloneObject=84 cloneKey=1 local=\\S+ localKey=14 ', 0)) == 1 and len(log_matches(r'born site=tt20-137 bound=1 clone=\\S+ cloneObject=803 cloneKey=14 local=\\S+ localKey=1 ', 1)) == 1",
+   "message": "each seat must build one bound tt20-137 pair: a default Roxas as dual-wield 0x323 (key 14), Sora as Sora (key 1)"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['census_axel'][0]['btlf'] == 1 and saved['census_axel'][0]['sora'] == 1 and saved['census_axel'][0]['roxas'] == 0 and saved['census_axel'][0]['w10'] == 1 and saved['census_axel'][0]['w20'] == 1 and saved['census_axel'][0]['member0'] == 803 and saved['census_axel'][1]['btlf'] == 1 and saved['census_axel'][1]['sora'] == 1 and saved['census_axel'][1]['roxas'] == 0 and saved['census_axel'][1]['w10'] == 1 and saved['census_axel'][1]['w20'] == 1 and saved['census_axel'][1]['member0'] == 84",
+   "message": "each screen must hold one body per seat (dual-wield Roxas with both keyblades, or Sora), no single-blade Roxas"
+  },
+  {
+   "do": "assert",
+   "expr": "all(len(saved['form_roots'][i]) == 1 and all(int(str(b['form']), 0) == 10 and int(str(b['root']), 0) != 0 for b in saved['form_roots'][i]) for i in (0, 1))",
+   "message": "each dual-wield body must be native form 10 with a drive-form-row handle at status +0x254"
+  },
+  {
+   "do": "assert",
+   "expr": "all(saved['save_posthit']['instances'][k]['diffs']['forms'] == [] for k in ('0', '1'))",
+   "message": "a drive-form SAVE row changed between boot and the clone hits"
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('control released at=02/14 evt=137 site=tt20-137', 0) > 0 and log_count('control released at=02/14 evt=137 site=tt20-137', 1) > 0",
+   "timeoutMs": 60000,
+   "pollMs": 100
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[combat-admission] released admitted ', 0) > 0",
+   "timeoutMs": 30000,
+   "pollMs": 100
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 6,
+   "fps": 30,
+   "background": true,
+   "name": "owner0_0"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 6,
+   "fps": 30,
+   "background": true,
+   "name": "owner0_1"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "args": [
+    "player-input",
+    "--ly",
+    "1.0",
+    "--duration-ms",
+    "900"
+   ]
+  },
+  {
+   "do": "wait",
+   "ms": 200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "args": [
+    "player-press",
+    "--button",
+    "circle",
+    "--duration-ms",
+    "120"
+   ]
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "args": [
+    "player-press",
+    "--button",
+    "cross",
+    "--duration-ms",
+    "120"
+   ]
+  },
+  {
+   "do": "wait",
+   "ms": 350
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "args": [
+    "player-press",
+    "--button",
+    "cross",
+    "--duration-ms",
+    "120"
+   ]
+  },
+  {
+   "do": "wait",
+   "ms": 350
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 0,
+   "args": [
+    "player-press",
+    "--button",
+    "cross",
+    "--duration-ms",
+    "120"
+   ]
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 6,
+   "fps": 30,
+   "background": true,
+   "name": "owner1_0"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 6,
+   "fps": 30,
+   "background": true,
+   "name": "owner1_1"
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "args": [
+    "player-input",
+    "--ly",
+    "1.0",
+    "--duration-ms",
+    "900"
+   ]
+  },
+  {
+   "do": "wait",
+   "ms": 200
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "args": [
+    "player-press",
+    "--button",
+    "circle",
+    "--duration-ms",
+    "120"
+   ]
+  },
+  {
+   "do": "wait",
+   "ms": 700
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "args": [
+    "player-press",
+    "--button",
+    "cross",
+    "--duration-ms",
+    "120"
+   ]
+  },
+  {
+   "do": "wait",
+   "ms": 350
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "args": [
+    "player-press",
+    "--button",
+    "cross",
+    "--duration-ms",
+    "120"
+   ]
+  },
+  {
+   "do": "wait",
+   "ms": 350
+  },
+  {
+   "do": "kh2ctl",
+   "instance": 1,
+   "args": [
+    "player-press",
+    "--button",
+    "cross",
+    "--duration-ms",
+    "120"
+   ]
+  },
+  {
+   "do": "wait",
+   "ms": 1200
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "save",
+   "as": "clone_motions",
+   "expr": "[sorted({m['b'] for m in log_matches(r'\\[puppet 0\\] frame \\d+ motion \\d+ -> (?P<b>\\d+) [^\\n]*actor=0*(?P<a>[0-9A-F]+)', 0) if int(m['a'],16) == int(saved['probe_before'][0]['clone'],16)}), sorted({m['b'] for m in log_matches(r'\\[puppet 0\\] frame \\d+ motion \\d+ -> (?P<b>\\d+) [^\\n]*actor=0*(?P<a>[0-9A-F]+)', 1) if int(m['a'],16) == int(saved['probe_before'][1]['clone'],16)})]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(len(saved['clone_motions'][i]) >= 3 for i in (0, 1))",
+   "message": "each seat's clone must play its owner's motions (puppet receipts)"
+  },
+  {
+   "do": "save",
+   "as": "down1_before",
+   "expr": "log_count('[downed] revive returned', 1)"
+  },
+  {
+   "do": "revive_guard",
+   "host": 1,
+   "friend": 0
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 12,
+   "fps": 30,
+   "background": true,
+   "name": "down1_revive_0"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 12,
+   "fps": 30,
+   "background": true,
+   "name": "down1_revive_1"
+  },
+  {
+   "do": "downed_kill",
+   "instance": 1
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[downed] revive returned', 1) > saved['down1_before']",
+   "timeoutMs": 60000,
+   "pollMs": 250
+  },
+  {
+   "do": "wait",
+   "ms": 1500
+  },
+  {
+   "do": "revive_guard",
+   "on": false,
+   "as": "down1_guard"
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "save",
+   "as": "down1_after",
+   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
+  },
+  {
+   "do": "save",
+   "as": "down0_before",
+   "expr": "log_count('[downed] revive returned', 0)"
+  },
+  {
+   "do": "revive_guard",
+   "host": 0,
+   "friend": 1
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 12,
+   "fps": 30,
+   "background": true,
+   "name": "down0_revive_0"
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 12,
+   "fps": 30,
+   "background": true,
+   "name": "down0_revive_1"
+  },
+  {
+   "do": "downed_kill",
+   "instance": 0
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[downed] revive returned', 0) > saved['down0_before']",
+   "timeoutMs": 60000,
+   "pollMs": 250
+  },
+  {
+   "do": "wait",
+   "ms": 1500
+  },
+  {
+   "do": "revive_guard",
+   "on": false,
+   "as": "down0_guard"
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "save",
+   "as": "down0_after",
+   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
+  },
+  {
+   "do": "assert",
+   "expr": "log_count('[downed] full party down', 0) == 0 and all(saved[t][i]['btlf'] == 1 for t in ('down1_after', 'down0_after') for i in (0, 1))",
+   "message": "a single down/revive must keep both seats' bodies and never end the party"
+  },
+  {
+   "do": "save",
+   "as": "arrivals_before_retry",
+   "expr": "log_count('[enemysync] client arrived epoch=', 1)"
+  },
+  {
+   "do": "downed_kill",
+   "instance": 1
+  },
+  {
+   "do": "downed_kill",
+   "instance": 0
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[downed] full party down', 0) > 0 and int(str(peek('0x2AE8050','u64',0)),0) != 0",
+   "timeoutMs": 30000,
+   "pollMs": 250
+  },
+  {
+   "do": "wait",
+   "ms": 7000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "game_over_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "game_over_friend"
+  },
+  {
+   "do": "press_continue",
+   "instance": 0,
+   "as": "retry",
+   "presses": 5,
+   "gapMs": 3000,
+   "timeoutMs": 40000
+  },
+  {
+   "do": "assert",
+   "expr": "saved['retry']['destination'] == [2, 21, 99, 2, 0, 0] and saved['retry']['armed'] == 0",
+   "message": "native Continue must return unarmed to the Computer Room checkpoint"
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0) == [2, 21, 99, 2, 0, 0] and location(1) == [2, 21, 99, 2, 0, 0] and log_count('[enemysync] client arrived epoch=', 1) > saved['arrivals_before_retry']",
+   "timeoutMs": 40000,
+   "pollMs": 250
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "checkpoint_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "checkpoint_friend"
+  },
+  {
+   "do": "save",
+   "as": "retired",
+   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['retired'][0]['btlf'] == 0 and saved['retired'][0]['w10'] == 0 and saved['retired'][0]['w20'] == 0 and saved['retired'][0]['roxas'] == 1 and saved['retired'][0]['sora'] == 0 and saved['retired'][0]['member0'] == 90 and log_count('[prologue] encounter exit at=02/15', 0) == 0 and saved['retired'][1]['btlf'] == 0 and saved['retired'][1]['w10'] == 0 and saved['retired'][1]['w20'] == 0 and saved['retired'][1]['roxas'] == 0 and saved['retired'][1]['sora'] == 1 and saved['retired'][1]['member0'] == 84 and log_count('[prologue] encounter exit at=02/15', 1) == 1",
+   "message": "after Continue each seat must hold only its selected body (Sora restored, Roxas native), no dual-wield body or keyblade pair"
+  },
+  {
+   "do": "assert",
+   "expr": "len(log_matches(r'room=02/14 door=0 map=137 btl=137 evt=137[\\s\\S]*?load complete serial=\\d+ transition=\\d+ room=02/15 door=99[\\s\\S]*\\[puppet 0\\][^\\n]*actor=0*' + saved['probe_before'][0]['clone'][2:].upper(), 0)) == 0 and len(log_matches(r'room=02/14 door=0 map=137 btl=137 evt=137[\\s\\S]*?load complete serial=\\d+ transition=\\d+ room=02/15 door=99[\\s\\S]*\\[puppet 0\\][^\\n]*actor=0*' + saved['probe_before'][1]['clone'][2:].upper(), 1)) == 0",
+   "message": "the old Axel II clone must never be driven again after the Continue load"
+  },
+  {
+   "do": "progress_snapshot",
+   "instances": [
+    0,
+    1
+   ],
+   "as": "save_end",
+   "compare": "save_boot",
+   "extraRanges": [
+    [
+     "forms",
+     13044,
+     560
+    ]
+   ]
+  },
+  {
+   "do": "assert",
+   "expr": "all(saved['save_end']['instances'][k]['diffs']['forms'] == [] for k in ('0', '1'))",
+   "message": "the drive-form rows (the dual-wield row the clone's status +0x254 references) changed on a seat"
+  },
+  {
+   "do": "coop_verdict",
+   "as": "verdict",
+   "require": true,
+   "arrivalTimeoutMs": 20000
+  }
+ ]
+}

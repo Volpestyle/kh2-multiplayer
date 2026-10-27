@@ -235,10 +235,16 @@ bool RoxasAllowed() {return playerkit::RemoteKitMemberActive() || partynative::K
 // VUH-2911: the checked encounter site (Axel II) whose missing-party construction admitted its body. Its
 // encounter-only descriptor (dual-wield Roxas 0x323) counts only while NOW is still exactly that site; any
 // other load (the native Continue to 02/15 d99) ends it, so no other room or global gate ever admits it.
+// Always the canonical static row (routespawn::EncounterSiteAt), never the per-seat copy SpawnMissingParty gets.
 std::atomic<const routespawn::MissingPartySite*> g_encounterSite{};
 bool EncounterScope() {
-    const auto* site=g_encounterSite.load(std::memory_order_acquire);std::array<std::uint8_t,10> now{};
-    return site && MissingKitScope() && Read(g_base+0x717008,now) && now==site->location;
+    auto* site=g_encounterSite.load(std::memory_order_acquire);std::array<std::uint8_t,10> now{};
+    if(!site || !Read(g_base+0x717008,now))return false;
+    if(now!=site->location) { // left the site: the scope ends; a return needs its own construction
+        g_encounterSite.compare_exchange_strong(site,nullptr,std::memory_order_acq_rel);
+        return false;
+    }
+    return MissingKitScope();
 }
 int KeyForKit(std::uint16_t kit) {return kh2coop::kitStatusKey(kit);} // the reviewed kit table
 // Party kits: the clones' key multiset equals the keys of the kits the observer wrote.
@@ -814,7 +820,9 @@ void* SpawnMissingParty(const void* nativeRecord,void* controller,NativeWrapper 
     missing.cloneObject=cloneObject;missing.cloneKey=cloneKey;missing.localKey=localKey;
     if(site.prologue)g_missingKits=true; // before construction: the Roxas descriptors become selectable in TT
     // VUH-2911: before construction too: the encounter body (clone, local or both) is selectable at this NOW only.
-    if(site.prologue && site.encounterBody)g_encounterSite.store(&site,std::memory_order_release);
+    // `site` is the caller's per-seat copy (a stack local): retain the static row for the same NOW instead.
+    if(site.prologue && site.encounterBody)
+        g_encounterSite.store(routespawn::EncounterSiteAt(site.location,site.encounterBody),std::memory_order_release);
     const std::uint32_t direct=cloneObject;std::memcpy(missing.record.data(),&direct,sizeof(direct));
     Selection selection{};selection.selected=true;selection.stamp=stamp;
     selection.serial=g_serial.fetch_add(1)+1;selection.missingSlot=g_missingBudget.count;missing.serial=selection.serial;

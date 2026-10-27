@@ -497,6 +497,33 @@ void encounter() {
     // Mixed seats at Axel II: each seat's own body and its clone of the other seat.
     check(prologue::SiteBody(0x5A, axel->encounterBody) == 0x323 && prologue::SiteBody(0x54, axel->encounterBody) == 0x54,
           "Roxas + Sora: the Roxas seat's local and its clone on the Sora seat are 0x323; the Sora seat stays 0x54 on both");
+    // VUH-2911 (Ione 61ea3f02): the exit gives every selection back, in both seat orders.
+    for (const auto order : {std::array<std::uint16_t, 2> {0x54, 0x5A}, std::array<std::uint16_t, 2> {0x5A, 0x54}}) {
+        bool ok = true;
+        for (const auto selected : order) {
+            prologue::EncounterExit exit;
+            exit.AtSite(axel->encounterBody != 0);
+            const auto atAxel = prologue::SiteBody(selected, axel->encounterBody);
+            const auto scripted = exit.AtLoad(false, 0x5A, selected);       // e.g. a post-fight event: keeps native
+            const auto checkpoint = exit.AtLoad(true, 0x5A, selected);      // the 02/15 d99 Continue field load
+            const auto later = exit.AtLoad(true, 0x5A, selected);           // the next unpinned field: native again
+            const auto body = checkpoint ? checkpoint : static_cast<std::uint16_t>(0x5A);
+            ok = ok && atAxel == (selected == 0x54 ? 0x54 : 0x323) && !scripted && body == selected && !later;
+        }
+        check(ok, order[0] == 0x54 ? "Sora host + Roxas friend: each seat's selected body is back at the Continue checkpoint"
+                                   : "Roxas host + Sora friend: each seat's selected body is back at the Continue checkpoint");
+    }
+    {
+        prologue::EncounterExit exit;
+        exit.AtSite(false);
+        const bool plain = !exit.AtLoad(true, 0x5A, 0x54);
+        exit.AtSite(true); exit.AtSite(false);  // another checked site builds the selection itself
+        const bool disarmed = !exit.AtLoad(true, 0x5A, 0x54);
+        exit.AtSite(true);
+        const bool notRoxas = !exit.AtLoad(true, 0x323, 0x54) && !exit.AtLoad(true, 0x5A, 0x54);
+        check(plain && disarmed && notRoxas, "no exit without an encounter site, after another checked site, "
+              "or where the game did not resolve the prologue Roxas (consumed once)");
+    }
     // The kit table: 0x323 is never qualified, and its encounter admission needs the scope, its form, key and full name.
     check(!qualifiedKit(0x323) && !kitStatusKey(0x323) && !qualifiedKitByRoster(2) && !soloQualifiedKit(0x323) &&
           !partyKitAllowed(0x323) && !prologue::ProfileQualified(0x323), "no global gate admits 0x323");

@@ -1,6 +1,6 @@
 {
  "name": "net_prologue_mansion_axel_form",
- "description": "FM-02 rehearsal route (the committed Computer Room -> Basement Hall pilot, both Dusk waves) into Axel II, 02/14 btl137 (checked site tt20-137). Both default Roxas seats must build the native encounter body 0x323 (P_EX110_BTLF) for their local and their clone of the other seat, with both keyblades, and release together. Inside the combat-admission hold, one synthetic 1-HP native hit lands on each seat's clone: the observer's own HP, its SAVE character record (Sora/Roxas, SAVE+0x24F0) and the drive-form rows (SAVE+0x32F4, the row the clone's status +0x254 references) must not change. Each owner then moves, jumps and attacks alone, filmed on both seats; each owner is downed once (DownedSpike fixture Kill) and revived by the other seat; then both are downed and the host takes the native Continue to the Computer Room 02/15 d99, where no dual-wield body or old clone may remain. Video-only paired clips (lead amendment). Rehearsal save, no save.",
+ "description": "FM-02 rehearsal route (the committed Computer Room -> Basement Hall pilot, both Dusk waves) into Axel II, 02/14 btl137 (checked site tt20-137). A default Roxas seat builds the native encounter body 0x323 (P_EX110_BTLF) for its local and for its clone on the other seat, with both keyblades; a Sora seat keeps Sora for both. Inside the host's combat-admission hold (proven around the window, else a setup failure), one synthetic 1-HP native hit lands on each seat's clone: the observer's own HP, every SAVE character record (SAVE+0x24F0, 0xE04) and every drive-form row (SAVE+0x32F4, 0x230: the row a dual-wield status +0x254 references) must be byte-identical just before and just after the hits. Each owner then moves, jumps and attacks alone, filmed on both seats; each owner is downed once (DownedSpike fixture Kill) and revived by the other seat; then both are downed and the host takes the native Continue to the Computer Room 02/15 d99, where each seat holds only its selected body: no dual-wield body, keyblade pair or old clone. Video-only paired clips (lead amendment). Rehearsal save, no save. Selections: host 0x5A, friend 0x5A.",
  "playerDefaults": true,
  "protect": [],
  "steps": [
@@ -32,7 +32,7 @@
   {
    "do": "save",
    "as": "boot_vitals",
-   "expr": "[{'hp': [a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'difficulty': peek('0x9ABD48','u8',0)}, {'hp': [a['hp'] for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0], 'difficulty': peek('0x9ABD48','u8',1)}]"
+   "expr": "[{'hp': [a['hp'] for a in actors(i) if int(a['address'],16) == int(peek('0x2A105D0','u64',i),16)][0], 'difficulty': peek('0x9ABD48','u8',i)} for i in (0, 1)]"
   },
   {
    "do": "progress_snapshot",
@@ -127,14 +127,38 @@
   },
   {
    "do": "wait_until",
-   "expr": "log_count('control released at=02/14 evt=137 site=tt20-137', 0) > 0 and log_count('control released at=02/14 evt=137 site=tt20-137', 1) > 0",
-   "timeoutMs": 60000,
+   "expr": "log_count('[missing-party] born site=tt20-137 bound=1 ', 0) > 0 and log_count('[missing-party] born site=tt20-137 bound=1 ', 1) > 0",
+   "timeoutMs": 30000,
    "pollMs": 100
   },
   {
    "do": "save",
+   "as": "window_open",
+   "expr": "[log_count('[combat-admission] deferred group=1 ', 0), log_count('[combat-admission] released ', 0)]"
+  },
+  {
+   "do": "progress_snapshot",
+   "instances": [
+    0,
+    1
+   ],
+   "as": "hit_before",
+   "only": [
+    "characters",
+    "forms"
+   ],
+   "extraRanges": [
+    [
+     "forms",
+     13044,
+     560
+    ]
+   ]
+  },
+  {
+   "do": "save",
    "as": "probe_before",
-   "expr": "[{'save': peek('0x9ABDA0','u64',0), 'form10': [peek('0x9ACD9C','u64',0), peek('0x9ACDA4','u64',0), peek('0x9ACDAC','u64',0), peek('0x9ACDB4','u64',0), peek('0x9ACDBC','u64',0), peek('0x9ACDC4','u64',0), peek('0x9ACDCC','u64',0)], 'local': [a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'clone': [a['address'] for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0], 'admitted': log_count('[combat-admission] released admitted ', 0)}, {'save': peek('0x9ABDA0','u64',1), 'form10': [peek('0x9ACD9C','u64',1), peek('0x9ACDA4','u64',1), peek('0x9ACDAC','u64',1), peek('0x9ACDB4','u64',1), peek('0x9ACDBC','u64',1), peek('0x9ACDC4','u64',1), peek('0x9ACDCC','u64',1)], 'local': [a['hp'] for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0], 'clone': [a['address'] for a in actors(1) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',1),16)][0], 'admitted': log_count('[combat-admission] released admitted ', 0)}]"
+   "expr": "[(lambda xs, c: {'local': [a['hp'] for a in xs if int(a['address'],16) == c][0], 'clone': [a['address'] for a in xs if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != c][0]})(actors(0), int(peek('0x2A105D0','u64',0),16)), (lambda xs, c: {'local': [a['hp'] for a in xs if int(a['address'],16) == c][0], 'clone': [a['address'] for a in xs if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != c][0]})(actors(1), int(peek('0x2A105D0','u64',1),16))]"
   },
   {
    "do": "kh2ctl",
@@ -155,12 +179,57 @@
   {
    "do": "save",
    "as": "probe_after",
-   "expr": "[{'save': peek('0x9ABDA0','u64',0), 'form10': [peek('0x9ACD9C','u64',0), peek('0x9ACDA4','u64',0), peek('0x9ACDAC','u64',0), peek('0x9ACDB4','u64',0), peek('0x9ACDBC','u64',0), peek('0x9ACDC4','u64',0), peek('0x9ACDCC','u64',0)], 'local': [a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'clone': [a['address'] for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0], 'admitted': log_count('[combat-admission] released admitted ', 0)}, {'save': peek('0x9ABDA0','u64',1), 'form10': [peek('0x9ACD9C','u64',1), peek('0x9ACDA4','u64',1), peek('0x9ACDAC','u64',1), peek('0x9ACDB4','u64',1), peek('0x9ACDBC','u64',1), peek('0x9ACDC4','u64',1), peek('0x9ACDCC','u64',1)], 'local': [a['hp'] for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0], 'clone': [a['address'] for a in actors(1) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',1),16)][0], 'admitted': log_count('[combat-admission] released admitted ', 0)}]"
+   "expr": "[(lambda xs, c: {'local': [a['hp'] for a in xs if int(a['address'],16) == c][0], 'clone': [a['address'] for a in xs if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != c][0]})(actors(0), int(peek('0x2A105D0','u64',0),16)), (lambda xs, c: {'local': [a['hp'] for a in xs if int(a['address'],16) == c][0], 'clone': [a['address'] for a in xs if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != c][0]})(actors(1), int(peek('0x2A105D0','u64',1),16))]"
+  },
+  {
+   "do": "progress_snapshot",
+   "instances": [
+    0,
+    1
+   ],
+   "as": "hit_after",
+   "compare": "hit_before",
+   "only": [
+    "characters",
+    "forms"
+   ],
+   "extraRanges": [
+    [
+     "forms",
+     13044,
+     560
+    ]
+   ]
+  },
+  {
+   "do": "save",
+   "as": "window_close",
+   "expr": "log_count('[combat-admission] released ', 0)"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['window_open'][0] > saved['window_open'][1] and saved['window_close'] == saved['window_open'][1]",
+   "message": "SETUP FAILURE, not a form result: the host's combat-admission hold (Axel frozen) did not cover the whole clone-hit window; rerun"
+  },
+  {
+   "do": "assert",
+   "expr": "all(saved['hit%d' % i]['ok'] and saved['hit%d' % i]['hpAfter'] == saved['hit%d' % i]['hpBefore'] - 1 for i in (0, 1))",
+   "message": "the synthetic native hit must damage each seat's clone by exactly 1"
+  },
+  {
+   "do": "assert",
+   "expr": "all(saved['probe_after'][i]['local'] == saved['probe_before'][i]['local'] for i in (0, 1)) and all(saved['hit_after']['instances'][k]['diffs'][r] == [] for k in ('0', '1') for r in ('characters', 'forms'))",
+   "message": "a hit on a clone changed its observer's own HP, a SAVE character record byte (SAVE+0x24F0..0x32F4) or a drive-form row byte"
   },
   {
    "do": "save",
    "as": "census_axel",
-   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
+   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
+  },
+  {
+   "do": "save",
+   "as": "form_roots",
+   "expr": "[[{'actor': a['address'], 'local': int(a['address'],16) == int(peek('0x2A105D0','u64',0),16), 'form': peek_at(int(a['address'],16) + 0xDE0, 'u8', 0), 'root': peek_at(int(a['status'],16) + 0x254, 'u64', 0)} for a in actors(0) if a['name'] == 'P_EX110_BTLF'], [{'actor': a['address'], 'local': int(a['address'],16) == int(peek('0x2A105D0','u64',1),16), 'form': peek_at(int(a['address'],16) + 0xDE0, 'u8', 1), 'root': peek_at(int(a['status'],16) + 0x254, 'u64', 1)} for a in actors(1) if a['name'] == 'P_EX110_BTLF']]"
   },
   {
    "do": "progress_snapshot",
@@ -195,28 +264,29 @@
   },
   {
    "do": "assert",
-   "expr": "all(log_count('[missing-party] born site=tt20-137 bound=1 ', i) == 1 and len(log_matches(r'born site=tt20-137 bound=1 clone=\\S+ cloneObject=803 cloneKey=14 local=\\S+ localKey=14 ', i)) == 1 and log_count('[prologue] construction at=02/14 evt=137', i) >= 1 for i in (0, 1))",
-   "message": "each seat must build one bound tt20-137 pair: its local and its clone of the other seat both dual-wield Roxas 0x323 (key 14)"
+   "expr": "all(log_count('[missing-party] born site=tt20-137 bound=1 ', i) == 1 and log_count('[prologue] construction at=02/14 evt=137', i) >= 1 for i in (0, 1)) and len(log_matches(r'born site=tt20-137 bound=1 clone=\\S+ cloneObject=803 cloneKey=14 local=\\S+ localKey=14 ', 0)) == 1 and len(log_matches(r'born site=tt20-137 bound=1 clone=\\S+ cloneObject=803 cloneKey=14 local=\\S+ localKey=14 ', 1)) == 1",
+   "message": "each seat must build one bound tt20-137 pair: a default Roxas as dual-wield 0x323 (key 14), Sora as Sora (key 1)"
   },
   {
    "do": "assert",
-   "expr": "all(saved['census_axel'][i]['btlf'] == 2 and saved['census_axel'][i]['roxas'] == 0 and saved['census_axel'][i]['w10'] == 2 and saved['census_axel'][i]['w20'] == 2 and saved['census_axel'][i]['member0'] == 0x323 for i in (0, 1))",
-   "message": "each screen must hold exactly two dual-wield Roxases (local + clone) with both keyblades each, and no single-blade Roxas"
+   "expr": "saved['census_axel'][0]['btlf'] == 2 and saved['census_axel'][0]['sora'] == 0 and saved['census_axel'][0]['roxas'] == 0 and saved['census_axel'][0]['w10'] == 2 and saved['census_axel'][0]['w20'] == 2 and saved['census_axel'][0]['member0'] == 803 and saved['census_axel'][1]['btlf'] == 2 and saved['census_axel'][1]['sora'] == 0 and saved['census_axel'][1]['roxas'] == 0 and saved['census_axel'][1]['w10'] == 2 and saved['census_axel'][1]['w20'] == 2 and saved['census_axel'][1]['member0'] == 803",
+   "message": "each screen must hold one body per seat (dual-wield Roxas with both keyblades, or Sora), no single-blade Roxas"
   },
   {
    "do": "assert",
-   "expr": "all(saved['hit%d' % i]['ok'] and saved['hit%d' % i]['hpAfter'] == saved['hit%d' % i]['hpBefore'] - 1 for i in (0, 1))",
-   "message": "the synthetic native hit must damage each seat's clone by exactly 1"
-  },
-  {
-   "do": "assert",
-   "expr": "all(saved['probe_after'][i]['local'] == saved['probe_before'][i]['local'] and saved['probe_after'][i]['save'] == saved['probe_before'][i]['save'] and saved['probe_after'][i]['form10'] == saved['probe_before'][i]['form10'] for i in (0, 1))",
-   "message": "a hit on a clone changed its observer's own HP, SAVE character record or dual-wield form row"
+   "expr": "all(len(saved['form_roots'][i]) == 2 and all(int(str(b['form']), 0) == 10 and int(str(b['root']), 0) != 0 for b in saved['form_roots'][i]) for i in (0, 1))",
+   "message": "each dual-wield body must be native form 10 with a drive-form-row handle at status +0x254"
   },
   {
    "do": "assert",
    "expr": "all(saved['save_posthit']['instances'][k]['diffs']['forms'] == [] for k in ('0', '1'))",
    "message": "a drive-form SAVE row changed between boot and the clone hits"
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('control released at=02/14 evt=137 site=tt20-137', 0) > 0 and log_count('control released at=02/14 evt=137 site=tt20-137', 1) > 0",
+   "timeoutMs": 60000,
+   "pollMs": 100
   },
   {
    "do": "wait_until",
@@ -420,7 +490,7 @@
   {
    "do": "assert",
    "expr": "all(len(saved['clone_motions'][i]) >= 3 for i in (0, 1))",
-   "message": "each seat's dual-wield clone must play its owner's motions (puppet receipts)"
+   "message": "each seat's clone must play its owner's motions (puppet receipts)"
   },
   {
    "do": "save",
@@ -473,7 +543,7 @@
   {
    "do": "save",
    "as": "down1_after",
-   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
+   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
   },
   {
    "do": "save",
@@ -526,12 +596,12 @@
   {
    "do": "save",
    "as": "down0_after",
-   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
+   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
   },
   {
    "do": "assert",
    "expr": "log_count('[downed] full party down', 0) == 0 and all(saved[t][i]['btlf'] == 2 for t in ('down1_after', 'down0_after') for i in (0, 1))",
-   "message": "a single down/revive must keep both dual-wield bodies and never end the party"
+   "message": "a single down/revive must keep both seats' bodies and never end the party"
   },
   {
    "do": "save",
@@ -602,12 +672,12 @@
   {
    "do": "save",
    "as": "retired",
-   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
+   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
   },
   {
    "do": "assert",
-   "expr": "all(saved['retired'][i]['btlf'] == 0 and saved['retired'][i]['roxas'] == 1 and saved['retired'][i]['member0'] == 0x5A for i in (0, 1))",
-   "message": "after Continue each seat must be back to its selected Roxas only: no dual-wield body, no clone, member 0 Roxas"
+   "expr": "saved['retired'][0]['btlf'] == 0 and saved['retired'][0]['w10'] == 0 and saved['retired'][0]['w20'] == 0 and saved['retired'][0]['roxas'] == 1 and saved['retired'][0]['sora'] == 0 and saved['retired'][0]['member0'] == 90 and log_count('[prologue] encounter exit at=02/15', 0) == 0 and saved['retired'][1]['btlf'] == 0 and saved['retired'][1]['w10'] == 0 and saved['retired'][1]['w20'] == 0 and saved['retired'][1]['roxas'] == 1 and saved['retired'][1]['sora'] == 0 and saved['retired'][1]['member0'] == 90 and log_count('[prologue] encounter exit at=02/15', 1) == 0",
+   "message": "after Continue each seat must hold only its selected body (Sora restored, Roxas native), no dual-wield body or keyblade pair"
   },
   {
    "do": "assert",

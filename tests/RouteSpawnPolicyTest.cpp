@@ -154,6 +154,20 @@ void bailey() {
     check(!MissingPartyAbort(0x3A7B1B,2,0)&&!MissingPartyAbort(0x3A7B1B,1,1),"other status keys and forms remain Fault-only");
     check(MissingPartyAbort(0x3A7B1B,14,10)&&!MissingPartyAbort(0x3A7B1B,1,10)&&!MissingPartyAbort(0x3A7B1B,14,11)&&
           !MissingPartyAbort(0x3A7B1B,14,1)&&!MissingPartyAbort(0x3A7B1C,14,10),"VUH-2911: Roxas key14 form10 (dual-wield) only");
+    {
+        // VUH-2911 (Ione 61ea3f02): the encounter scope retains the static row even when ingress hands it a
+        // per-seat stack copy that is then changed and its storage reused.
+        const MissingPartySite* kept=nullptr;
+        {
+            MissingPartySite copy=*MissingPartySiteAt(BasementHall137Location);copy.localObject=0x54;copy.localKey=1;
+            kept=EncounterSiteAt(copy.location,copy.encounterBody);
+            copy.location.fill(0xEE);copy.encounterBody=0;
+        }
+        std::array<std::uint8_t,sizeof(MissingPartySite)> reuse{};reuse.fill(0xCD); // the copy's storage, reused
+        check(kept>=std::begin(MissingPartySites)&&kept<std::end(MissingPartySites)&&kept->location==BasementHall137Location&&
+              kept->localObject==90&&kept->localKey==14&&kept->encounterBody==DualWieldRoxas,
+              "VUH-2911: the retained encounter site is the static row, never the caller's copy");
+    }
     MissingPartyBinding b{1,2,3,4,2,true,false,true,true,true};
     check(Bound(b),"distinct private clone and canonical ordinary local with both native attachments");
     auto c=b;c.clone=0;check(!Bound(c),"null clone refused");

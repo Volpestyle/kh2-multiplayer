@@ -2611,9 +2611,14 @@ def step_progress_snapshot(ctx: Context, step: dict, *, _read=None) -> dict:
     # VUH-2911: opt-in extra SAVE ranges, e.g. the drive-form rows ("forms", 0x32F4, 0x230) a dual-wield
     # clone's status +0x254 references; the default ranges stay unchanged for every other scenario.
     extra = tuple((str(label), int(offset), int(length)) for label, offset, length in step.get("extraRanges", []))
+    # VUH-2911: `only` keeps just these labels (default or extra), so a short window reads only what it compares.
+    only = set(step.get("only", ()))
+    chosen = [r for r in (*PROGRESS_RANGES, *PERSONAL_RANGES, *extra) if not only or r[0] in only]
+    if only - {r[0] for r in chosen}:
+        raise StepFailed(f"progress_snapshot only: unknown range(s) {sorted(only - {r[0] for r in chosen})}")
     for index in step.get("instances", [step.get("instance", 0)]):
         ranges = {}
-        for label, offset, length in (*PROGRESS_RANGES, *PERSONAL_RANGES, *extra):
+        for label, offset, length in chosen:
             fields = [(0x9A98B0 + offset + n, min(8, length - n)) for n in range(0, length, 8)]
             raw = bytearray()
             # PC1 refused the observed64/128-field helper invocations,

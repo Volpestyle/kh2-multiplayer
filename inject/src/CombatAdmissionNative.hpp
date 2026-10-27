@@ -202,7 +202,7 @@ inline void NoteHostRequest(const Destination& from, const Destination& to, std:
         detail::ServiceOwner(now); // release while the old native identity still matches
     }
     detail::machine.NoteRequest(from, to, nextTransition);
-    // Every Continue retry's exact destination (in Axel I: the 02/15 checkpoint, never armed).
+    // Every Continue retry's exact destination (in Axel II: the 02/15 checkpoint, never armed).
     if (continueRetry && detail::log)
         detail::log("[combat-admission] continue-retry from=%02X/%02X btl=%u to=%02X/%02X door=%u map=%u btl=%u evt=%u "
                     "transition=%u armed=%u", from.world, from.room, from.battle, to.world, to.room, to.door, to.map,

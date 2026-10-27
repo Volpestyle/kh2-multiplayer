@@ -56,6 +56,7 @@ std::atomic<std::uint8_t> g_notice {0};
 // VUH-1512: the NOW of the load whose member 0 ResolveLocal replaced (all 0xFF: none).
 std::atomic<std::uint64_t> g_bodyAtLow {~0ull};
 std::atomic<std::uint16_t> g_bodyAtHigh {0xFFFF};
+prologue::EncounterExit g_encounterExit;  // VUH-2911: the loading thread's own (ResolveLocal only)
 std::uint16_t g_refusalLogged = 0;
 std::atomic<std::uint16_t> g_refused {0};
 // VUH-1512: the bounded solo hold; the seat it waits for and the last display name seen per slot.
@@ -402,16 +403,29 @@ bool OtherBody(std::uint16_t& other, std::array<std::uint8_t, 10>& now) {
 }
 } // namespace
 
-void ResolveLocal(std::uintptr_t resolvedMembers) {
+void ResolveLocal(std::uintptr_t resolvedMembers, bool fieldLoad) {
     if (!g_requested || !resolvedMembers) return;
     std::array<std::uint8_t, 10> now {};
-    const auto* site = ReadNow(now) ? PrologueSite(now) : nullptr;
-    if (!site) return;
-    // VUH-2911: Axel II resolves its scripted dual-wield Roxas as member 0; a seat with another body (Sora)
-    // keeps that body there, and a default Roxas keeps the native encounter body.
-    const std::uint16_t native = prologue::NativeSiteBody(site->encounterBody);
-    std::uint16_t body = 0, key = 0;
-    if (!LocalBody(site->encounterBody, body, key) || body == native) return;
+    if (!ReadNow(now)) return;
+    const auto* site = PrologueSite(now);
+    std::uint16_t native = prologue::DEFAULT_PROFILE, body = 0, key = 0;
+    if (site) {
+        g_encounterExit.AtSite(site->encounterBody != 0);
+        // VUH-2911: Axel II resolves its scripted dual-wield Roxas as member 0; a seat with another body (Sora)
+        // keeps that body there, and a default Roxas keeps the native encounter body.
+        native = prologue::NativeSiteBody(site->encounterBody);
+        if (!LocalBody(site->encounterBody, body, key) || body == native) return;
+    } else {
+        // VUH-2911: the exit from an encounter site (its Continue checkpoint) restores this seat's selection.
+        std::uint16_t member0 = 0, selected = 0;
+        __try { member0 = *reinterpret_cast<const std::uint16_t*>(resolvedMembers); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return; }
+        if (!LocalBody(0, selected, key)) selected = 0;
+        body = g_encounterExit.AtLoad(fieldLoad, member0, selected);
+        if (!body) return;
+        if (g_log) g_log("[prologue] encounter exit at=%02X/%02X evt=%u: restoring the selected body 0x%X", now[0], now[1],
+                         LocationOf(now).evt, body);
+    }
     bool replaced = false;
     __try {
         auto* member0 = reinterpret_cast<std::uint16_t*>(resolvedMembers);

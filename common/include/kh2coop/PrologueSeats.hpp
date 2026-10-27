@@ -42,6 +42,21 @@ inline std::uint16_t SiteBody(std::uint16_t profile, std::uint16_t encounterBody
 }
 // The story body the game resolves as member 0 at that site: the encounter body, else the prologue's Roxas.
 inline std::uint16_t NativeSiteBody(std::uint16_t encounterBody) { return encounterBody ? encounterBody : DEFAULT_PROFILE; }
+// VUH-2911: leaving an encounter site gives the selection back. An encounter site's load arms the exit; the
+// first plain field load after it that is not a checked site (Axel II's native Continue to the 02/15 d99
+// checkpoint, or any other exit) replaces the prologue's native Roxas with a seat's other selected body (Sora).
+// A scripted load (event program, event context or cutscene, the kit path's own refusal) keeps the native
+// member and leaves the exit armed; any other checked site disarms it, since it builds the selection itself.
+struct EncounterExit {
+    bool armed = false;
+    void AtSite(bool encounter) { armed = encounter; }
+    // The member-0 replacement for this load, or 0 to keep the native member.
+    std::uint16_t AtLoad(bool fieldLoad, std::uint16_t member0, std::uint16_t selected) {
+        if (!armed || !fieldLoad) return 0;
+        armed = false;
+        return member0 == DEFAULT_PROFILE && selected && selected != DEFAULT_PROFILE ? selected : 0;
+    }
+};
 // The refused character as the on-screen note names it.
 inline const char* ProfileDisplayName(std::uint16_t profile) {
     switch (profile) {

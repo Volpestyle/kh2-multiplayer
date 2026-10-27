@@ -244,7 +244,9 @@ void HookedResolveMembers() {
         ++g_stats.faults;
     }
     // VUH-1512: a seat that chose another body takes it at a checked prologue site (own SEH and log).
-    prologueparty::ResolveLocal(g_base + RVA_RESOLVED_MEMBERS);
+    // VUH-2911: and on the first plain field load after an encounter site (the kit path's own event gate).
+    prologueparty::ResolveLocal(g_base + RVA_RESOLVED_MEMBERS,
+                                ok && c.evtProgram == 0 && c.eventContext == 0 && c.cutsceneState == 0);
     // Logged outside the SEH scope so a CRT fault can't strand the FILE lock.
     if (ok && g_log && g_kit != 0)
         g_log("[playerkit] load world=%u room=%u evt=%u eventCtx=%d cutscene=%d native0=0x%X kit=0x%X result=%s",
