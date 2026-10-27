@@ -626,10 +626,10 @@ void testWorldCacheEpoch() {
         ByteReader r(body, n);
         RoomTransition back;
         readRoomTransitionPacket(r, back);
-        check(header && n == 16 + 6 + 5 + 1 && r.atEnd() && back.epoch == 13 && back.spawnPickShared == 1 &&
+        check(header && n == 16 + 6 + 5 + 1 + 8 && r.atEnd() && back.epoch == 13 && back.spawnPickShared == 1 &&
                   back.spawnPickSaltTag == 0x01020304u && back.difficultyPlayers == 1 && !back.partyRowValid &&
                   back.nativeDifficulty == 0xFF,
-              "RoomTransition packet: 16 generic bytes + shared/salt/count/party-row/native-difficulty trailer");
+              "RoomTransition packet: 16 generic bytes + shared/salt/count/party-row/native-difficulty/admission trailer");
         // VUH-2632 (v32): the host's native difficulty rides the trailer; 0..3 or unknown 0xFF only.
         for (const std::uint8_t d : {std::uint8_t{0}, std::uint8_t{1}, std::uint8_t{2}, std::uint8_t{3}}) {
             RoomTransition diff = shared; diff.nativeDifficulty = d;
