@@ -1,7 +1,9 @@
 # Axel I arrival delay: log analysis and proposed combat barrier (VUH-2897)
 
-Analysis only, based on main `c330cfd`. No build, test binary, game, desk job,
-or live run was started for this work. The four older runs use Juno's pre-fix
+Analysis only; rebased onto main `aa0d64c` for the source qualification below.
+No build, test binary, game, desk job, or live run was started for this work.
+Read-only Ghidra queries use an owned copy of the existing analyzed project.
+The four older runs use Juno's pre-fix
 builds; Juniper's three use `c330cfd`. Their original directories are read-only.
 
 The host finishes its own Axel intro **before announcing the destination to
@@ -126,11 +128,14 @@ completed its own issued load and intro and acknowledged arrival.
    wrong-room and replaced-seat receipts. Release only after all current
    required seats finish their native intros. Do not skip events or pre-apply
    the host's post-intro flags into a friend's intro already in progress.
-4. Use a 15 s diagnostic deadline after host-ready (5.75 s observed + margin),
-   with an explicit failure reason if a seat is missing. Timeout must not
-   manufacture an arrival or silently release the fight solo. Reset/leave
-   retires the barrier by its session/connection identity; no cached actor
-   pointer survives a load.
+4. Use a 15 s deadline after host-ready (5.75 s observed + margin), measured
+   independently of entity frames. On missing/stalled/replaced participation,
+   log the exact failure reason and unwind the barrier's own hold within a
+   bounded interval, returning native control. This is a failed barrier and an
+   explicit fallback to native play, never a successful/fabricated arrival.
+   It must not leave a pause open or keep the host waiting indefinitely.
+   Reset/leave retires the barrier by its session/connection identity; no cached
+   actor pointer survives a load. This incorporates the lead's timeout condition.
 
 An overlapping-load protocol is a valid alternative, but cannot be achieved
 by relaxing `HostBeginInstance` globally. It needs a distinct destination
@@ -153,6 +158,82 @@ combat cannot begin. A new native gate needs independent review. Live proof
 remains scheduled by the lead using VUH-2898's bounded arrival wait: both
 intros observed, friend arrival before the host's first Axel hit, saved files
 unchanged. No live run is authorized by this proposal.
+
+## Source qualification checkpoint (still before implementation)
+
+The authenticated return path is reusable. The **native admission seam is not
+yet qualified**; a menu request or actor freeze cannot currently claim that
+combat is stopped before the first hit. No production patch has been written.
+
+### Arrival transport
+
+- `Protocol.hpp::TransitionAck` contains epoch, world, room and arrived only.
+  It does not carry the full door/program tuple or echo a particular host
+  destination announcement. `Warp::HostTransitionArrived` already requires the
+  issued native load, exact full destination and safe gameplay after the intro.
+  Preserve that proof; a relay log, avatar pose or load-complete line is not ACK
+  authority.
+- `SessionHost.cpp` validates a `WorldEnvelope` against the verified peer's
+  connection/delivery and current session, rejects quarantine/source-floor
+  violations, and retains its native source scope while forwarding.
+  `sendTo` can target the current host delivery without relabeling a client ACK
+  as host-produced. The current `TransitionAck` case only stores/logs the ACK
+  and does not send it to the host.
+- `NetworkClient.cpp` validates the receiver binding and current source roster
+  connection/delivery before `onWorldEnvelope`. The existing `WorldPump`/inbox
+  can carry the exact envelope into the DLL. A host ACK consumer must run before
+  EnemySync's client-only packet drop, with the current peer identity checked
+  again at consumption.
+- The release message needs the exact destination/epoch plus an echoed host
+  announcement challenge, bound to native load and admitted participants. A
+  delayed receipt from a prior same-room/rebuilt load must not release a new
+  barrier. Capture that challenge when the host publishes, echo it only after
+  the friend's existing arrival proof, and reject replaced/quarantined seats,
+  stale deliveries, malformed/suffix payloads and wrong targets. This is a
+  protocol change still to implement/test; authentication alone is insufficient.
+- The ordinary DLL world inbox is consumed from the entity-head frame service.
+  A full native pause can stop that consumer. Reusing the transport does not
+  prove hold-time liveness. A separate bounded, scoped control snapshot/channel
+  serviced from a callback that continues during native pause is a candidate;
+  it must not create a second consumer of the world ring. Existing EventHold's
+  input-owner channel is a reference, not proof that this new gate will work.
+
+### Native hold boundary
+
+| Static receipt | Established fact | Limit for this barrier |
+|---|---|---|
+| `3BFD30`, `3BF5E0` | Current hook is a selected per-entity update inside dependency passes. | Its callbacks are not a complete census; suppressing Axel there does not establish that projectiles, collision or other native tasks stop. |
+| `3BFA40`, `3BF2C0`, `3BF2E0` | `CONTROLLABLE` at `2A171E8` is a frozen-group bitset; native setters set/clear a group bit. | It is not a universal simulation pause. Writing it also closes SafeNativeGameplay/progress/publication gates and may stop the current owner service. |
+| `1572B0` | The Start watcher checks zero pause blockers at `ABB878` and in-field state, then requests a menu. | `PAUSE_STATUS` is a blocker mask, not a freeze switch. An input-only hold does not stop combat. |
+| `2E4950` → `151480` → `1515E0` | A menu request schedules a later native mode-transition task. | Calling it or injecting Start is not a synchronous pre-hit barrier. The observed first hit can be five entity frames after host arrival. |
+| `3AC750` case 9 → `3BF2E0(0/1)`, then `3AC000` | Intro teardown can unfreeze groups before the outer completion function clears `EVENT_CONTEXT`. | An event-complete/context-clear observation alone is not proof it precedes all combat work; holding completion too early also blocks host publication. |
+| `150820`, `150310`, `1515E0`, `150CA0` | The field mode object is `716860`; its state at `716884` is set to 2 on the native pause path and restored to 1 on return. The generic mode loop dispatches its task group only in state 1. | This identifies a broader native pause mechanism, not a safe direct-write API. It does not prove where a new hold can be acquired relative to an already-running field dispatch or worker jobs. |
+| `14FC20` → `14FD60` | Task-group dispatch walks direct callbacks and fiber resumes. | Skipping one entry or guessing a parent task can skip intro/control work or fail to stop work already dispatched. Scope, ordering and an independent ACK/deadline service remain unproven. |
+
+These are decompilation facts, not measured hook TIDs, an executed native pause,
+or an assertion that a source-level call list establishes runtime scheduling.
+The existing input hook has native pause/unwind support, but currently does not
+drain the world inbox. Its diagnostic-thread and reentrancy guards must remain.
+
+### Concrete next qualification
+
+Before selecting a behavior-changing hook, obtain a **scoped observational
+trace** of the Mansion → Axel native handoff: request/load completion, event
+context and frozen-group release, field dispatch entry/exit, selected entity
+update and first damage. Stamp GetTickCount64, actual TID, entity frame, full
+destination, native load/transition and current session/delivery identity.
+Distinguish nested dispatch/fiber stacks; cap the trace to this one handoff.
+It must not call pause, change flags, suppress updates, or synthesize readiness.
+Also observe which independent input/control callback continues during a native
+pause before relying on it for ACK delivery or the deadline.
+
+The existing logs cannot recover these missing boundaries. The lead required
+qualification before coding and owns all live runs. The next decision is
+whether to prepare this diagnostic-only patch for independent review and a
+lead-scheduled qualification run, rather than implement a hold on an unproven
+seam. Static audit and a bounded state-machine test cannot by themselves prove
+first-hit exclusion or pause-time callback liveness. Neither live execution nor
+that diagnostic patch is claimed here.
 
 ## Evidence locations
 
