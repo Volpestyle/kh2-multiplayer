@@ -351,8 +351,7 @@ void ownedGroups() {
 }
 
 // An event installed during the hold: wait only when it froze 0/1 itself; an event whose
-// descriptor spared the party cannot extend the hold past the deadline. A transition issued
-// after the lease is never released into mid-load, except on NoteHostRequest's own pass.
+// descriptor spared the party cannot extend the hold past the deadline.
 void releaseWaits() {
     auto during = [](EventFreeze freeze) { auto v = AfterIntro(); v.eventContext = 0xBEEF; v.eventFreeze = freeze; return v; };
     {   Machine m; Hold(m);
@@ -383,40 +382,6 @@ void releaseWaits() {
         a = m.Service(v, Session(), 1000 + DeadlineMs + 60001);
         check(a.kind == Action::Release && a.groups == 0b11000 && a.via == Via::Clear,
               "after the freezing event only the lease's own 3/4 are released");
-    }
-    {   // A transition issued after the lease (pending) waits for its load, which retires the lease.
-        Machine m; Hold(m);
-        auto v = AfterIntro(); v.transition = Transition + 1; v.pending = true;
-        auto a = m.Service(v, Session(), 2000);
-        check(a.kind == Action::None && a.wait == Wait::Transition && m.Current().outcome == Outcome::Transition,
-              "an in-flight transition is decided but nothing is cleared mid-load");
-        check(m.FirstWait(Wait::Transition) && m.FirstWait(Wait::Event) && !m.FirstWait(Wait::Transition),
-              "each wait kind is logged once");
-        v.load = Load + 1;
-        a = m.Service(v, Session(), 2100);
-        check(a.kind == Action::Retire && m.Current().retiredWithoutRelease, "its load retires the lease (S2)");
-    }
-    {   // The same transition abandoned without a load: release as usual.
-        Machine m; Hold(m);
-        auto v = AfterIntro(); v.transition = Transition + 1; v.pending = true;
-        (void)m.Service(v, Session(), 2000);
-        v.pending = false;
-        const auto a = m.Service(v, Session(), 2100);
-        check(a.kind == Action::Release && a.groups == 0b11011, "an abandoned transition releases on the next service");
-    }
-    {   // NoteHostRequest's pass runs after BeginTransition, before the request reaches the game.
-        Machine m; Hold(m);
-        m.BeforeNativeTransition(2000);
-        auto v = AfterIntro(); v.transition = Transition + 1; v.pending = true;
-        const auto a = m.Service(v, Session(), 2000, true);
-        check(a.kind == Action::Release && a.groups == 0b11011 && m.Current().outcome == Outcome::Transition,
-              "the forwarding pass releases before the request is forwarded");
-    }
-    {   // A pending flag alone (not in field, same transition) never blocks the release.
-        Machine m; Hold(m);
-        auto v = AfterIntro(); v.pending = true;
-        const auto a = m.Service(v, Session(), 1000 + DeadlineMs);
-        check(a.kind == Action::Release && a.groups == 0b11011, "pending without a new transition does not wait");
     }
 }
 } // namespace

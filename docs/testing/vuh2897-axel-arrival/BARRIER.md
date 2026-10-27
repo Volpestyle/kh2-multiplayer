@@ -29,8 +29,7 @@ The barrier is offline-qualified only. Kestrel runs the live checks listed at th
   already set is never owned and never cleared by the barrier.
 - **Release:** one owner-thread pass, ascending: the deferred 0 and 1 through the original
   `3BF2E0`, then the owned 3 and 4. A bit that is no longer set is skipped. The release
-  happens only in the same load, with no host transition in flight, and with no event
-  installed that froze 0/1 itself (see **Event installed** below). Owned 3/4 are never
+  happens only in the same load, and with no event installed that froze 0/1 itself (see **Event installed** below). Owned 3/4 are never
   freed while 0/1 are still held.
 
 ## Lease, challenge and ACK
@@ -97,13 +96,13 @@ e0188648):
   next load.
 - Strict S3 publication means a stray extra group bit falls back to the 15 s deadline.
 
-**Transition in flight (N2).** The host releases before a native request is forwarded:
-`NoteHostRequest` runs after `BeginTransition`, and its own pass may release. Later
-services wait while a host transition newer than the lease is pending, logging
-`release-waiting-transition` once. That load then retires the lease (S2), so nothing is
-cleared mid-load. If the request is abandoned without a load, the next service releases
-as usual. This only matters when a freezing event blocked the release during the request's
-own pass.
+**Transition in flight.** The host releases before a native request is forwarded, while the
+old identity still matches. If a freezing event blocks that pass, the request is forwarded
+anyway, and a later service releases once the event ends, or the load retires the lease
+(S2). A release before that load cannot reach the new room's bits: `152CD0` zeroes the mask
+and installs the new intro with no yield between them. Maren's optional N2 (wait for the
+load instead) was dropped: `TransitionPending` clears only in `CompleteLoad`, so a forwarded
+request that never loaded would have left Roxas and Axel frozen with no recovery.
 
 **Reload (S2, static).** `3BF810` zeroes dword `2A171E8` (groups 0–31). It is called only
 from `39CA10`, which runs in `152CD0`, the task at the end of every field-build load task
@@ -176,18 +175,16 @@ bundle. Results:
 
 - `kh2coop_combat_admission_test`: ownership, release order and idempotence, every exit,
   ACK negative controls, the scoped publication proof, the deadline, and the owned-3/4 rules.
-  It checks every mask for "never 3/4 alone". It also covers the release waits: sparing,
-  freezing and unreadable events at and past the deadline, and an in-flight, abandoned or
-  forwarding transition.
+  It checks every mask for "never 3/4 alone". It also covers the release waits for sparing,
+  freezing and unreadable events, at and past the deadline.
 - `kh2coop_combat_admission_native_test`: the real pinned teardown bytes and `3BF2C0`
   setter run in an owned executable image, with MinHook stubbed. It covers:
   - deferral, owned 3/4, and release order 0, 1, 3, 4 on the owner thread;
   - the deadline at 15 s;
   - event waits, read from a fake descriptor: a sparing event releases through it at the
     deadline, and a freezing event holds past it, then frees only the owned 3/4;
-  - downing, Continue, reload retirement;
-  - a request forwarded under a freezing event, which waits for its load, or releases if
-    the request is abandoned;
+  - downing, Continue (including the request's own pass with its transition already
+    pending), reload retirement;
   - off-thread refusal, solo, off-thread shutdown;
   - coexistence with the trace (one 3BF2E0 detour).
 - `kh2coop_combat_admission_net_test`: exact framing (truncated or suffixed rejected), the

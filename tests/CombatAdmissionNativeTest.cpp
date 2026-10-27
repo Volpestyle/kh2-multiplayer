@@ -241,33 +241,6 @@ int main() {
           "the request's own pass releases although its transition is already pending");
     pendingTransition = false;
 
-    // A request forwarded while a freezing event blocked its release: nothing is cleared mid-load.
-    {   FakeEvent freezing(false);
-        output.clear();
-        HoldOnce();
-        SetEventContext(freezing.Address());
-        ++transition; pendingTransition = true;
-        ca::NoteHostRequest(ca::AxelTarget, {2, 0x13, 0, 134, 134, 134}, transition);
-        *mask &= ~3u; SetEventContext(0); ca::Service();
-        Check(natives.empty() && Has("release-waiting-event") && Has("release-waiting-transition") && ca::Live(),
-              "after the event, an in-flight transition still holds the release");
-        ++load; ca::NoteLoad(load, transition); pendingTransition = false;
-        Check(natives.empty() && !ca::Live() && Has("retired-without-release"),
-              "its load retires the lease without touching the new room (S2)");
-    }
-    // The same, but the request is abandoned without a load: the release goes ahead.
-    {   FakeEvent freezing(false);
-        output.clear();
-        HoldOnce();
-        SetEventContext(freezing.Address());
-        ++transition; pendingTransition = true;
-        ca::NoteHostRequest(ca::AxelTarget, {2, 0x13, 0, 134, 134, 134}, transition);
-        *mask &= ~3u; SetEventContext(0); ca::Service();
-        pendingTransition = false; ca::Service();
-        Check(Groups() == std::vector<std::uintptr_t>{3, 4} && *mask == 0 && !ca::Live(),
-              "an abandoned transition releases the owned 3/4 on the next service");
-    }
-
     // Reload landed first: retired, nothing replayed into the new room.
     output.clear();
     HoldOnce();

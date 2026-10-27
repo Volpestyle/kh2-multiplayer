@@ -128,15 +128,8 @@ struct Seat {
 };
 
 // Why a decided lease has not released yet (diagnostic), and how it released.
-enum class Wait : std::uint8_t { None, Event, Transition };
-inline const char* WaitName(Wait w) {
-    switch (w) {
-    case Wait::None: return "none";
-    case Wait::Event: return "release-waiting-event";
-    case Wait::Transition: return "release-waiting-transition";
-    }
-    return "unknown";
-}
+enum class Wait : std::uint8_t { None, Event };
+inline const char* WaitName(Wait w) { return w == Wait::Event ? "release-waiting-event" : "none"; }
 enum class Via : std::uint8_t { Clear, SparingEvent };
 inline const char* ViaName(Via v) { return v == Via::SparingEvent ? "event-spares-party" : "clear"; }
 
@@ -343,9 +336,8 @@ public:
 
     // Owner service: input collector (also runs during native pause) and the
     // entity-head frame. Decides at most once per lease, then releases when
-    // the native identity allows it. `forwarding` is NoteHostRequest's own pass,
-    // which runs after BeginTransition but before the request reaches the game.
-    Action Service(const NativeView& v, const SessionView& s, std::uint64_t now, bool forwarding = false) {
+    // the native identity allows it.
+    Action Service(const NativeView& v, const SessionView& s, std::uint64_t now) {
         if (!Live()) return {};
         if (lease_.phase == Phase::Held) {
             const auto outcome = Evaluate(v, s, now);
@@ -357,9 +349,6 @@ public:
         // (152CD0 -> 39CA10 -> 3BF810, dword 2A171E8), so a lease from an older load is
         // retired without touching any group of the new room.
         if (v.load != lease_.load) return Retire(now);
-        // A host transition issued after the lease is in flight: its load resets the mask (S2),
-        // so nothing is cleared mid-load. If it is abandoned without a load, release as usual.
-        if (v.pending && v.transition != lease_.transition && !forwarding) return Waiting(Wait::Transition);
         // A new event that froze 0/1 itself owns them (the bits are a set, not a count): wait,
         // touching nothing, until its context clears; its own teardown clears 0/1 natively.
         // An event whose descriptor spared the party never set them, and waiting would hold

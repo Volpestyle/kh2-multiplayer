@@ -123,12 +123,12 @@ inline void Apply(const Action& action, const NativeView& v, std::uint64_t now) 
     LogLease(Failed(l.outcome) ? "released failed-barrier native-fallback" : "released admitted", l, v, now);
     axeltrace::Point(Failed(l.outcome) ? "admission-release-failed" : "admission-release", action.incarnation);
 }
-inline void ServiceOwner(std::uint64_t now, bool forwarding = false) {
+inline void ServiceOwner(std::uint64_t now) {
     if (!installed.load(std::memory_order_acquire) || releasing || !machine.Live() || !Owner()) return;
     const auto before = machine.Current().phase;
     if (shutdownRequested.load(std::memory_order_acquire)) machine.RequestShutdown(now);
     const auto v = Sample();
-    const auto action = machine.Service(v, Session(), now, forwarding);
+    const auto action = machine.Service(v, Session(), now);
     const auto& l = machine.Current();
     if (before == Phase::Held && l.phase != Phase::Held) {
         LogLease("decided", l, v, now);
@@ -197,7 +197,7 @@ inline void NoteHostRequest(const Destination& from, const Destination& to, std:
         detail::machine.BeforeNativeTransition(now);
         detail::LogLease("decided", detail::machine.Current(), detail::Sample(), now);
         axeltrace::Point("admission-decided", static_cast<std::uintptr_t>(detail::machine.Current().outcome));
-        detail::ServiceOwner(now, true); // release while the old native identity still matches
+        detail::ServiceOwner(now); // release while the old native identity still matches
     }
     detail::machine.NoteRequest(from, to, nextTransition);
     SetLastError(error);
