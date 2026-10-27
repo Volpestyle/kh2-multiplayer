@@ -50,6 +50,10 @@ casting Fire, spending MP and naturally refilling while the opposite HUD agrees
 ([native HUD](NATIVE_PARTY_HUD.md), [guest Magic](NATIVE_GUEST_MAGIC.md)).
 These do not establish two-PC prologue, reciprocal HUD or whole-route acceptance.
 
+The `bc8d9ad` Mansion batch reopened wave-two death/end qualification
+(VUH-2884). A [native terminal ordering candidate](testing/vuh2884-native-terminal/README.md)
+is prepared offline; all three Mansion live variants remain unqualified.
+
 The current route gate remains **New Game / Roxas Days 1-6 -> Sora's TT first
 visit -> Yen Sid -> HB 1 -> world map/Gummi -> LoD 1 -> Shan-Yu**, on two PCs through
 native doors with both players active. Opening-scene friend representation,

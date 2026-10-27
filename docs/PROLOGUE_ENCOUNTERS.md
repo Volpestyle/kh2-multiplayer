@@ -27,6 +27,11 @@ readings, confirmed only where the live column says so.
 
 ## Checklist
 
+Current Mansion qualification is open: the `bc8d9ad` batch lost two wave-two
+death outcomes in the base run. VUH-2884's [log analysis and candidate](testing/vuh2884-native-terminal/README.md)
+also distinguish native-local end completion from delayed fallback replay.
+Historical checked-site receipts below do not close the current rerun gate.
+
 | Day | Room | btl | Mission | Enemies (object ID) | Kind | Live |
 |---|---|---|---|---|---|---|
 | 1 | 07 Tram Common | 95 | `TT07_MS101` | none | scripted, no spawn | checked site, `tt07-armor-shop-104` (VUH-2359/2487) |

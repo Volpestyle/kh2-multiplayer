@@ -261,6 +261,10 @@ Limits:
 - When the last Dusk of the hall dies, the fight-end event can close the room before its death is
   published, which leaves a friend's mirror alive (run `20261019-150147`). This is an enemy-sync race,
   not a downed-state one.
+- The `bc8d9ad` Mansion batch reproduced missing wave-two death accounting and
+  delayed end reconciliation (VUH-2884). Its [offline candidate and log
+  analysis](testing/vuh2884-native-terminal/README.md) do not qualify a downed
+  rerun; base, host-down and friend-down live acceptance remain open.
 - The two-PC check rides on the VUH-2464 firewall run.
 
 ## Downed rules by difficulty (D17, VUH-2632)

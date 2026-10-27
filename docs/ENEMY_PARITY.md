@@ -1289,6 +1289,13 @@ runtime's session slot (`WorldBridge::LocalSlot`: 0 = host, 1Ã¢â‚¬â€œ2
     records a kill at the hooked `0x3D2EB0` funnel (an announced enemy brought to 0). The first census
     that finds it gone publishes a real death (`left=0`) at once, not a leave or nothing. Debug kills
     through `kh2ctl hit kill` bypass the hook; `hit damage` takes the real path.
+  - VUH-2884 candidate: also retain the checked native lethal-notification edge
+    (`3D4A40`, dead flag newly set) for an announced occurrence with unchanged
+    roots and owner scope. A copied terminal fact is independent of later HP
+    samples and drains before mission state, including held-census frames.
+    Alive removal still grants no kill. Native coverage of the Mansion base
+    run's missing wave-two deaths awaits live qualification; see
+    [result and original-log fixtures](testing/vuh2884-native-terminal/README.md).
   - VUH-2497: the friend's census is held while it plays the room's own events, so its binder can
     meet a Dusk only after the host has killed it (runs `154343`, `160928`, `160418`). Two shapes:
     - First sight after the death: the host cleared wave 1 while the friend was still in the hall's

@@ -3,6 +3,10 @@
 #include "MissionMirror.hpp"
 #include "PartyRow.hpp"
 #include "BossLeave.hpp"
+#include "NativeEnemyDeath.hpp"
+#include <fstream>
+#include <map>
+#include <string>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -146,6 +150,133 @@ void bossLeave() {
     check(!BL::Fallback(221, 3, true, false), "never inside a resync's record-authority write fence");
     check(!BL::Fallback(221, 3, false, true), "one attempt per local spawn");
 }
+
+void nativeDeath() {
+    namespace ND=kh2coop::inject::nativedeath;
+    ND::Receipt before;
+    before.available=true;before.netId=5;
+    before.scope={2,3,3,2,1,1,1,{2,19,0,134,134,134}};
+    before.identity={0x10000,0x20000,0x30000,0x40000,0x50000,309};
+    auto after=before;after.flags=4;
+    check(ND::Completed(before,after),"native death notification recognizes a positive-HP scripted terminal");
+    check(!ND::Completed(before,before),"alive removal without a native dead edge earns no death");
+    check(!ND::Completed(after,after),"a repeated notification is not a new death");
+    auto wrong=after;wrong.available=false;
+    check(!ND::Completed(before,wrong),"unavailable poststate refuses death");
+    wrong=before;wrong.available=false;
+    check(!ND::Completed(wrong,after),"unavailable entry refuses death");
+    wrong=after;++wrong.netId;
+    check(!ND::Completed(before,wrong),"another announced occurrence refuses death");
+    for(unsigned i=0;i<13;++i) {
+        wrong=after;
+        switch(i) {
+        case 0: ++wrong.scope.generation;break;
+        case 1: ++wrong.scope.epoch;break;
+        case 2: ++wrong.scope.load;break;
+        case 3: ++wrong.scope.transition;break;
+        case 4: ++wrong.scope.hostConnection;break;
+        case 5: ++wrong.scope.hostDelivery;break;
+        case 6: ++wrong.scope.writerDelivery;break;
+        default: ++wrong.scope.location[i-7];break;
+        }
+        check(!ND::Completed(before,wrong) && !ND::Pending(after,wrong.scope,true,false,false),
+              "changed owner scope refuses completion and publication");
+    }
+    for(unsigned i=0;i<6;++i) {
+        wrong=after;
+        switch(i) {
+        case 0: ++wrong.identity.actor;break;
+        case 1: ++wrong.identity.objentry;break;
+        case 2: ++wrong.identity.status;break;
+        case 3: ++wrong.identity.controller;break;
+        case 4: ++wrong.identity.record;break;
+        default: ++wrong.identity.objectId;break;
+        }
+        check(!ND::Completed(before,wrong),"changed native roots refuse completion");
+    }
+    check(ND::Pending(after,after.scope,true,false,false),"held census can drain a copied real death");
+    check(!ND::Pending(after,after.scope,false,false,false) && !ND::Pending(after,after.scope,true,true,false) &&
+          !ND::Pending(after,after.scope,true,false,true),"unannounced, already sent and retired rows never publish");
+    check(MR::EndRosterReady(true,true,false),"complete empty or settled scoped roster permits end");
+    check(!MR::EndRosterReady(true,true,true) && !MR::EndRosterReady(true,false,false) &&
+          !MR::EndRosterReady(false,true,false),"living, unavailable and changed-mission rosters defer end");
+}
+
+// Exact event excerpts from Juno's host logs. This replays the already observed
+// funnel receipts through the production pending rule. The base run has no
+// such receipt: no test invents one or claims native-hook/live coverage for it.
+void terminalLogs() {
+    namespace ND=kh2coop::inject::nativedeath;
+    for(const char* name:{"193245","194057","194738","180147","200433","201309"}) {
+        std::ifstream input(std::string(KH2COOP_TERMINAL_FIXTURES)+"/"+name+".log");
+        check(input.good(),"retained host log excerpt is readable");
+        std::map<unsigned,ND::Receipt> pending;
+        std::map<unsigned,bool> sent;
+        unsigned captured=0,heldDrain=0,observedLeaves=0;
+        bool ended=false,lateBeforeEnd=false;
+        std::string line;
+        while(std::getline(input,line)) {
+            if(line.find("host native kill netId=")!=std::string::npos) {
+                const auto id=static_cast<unsigned>(std::stoul(line.substr(line.find("netId=")+6)));
+                auto& receipt=pending[id];receipt.available=true;receipt.netId=id;++captured;
+            }
+            if(line.find("despawned, not refilled, left=1")!=std::string::npos)++observedLeaves;
+            const bool held=line.find("native census unavailable: gameplay gate")!=std::string::npos;
+            const bool endSnapshot=line.find("[mission-mirror] host frame=")!=std::string::npos &&
+                line.find("end=3/")!=std::string::npos;
+            if(held || endSnapshot) {
+                for(const auto& [id,receipt]:pending)if(ND::Pending(receipt,receipt.scope,true,sent[id],false)) {
+                    if(held)++heldDrain;
+                    EnemyDeath death;death.epoch=3;death.netId=static_cast<std::uint16_t>(id);
+                    const auto bytes=encode(death);
+                    const std::uint8_t* payload=nullptr;std::size_t size=0;
+                    check(decodePacketHeader(bytes.data(),bytes.size(),payload,size)==PacketType::EnemyDeath,
+                          "retained terminal uses the enemy-death packet");
+                    ByteReader reader(payload,size);EnemyDeath packet;read(reader,packet);
+                    check(packet.left==0,"a retained native terminal encodes as a death, never a leave");
+                    sent[id]=true;
+                    if(std::string(name)=="194738" && id==5 && !ended)lateBeforeEnd=true;
+                }
+                if(endSnapshot)ended=true;
+            }
+        }
+        if(std::string(name)=="194738")check(captured==6 && heldDrain>0 && lateBeforeEnd,
+            "run 194738 final funnel receipt drains during the event before its end snapshot");
+        if(std::string(name)=="194057")check(captured==6,"run 194057 retains all six actual funnel receipts");
+        if(std::string(name)=="193245")check(captured==4 && observedLeaves==1 && !sent[5] && !sent[6],
+            "base trace exposes missing wave-two native receipts; absence never fabricates two kills");
+        if(std::string(name)=="180147")check(observedLeaves>0,"Calling trace retains the same alive-disappearance symptom");
+        if(std::string(name)=="200433")check(captured==4 && observedLeaves==1 && !ended && !sent[5] && !sent[6],
+            "host-down rerun loses a wave-two body before a wipe, with no mission-complete: no invented kills");
+        if(std::string(name)=="201309")check(captured==4 && observedLeaves==1 && ended && !sent[5] && !sent[6],
+            "friend-down rerun loses wave-two terminal evidence across mission-complete: no invented kills");
+    }
+    for(const char* name:{"193245","194057","194738","200433","201309"}) {
+        std::ifstream input(std::string(KH2COOP_TERMINAL_FIXTURES)+"/"+name+"-friend.log");
+        check(input.good(),"retained friend log excerpt is readable");
+        bool living=true,empty=false,cap=false;unsigned deferred=0;
+        std::string line;
+        while(std::getline(input,line)) {
+            if(line.find("[statehash] role=client epoch=3 ")!=std::string::npos &&
+               line.find("room=02/13 ")!=std::string::npos) {
+                const auto count=std::stoul(line.substr(line.find(" count=")+7));
+                living=count>0;
+                if(!living)empty=MR::EndRosterReady(true,true,false);
+            }
+            if(line.find("client end deferred file=TT19")!=std::string::npos) {
+                ++deferred;
+                check(!MR::EndRosterReady(true,true,living),
+                      "actual hall deferral follows a living-roster sample, not an empty one");
+            }
+            if(line.find("client end like the host file=TT19")!=std::string::npos &&
+               line.find("path=frame-cap")!=std::string::npos)cap=true;
+        }
+        if(std::string(name)=="194738")check(deferred==64 && cap && empty,
+            "friend-down trace records fallback replay before final settlement, then permits the empty roster");
+        if(std::string(name)=="194057")check(empty && !deferred,
+            "host-down trace settles natively without a roster deferral");
+    }
+}
 }  // namespace
 int main() {
     {
@@ -163,6 +294,8 @@ int main() {
     rules();
     partyRows();
     bossLeave();
+    nativeDeath();
+    terminalLogs();
     std::cout << (errors ? "FAILED" : "ALL PASSED") << '\n';
     return errors ? 1 : 0;
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "NativeSpawnController.hpp"
+#include "NativeEnemyDeath.hpp"
 #include <cstdint>
 
 namespace kh2coop::inject::lifecycletrace {
@@ -96,8 +97,13 @@ struct Stats {
 // MinHook must already be initialized. Each hook verifies and installs
 // independently; inspect masks for partial coverage. False opts out entirely.
 // No replay, suppression, network work, HP/count/cache writes, or native retries.
+// Optional production callbacks reuse just DeathMark when tracing is off. They
+// capture a checked occurrence before the one native call and commit copied
+// evidence only after normal return. Suspended calls retain pinned code/trampolines.
 bool Install(uintptr_t exeBase, spawncontroller::LogFn log,
-             spawncontroller::RoleFn role, bool trace = false);
+             spawncontroller::RoleFn role, bool trace = false,
+             nativedeath::Receipt (*beginDeath)(uintptr_t) noexcept = nullptr,
+             void (*endDeath)(const nativedeath::Receipt&) noexcept = nullptr);
 void Shutdown();
 Stats GetStats();
 bool PopEvent(Event& event);

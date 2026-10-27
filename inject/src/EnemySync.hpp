@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 #include "NativeHitTrace.hpp"
+#include "NativeEnemyDeath.hpp"
 #include "kh2coop/PuppetProvenance.hpp"
 #include "kh2coop/WorldContext.hpp"
 #include "kh2coop/DownedState.hpp" // Types + WorldContext only; safe beside HitChannel
@@ -305,9 +306,11 @@ std::uint16_t ActionableNativeReaction(std::uint16_t raw) noexcept;
 // AvatarBridge::SetLocalDownedState); ReviveOwnerGate::Consume judges against it.
 void NoteLocalDownedState(const LocalDownedState& state) noexcept;
 // VUH-2495, host, game thread: the native stat funnel (0x3D2EB0) left `actor` at `hp`. An announced
-// enemy brought to 0 is remembered as killed, so the census publishes its death even when the actor
-// has already left the list (a fight-end event closes the census gate on the killing frame).
+// enemy brought to 0 retains a terminal receipt. Pending deaths drain before mission state even
+// when a fight-end event closes the census gate on the killing frame.
 void NoteNativeEnemyHp(uintptr_t actor, int hp) noexcept;
+nativedeath::Receipt CaptureNativeEnemyDeath(uintptr_t actor) noexcept;
+void CompleteNativeEnemyDeath(const nativedeath::Receipt& receipt) noexcept;
 // After envelope admission and ReviveOwnerGate::Consume (episode reserved),
 // enemysync calls this exactly once; it must run the fresh native checks
 // (downed::TryRevive). Returns the native result code (1 = revived).

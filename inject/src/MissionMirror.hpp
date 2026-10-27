@@ -102,6 +102,12 @@ inline bool Follows(const Mission& host, const Mission& local) noexcept {
     return host.active && local.active && SameFile(host.file, local.file) && !Ended(local);
 }
 
+// A complete, still-current census may be empty or contain only native dead
+// bodies. Host left=0/absence alone is not local settlement or a write permit.
+inline bool EndRosterReady(bool missionCurrent, bool censusCurrent, bool living) noexcept {
+    return missionCurrent && censusCurrent && !living;
+}
+
 // A gauge or counter takes the host's value when both games use that slot and the values differ.
 inline bool GaugeDiffers(const Slot& host, const Slot& local) noexcept {
     return (host.flags & kInUse) && (local.flags & kInUse) && std::isfinite(host.gauge) &&

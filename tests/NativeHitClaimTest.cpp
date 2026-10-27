@@ -4021,6 +4021,99 @@ void TestScriptChildOwnerTransitions() {
     Reset();
 }
 
+void TestMansionTerminalOrdering() {
+    const auto seed=[](bool client) {
+        Reset(client);g_mirrorRequested=true;g_recordBindingRequested=g_recordAuthorityRequested=false;
+        auto& spawn=g_inst.spawns[0];spawn.identityRead=true;
+        spawn.controller=RecordController();spawn.record=RecordData();
+        g_inst.world=g_host.world=arrivalTarget.worldId=2;
+        g_inst.room=g_host.room=arrivalTarget.roomId=19;
+        g_inst.door=arrivalTarget.door=0;
+        g_inst.map=g_inst.btl=g_host.btl=g_inst.evt=134;
+        arrivalTarget.mapProgram=arrivalTarget.battleProgram=arrivalTarget.eventProgram=134;
+        Put(image+offsets::WORLD_ID,std::uint8_t{2});Put(image+offsets::ROOM_ID,std::uint8_t{19});
+        Put(image+offsets::NOW+2,std::uint8_t{0});Put(image+offsets::MAP_PROGRAM,std::uint16_t{134});
+        Put(image+offsets::BATTLE_PROGRAM,std::uint16_t{134});Put(image+offsets::EVENT_PROGRAM,std::uint16_t{134});
+        const auto mission=image+0x80000;Put(image+MR::kMissionPtr,mission);Put(mission+MR::kFlags,std::uint32_t{1});
+        constexpr char path[]="msn/us/TT19_MS602.bar";
+        std::memcpy(reinterpret_cast<void*>(mission+MR::kPath),path,sizeof(path));
+        g_missionChecked=g_missionReady=true;g_missionParked=0;g_missionSequence=0;
+        g_missionLocalBase=g_missionHostBase=0;g_missionReplayed=g_missionWasFollowing=false;
+        g_missionHostEndTrap=0;g_missionEndObservation={};g_missionEndDeferral={};
+        g_missionHostFailedSeen=g_missionFallbackPending=false;g_missionDroppedEnd=-1;
+        g_missionHost=ReadMission();g_missionHost.flags|=MR::kEnded;g_missionHost.endTrap=3;g_missionHost.endArg=UINT32_MAX;
+        g_missionGeneration=WorldSessionGeneration();g_missionReceivedMs=GetTickCount64();
+        g_missionHostConnection=g_bridge.ConnectionId(0);g_missionHostDelivery=g_bridge.PeerDeliverySerial(0);
+        g_missionLatest.location=arrivalTarget;g_missionClientEnd={};
+        g_missionHooks[MR::EndTrapIndex(3)].native=reinterpret_cast<uintptr_t>(&BaileyNativeEnd);
+        g_applyStatDelta=BaileyEndDeath;baileyEndCalls=deathCalls=0;baileyEndExpectedHp=0;baileyEndLogs.clear();
+        g_log=BaileyEndLog;g_hitTraceFrame=100;
+    };
+    seed(false);
+    const auto receipt=CaptureNativeEnemyDeath(enemy);
+    Check(receipt.available,"actual lethal observer captures the announced Mansion occurrence");
+    Put(enemy+0x9B8,std::uint32_t{4});Put(image+offsets::OPEN_MENU,std::uint8_t{8});
+    CompleteNativeEnemyDeath(receipt);
+    Check(g_inst.spawns[0].nativeDeath.available && Read<int>(status)==1000,
+          "actual observer retains a scripted positive-HP native death without changing native HP");
+    g_bridge.sendAllowed=false;
+    Check(!PublishHostNativeDeaths() && !g_inst.spawns[0].deathSent,
+          "actual ring refusal retains the native terminal for retry");
+    g_bridge.sendAllowed=true;OnFrameStart(120);
+    std::size_t firstDeath=g_bridge.outgoing.size(),firstMission=g_bridge.outgoing.size();unsigned deaths=0;
+    for(std::size_t i=0;i<g_bridge.outgoing.size();++i) {
+        const auto& bytes=g_bridge.outgoing[i];
+        if(bytes[0]==static_cast<std::uint8_t>(PacketType::EnemyDeath)) {
+            firstDeath=std::min(firstDeath,i);++deaths;
+            Check(bytes==encode(EnemyDeath{9,1}),"actual held-frame publisher sends a real death, not left=1");
+        }
+        if(bytes[0]==static_cast<std::uint8_t>(PacketType::MissionState))firstMission=std::min(firstMission,i);
+    }
+    Check(deaths==1 && firstDeath<firstMission && firstMission<g_bridge.outgoing.size() && nativeCalls==0,
+          "actual held OnFrameStart drains death before mission state without another native call");
+    const auto sent=g_bridge.outgoing.size();
+    Check(PublishHostNativeDeaths() && g_bridge.outgoing.size()==sent,"actual terminal retry never duplicates a successful death");
+    seed(false);const auto old=CaptureNativeEnemyDeath(enemy);
+    Put(enemy+0x9B8,std::uint32_t{4});Put(enemy+0x9F0,RecordData()+64);
+    CompleteNativeEnemyDeath(old);
+    Check(!g_inst.spawns[0].nativeDeath.available,"actual observer rejects a changed native record");
+    seed(false);const auto stale=CaptureNativeEnemyDeath(enemy);
+    Put(enemy+0x9B8,std::uint32_t{4});++load;
+    CompleteNativeEnemyDeath(stale);
+    Check(!g_inst.spawns[0].nativeDeath.available,"actual observer rejects a changed load");
+
+    seed(true);Put(status,std::int32_t{11});g_host.enemies[1].hp=11;g_host.enemies[1].battleProgram=134;
+    Check(ResolveOrdinaryBindings(CaptureNativeCensus(),WorldSessionGeneration()),"Mansion final body has a live binding");
+    QueueHostWorld(encode(EnemyDeath{9,1}));OnFrameStart(101);
+    if(deathCalls!=1 || baileyEndCalls!=1) {
+        std::cerr<<"Mansion owner-frame state: deaths="<<deathCalls<<" ends="<<baileyEndCalls
+                 <<" hp="<<Read<int>(status)<<" role="<<static_cast<unsigned>(g_role)
+                 <<" hostDead="<<g_host.enemies[1].dead<<" bound="<<g_inst.spawns[0].netId<<'\n';
+        for(const auto& line:baileyEndLogs)std::cerr<<line<<'\n';
+    }
+    Check(deathCalls==1 && baileyEndCalls==1 && Read<int>(status)==0 && g_missionReplayed &&
+          std::any_of(baileyEndLogs.begin(),baileyEndLogs.end(),[](const auto& s){return s.find("path=clean-census")!=std::string::npos;}),
+          "actual client owner frame reconciles final death before clean-census end, with no fallback cap");
+
+    seed(true);Put(status,std::int32_t{0});Put(image+0x80000+MR::kFlags,std::uint32_t{1|MR::kEnded});
+    Put(image+offsets::OPEN_MENU,std::uint8_t{8});
+    ObserveNativeMissionEnd(103,CaptureNativeCensus());
+    Check(!g_missionEndObservation.nativeLogged,"an independent local hall end has no host-follow receipt");
+    g_bridge.spawnPickSalt=55;
+    auto& end=g_missionClientEnd;end.serial=1;end.session=55;end.generation=1;end.load=load;end.transition=transition;
+    end.hostConnection=g_bridge.ConnectionId(0);end.hostDelivery=g_bridge.PeerDeliverySerial(0);
+    end.worldId=2;end.roomId=19;std::memcpy(end.file,"TT19_MS602.bar",14);
+    end.window=true;ObserveNativeMissionEnd(104,CaptureNativeCensus());
+    Check(!g_missionEndObservation.nativeLogged,"a host end admitted in travel cannot qualify native-local completion");
+    end.window=false;++end.load;ObserveNativeMissionEnd(104,CaptureNativeCensus());
+    Check(!g_missionEndObservation.nativeLogged,"a retained end from another load cannot qualify completion");
+    --end.load;g_missionHost={}; // subsequent inactive host snapshot must not erase the admitted occurrence
+    ObserveNativeMissionEnd(105,CaptureNativeCensus());ObserveNativeMissionEnd(106,CaptureNativeCensus());
+    Check(g_missionEndObservation.nativeLogged && !g_missionEndObservation.replays && baileyEndCalls==0 &&
+          std::count_if(baileyEndLogs.begin(),baileyEndLogs.end(),[](const auto& s){return s.find("path=native-local replays=0")!=std::string::npos;})==1,
+          "retained admitted host end qualifies one native-local hall completion through a hold/inactive snapshot");
+}
+
 int main(int argc,char** argv) try {
     std::cout << std::unitbuf;
     image = reinterpret_cast<uintptr_t>(VirtualAlloc(nullptr, 0x3000000,
@@ -4347,6 +4440,7 @@ int main(int argc,char** argv) try {
           "raced new-generation reset rearms through normal ordered admission");
     TestBaileyMissionEndOrdering();
     TestBaileyMissionEndOrdering(true); // VUH-2352: ordinary Shadow death vs MU01 end hold
+    TestMansionTerminalOrdering();
     TestMoraleBirthLifetime();
     TestScriptChildOwnerTransitions();
     TestStruggleOrbRows();

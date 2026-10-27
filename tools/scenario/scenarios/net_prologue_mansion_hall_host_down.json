@@ -213,12 +213,12 @@
   {
    "do": "save",
    "as": "ends",
-   "expr": "[log_count('[mission-mirror] host end trap=', 0), log_count('client end like the host', 1) + log_count('client fail like the host', 1)]"
+   "expr": "[log_count('[mission-mirror] host end trap=mission_complete', 0), log_count('client end like the host file=TT19_MS602.bar trap=mission_complete', 1) + log_count('client end observed file=TT19_MS602.bar path=native-local replays=0', 1)]"
   },
   {
    "do": "assert",
-   "expr": "saved['ends'][0] == 1 and saved['ends'][1] <= 1 and saved['combat']['fullPartyDown'] == 0",
-   "message": "one host mission end, followed at most once, and never a full-party down"
+   "expr": "saved['ends'][0] == 1 and saved['ends'][1] == 1 and saved['combat']['fullPartyDown'] == 0",
+   "message": "one host mission end, followed exactly once, and never a full-party down"
   },
   {
    "do": "coop_verdict",

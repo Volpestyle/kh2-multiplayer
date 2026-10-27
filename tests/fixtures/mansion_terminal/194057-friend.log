@@ -1,0 +1,61 @@
+950: [statehash] role=client epoch=3 frame=1539 room=02/13 door=0 map=134 btl=134 evt=134 enemies=BA21A59C progress=CED49606 count=4 unmatched=0 observed=4 tickMs=794973875
+999: [statehash] role=client epoch=3 frame=1597 room=02/13 door=0 map=134 btl=134 evt=134 enemies=BA21A59C progress=CED49606 count=4 unmatched=0 observed=4 tickMs=794974875
+1075: [statehash] role=client epoch=3 frame=1655 room=02/13 door=0 map=134 btl=134 evt=134 enemies=EA6B27AC progress=CED49606 count=4 unmatched=0 observed=4 tickMs=794975875
+1116: [statehash] role=client epoch=3 frame=1715 room=02/13 door=0 map=134 btl=134 evt=134 enemies=F013B8E8 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=794976875
+1150: [statehash] role=client epoch=3 frame=1775 room=02/13 door=0 map=134 btl=134 evt=134 enemies=F013B8E8 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=794977875
+1215: [statehash] role=client epoch=3 frame=1835 room=02/13 door=0 map=134 btl=134 evt=134 enemies=F88169B8 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=794978890
+1270: [statehash] role=client epoch=3 frame=1895 room=02/13 door=0 map=134 btl=134 evt=134 enemies=EACF9208 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=794979890
+1325: [statehash] role=client epoch=3 frame=1955 room=02/13 door=0 map=134 btl=134 evt=134 enemies=47630448 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=794980890
+1330: [enemysync] client: host death epoch 3 netId 2 left=0
+1358: [statehash] role=client epoch=3 frame=2015 room=02/13 door=0 map=134 btl=134 evt=134 enemies=B26D1E5C progress=CED49606 count=3 unmatched=0 observed=4 tickMs=794981890
+1406: [statehash] role=client epoch=3 frame=2075 room=02/13 door=0 map=134 btl=134 evt=134 enemies=B26D1E5C progress=CED49606 count=3 unmatched=0 observed=3 tickMs=794982890
+1454: [statehash] role=client epoch=3 frame=2135 room=02/13 door=0 map=134 btl=134 evt=134 enemies=E004066F progress=CED49606 count=3 unmatched=0 observed=3 tickMs=794983890
+1494: [statehash] role=client epoch=3 frame=2195 room=02/13 door=0 map=134 btl=134 evt=134 enemies=EA0CEEBC progress=CED49606 count=3 unmatched=0 observed=3 tickMs=794984890
+1533: [statehash] role=client epoch=3 frame=2255 room=02/13 door=0 map=134 btl=134 evt=134 enemies=EA0CEEBC progress=CED49606 count=3 unmatched=0 observed=3 tickMs=794985890
+1584: [statehash] role=client epoch=3 frame=2315 room=02/13 door=0 map=134 btl=134 evt=134 enemies=AEBF21AC progress=CED49606 count=3 unmatched=0 observed=3 tickMs=794986890
+1629: [statehash] role=client epoch=3 frame=2375 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C3A1250D progress=CED49606 count=3 unmatched=0 observed=3 tickMs=794987890
+1643: [enemysync] client: host death epoch 3 netId 3 left=0
+1682: [statehash] role=client epoch=3 frame=2435 room=02/13 door=0 map=134 btl=134 evt=134 enemies=708D3FDC progress=CED49606 count=2 unmatched=0 observed=3 tickMs=794988890
+1711: [statehash] role=client epoch=3 frame=2495 room=02/13 door=0 map=134 btl=134 evt=134 enemies=708D3FDC progress=CED49606 count=2 unmatched=0 observed=2 tickMs=794989890
+1748: [statehash] role=client epoch=3 frame=2555 room=02/13 door=0 map=134 btl=134 evt=134 enemies=CF94BF94 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=794990890
+1772: [statehash] role=client epoch=3 frame=2615 room=02/13 door=0 map=134 btl=134 evt=134 enemies=CF94BF94 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=794991890
+1814: [statehash] role=client epoch=3 frame=2675 room=02/13 door=0 map=134 btl=134 evt=134 enemies=CFBD26E4 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=794992906
+1837: [statehash] role=client epoch=3 frame=2735 room=02/13 door=0 map=134 btl=134 evt=134 enemies=CFBD26E4 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=794993906
+1883: [statehash] role=client epoch=3 frame=2795 room=02/13 door=0 map=134 btl=134 evt=134 enemies=931ABA36 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=794994906
+1918: [statehash] role=client epoch=3 frame=2855 room=02/13 door=0 map=134 btl=134 evt=134 enemies=147CB2BE progress=CED49606 count=2 unmatched=0 observed=2 tickMs=794995906
+1951: [enemysync] client: host death epoch 3 netId 1 left=0
+1961: [statehash] role=client epoch=3 frame=2915 room=02/13 door=0 map=134 btl=134 evt=134 enemies=31D312FB progress=CED49606 count=1 unmatched=0 observed=2 tickMs=794996906
+1990: [statehash] role=client epoch=3 frame=2975 room=02/13 door=0 map=134 btl=134 evt=134 enemies=AC515A36 progress=CED49606 count=3 unmatched=0 observed=4 tickMs=794997906
+2034: [statehash] role=client epoch=3 frame=3035 room=02/13 door=0 map=134 btl=134 evt=134 enemies=AC515A36 progress=CED49606 count=3 unmatched=0 observed=3 tickMs=794998906
+2069: [statehash] role=client epoch=3 frame=3095 room=02/13 door=0 map=134 btl=134 evt=134 enemies=45325D1E progress=CED49606 count=3 unmatched=0 observed=3 tickMs=794999906
+2104: [statehash] role=client epoch=3 frame=3155 room=02/13 door=0 map=134 btl=134 evt=134 enemies=45325D1E progress=CED49606 count=3 unmatched=0 observed=3 tickMs=795000906
+2129: [statehash] role=client epoch=3 frame=3215 room=02/13 door=0 map=134 btl=134 evt=134 enemies=45325D1E progress=CED49606 count=3 unmatched=0 observed=3 tickMs=795001906
+2168: [statehash] role=client epoch=3 frame=3275 room=02/13 door=0 map=134 btl=134 evt=134 enemies=B19F2446 progress=CED49606 count=3 unmatched=0 observed=3 tickMs=795002906
+2198: [statehash] role=client epoch=3 frame=3335 room=02/13 door=0 map=134 btl=134 evt=134 enemies=B19F2446 progress=CED49606 count=3 unmatched=0 observed=3 tickMs=795003906
+2231: [enemysync] client: host death epoch 3 netId 4 left=0
+2245: [statehash] role=client epoch=3 frame=3395 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C55ADD59 progress=CED49606 count=2 unmatched=0 observed=3 tickMs=795004906
+2275: [statehash] role=client epoch=3 frame=3455 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C55ADD59 progress=CED49606 count=2 unmatched=0 observed=3 tickMs=795005906
+2320: [statehash] role=client epoch=3 frame=3515 room=02/13 door=0 map=134 btl=134 evt=134 enemies=8DA2D981 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795006906
+2352: [statehash] role=client epoch=3 frame=3575 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C696D26D progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795007906
+2381: [statehash] role=client epoch=3 frame=3635 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C696D26D progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795008906
+2403: [statehash] role=client epoch=3 frame=3695 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C696D26D progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795009921
+2449: [statehash] role=client epoch=3 frame=3756 room=02/13 door=0 map=134 btl=134 evt=134 enemies=02DC791D progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795010921
+2480: [statehash] role=client epoch=3 frame=3816 room=02/13 door=0 map=134 btl=134 evt=134 enemies=513DCA49 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795011921
+2504: [statehash] role=client epoch=3 frame=3875 room=02/13 door=0 map=134 btl=134 evt=134 enemies=513DCA49 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795012921
+2527: [statehash] role=client epoch=3 frame=3935 room=02/13 door=0 map=134 btl=134 evt=134 enemies=513DCA49 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795013921
+2538: [enemysync] client: host death epoch 3 netId 5 left=0
+2541: [enemysync] client: host death netId 5 applied (hp 8 -> 0)
+2558: [statehash] role=client epoch=3 frame=3995 room=02/13 door=0 map=134 btl=134 evt=134 enemies=24C3B79D progress=CED49606 count=1 unmatched=0 observed=2 tickMs=795014921
+2587: [statehash] role=client epoch=3 frame=4055 room=02/13 door=0 map=134 btl=134 evt=134 enemies=24C3B79D progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795015921
+2615: [statehash] role=client epoch=3 frame=4115 room=02/13 door=0 map=134 btl=134 evt=134 enemies=A625B025 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795016921
+2638: [statehash] role=client epoch=3 frame=4175 room=02/13 door=0 map=134 btl=134 evt=134 enemies=A625B025 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795017921
+2672: [statehash] role=client epoch=3 frame=4235 room=02/13 door=0 map=134 btl=134 evt=134 enemies=2787A8AD progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795018921
+2695: [statehash] role=client epoch=3 frame=4295 room=02/13 door=0 map=134 btl=134 evt=134 enemies=E99A9D79 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795019921
+2719: [statehash] role=client epoch=3 frame=4355 room=02/13 door=0 map=134 btl=134 evt=134 enemies=E99A9D79 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795020921
+2738: [statehash] role=client epoch=3 frame=4415 room=02/13 door=0 map=134 btl=134 evt=134 enemies=E99A9D79 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795021921
+2767: [statehash] role=client epoch=3 frame=4475 room=02/13 door=0 map=134 btl=134 evt=134 enemies=6AFC9601 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795022921
+2795: [statehash] role=client epoch=3 frame=4535 room=02/13 door=0 map=134 btl=134 evt=134 enemies=EC5E8E89 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795023921
+2814: [enemysync] client: host death epoch 3 netId 6 left=0
+2818: [enemysync] client: host death netId 6 applied (hp 4 -> 0)
+2870: [mission-mirror] client release file=TT19_MS602.bar host=-
+2872: [statehash] role=client epoch=3 frame=4845 room=02/13 door=0 map=134 btl=134 evt=134 enemies=17EFA678 progress=CED49606 count=0 unmatched=0 observed=0 tickMs=795033718

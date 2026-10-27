@@ -121,6 +121,59 @@ void __fastcall OriginalDeathMark(void* actor) {
     Run(Kind::DeathBookkeeping, expectedController, actor, g_exeBase + 0x3D4A6C);
     std::uint32_t flags = 4;
     std::memcpy(static_cast<std::uint8_t*>(actor) + 0x9B8, &flags, sizeof(flags));
+    if(changeLifecycle)++transition;
+}
+
+unsigned productionCaptures=0,productionCompletions=0;
+kh2coop::inject::nativedeath::Receipt ProductionCapture(uintptr_t actor) noexcept {
+    using namespace kh2coop::inject;
+    ++productionCaptures;
+    nativedeath::Receipt receipt;
+    if(!spawncontroller::IsDiagnosticGameThread())return receipt;
+    const auto snapshot=CaptureActor(actor);
+    receipt.available=snapshot.available;
+    receipt.netId=5;receipt.flags=snapshot.flags9B8;
+    receipt.scope={2,3,load,transition,1,1,1,{2,19,0,134,134,134}};
+    receipt.identity={actor,snapshot.objentry,snapshot.status,snapshot.controller,snapshot.record,snapshot.objectId};
+    SetLastError(111); // observer bookkeeping must not change the native caller's error
+    return receipt;
+}
+void ProductionComplete(const kh2coop::inject::nativedeath::Receipt& receipt) noexcept {
+    if(kh2coop::inject::nativedeath::Completed(receipt,ProductionCapture(receipt.identity.actor)))
+        ++productionCompletions;
+    SetLastError(222);
+}
+bool CatchDeathMark() {
+    __try {DeathMark(expectedActor);}
+    __except(GetExceptionCode()==deliberateException?EXCEPTION_EXECUTE_HANDLER:EXCEPTION_CONTINUE_SEARCH) {
+        return true;
+    }
+    return false;
+}
+void TestProductionDeath() {
+    diagnosticThread.store(GetCurrentThreadId());
+    g_recording=false;g_beginDeath=ProductionCapture;g_endDeath=ProductionComplete;
+    const std::uint32_t alive=0;
+    std::memcpy(static_cast<std::uint8_t*>(expectedActor)+0x9B8,&alive,sizeof(alive));
+    auto calls=deathMarkCalls;SetLastError(99);
+    Check(!CatchDeathMark() && deathMarkCalls==calls+1 && productionCompletions==1 && GetLastError()==99,
+          "production-only lethal observer preserves one native call and LastError without diagnostic recording");
+    Check(!CatchDeathMark() && productionCompletions==1,
+          "an already-dead body does not earn a second terminal receipt");
+    std::memcpy(static_cast<std::uint8_t*>(expectedActor)+0x9B8,&alive,sizeof(alive));
+    changeLifecycle=true;
+    Check(!CatchDeathMark() && productionCompletions==1,"a native load/transition change rejects completion");
+    changeLifecycle=false;faultCount=true;calls=deathMarkCalls;
+    std::memcpy(static_cast<std::uint8_t*>(expectedActor)+0x9B8,&alive,sizeof(alive));
+    const auto captures=productionCaptures;
+    Check(CatchDeathMark() && deathMarkCalls==calls+1 && productionCaptures==captures+1 && productionCompletions==1,
+          "native lethal unwind propagates exactly once and never calls the terminal completion");
+    faultCount=false;diagnosticThread.store(0);
+    std::memcpy(static_cast<std::uint8_t*>(expectedActor)+0x9B8,&alive,sizeof(alive));
+    Check(!CatchDeathMark() && productionCompletions==1,
+          "an unregistered native caller preserves the death without granting a terminal receipt");
+    diagnosticThread.store(GetCurrentThreadId());
+    g_beginDeath=nullptr;g_endDeath=nullptr;
 }
 
 bool CatchRemoval() {
@@ -615,6 +668,7 @@ int main() {
           "registered-thread Off is explicitly distinguishable from an unsampled role");
     g_role = Role;
     TestPredicates();
+    TestProductionDeath();
     Check(hookCalls == 0, "headless tests never invoke hook installation or teardown");
     return errors ? 1 : 0;
 }

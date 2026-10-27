@@ -87,6 +87,13 @@ games run the same mission file and its own mission hasn't ended:
   the room, so it counts as a new mission on both sides, even if the object is
   reused. Limit: a mission that keeps running across a room load counts as a
   new one after the load. The LoD missions seen so far stay in one room.
+- **Final death ordering (VUH-2884 candidate):** pending checked host deaths
+  publish before mission snapshots even during a gameplay hold. The friend
+  reconciles deaths before checking the end with a fresh census; empty or
+  all-dead scoped rosters permit replay, while living or unavailable rosters
+  defer. Bailey and the Basement Hall also log a native-local completion once,
+  independently of replay. The 180-frame fallback remains. Offline/live
+  qualification is tracked in [the candidate result](testing/vuh2884-native-terminal/README.md).
 - **An end the friend can't replay:** sometimes the host's mission ends with no
   end trap the hooks saw (an engine end, or a host without hooks). The friend
   then stops following. If it had dropped its own end meanwhile, it runs that

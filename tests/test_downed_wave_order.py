@@ -223,12 +223,32 @@ class ScenarioStepsTest(unittest.TestCase):
             self.ctx.saved = {"deaths_before": 0}
             host, friend = traces(downed, "good")
             host += "\n[mission-mirror] host end trap=mission_complete arg=0"
-            friend += "\n[mission-mirror] client end like the host file=TT19_MS602.bar trap=x arg=0 ok=1 path=x"
+            friend += "\n[mission-mirror] client end like the host file=TT19_MS602.bar trap=mission_complete arg=0 ok=1 path=clean-census"
             self.write(host, friend)
             for step in self.final(downed):
                 self.run_step(step)
             self.assertTrue(self.ctx.saved["order"]["ok"])
             self.assertGreaterEqual(self.ctx.saved["combat"]["hostDeaths"], 6)
+
+    def test_final_steps_reject_a_missing_friend_completion(self):
+        for downed in (0, 1):
+            self.ctx.saved = {"deaths_before": 0}
+            host, friend = traces(downed, "good")
+            host += "\n[mission-mirror] host end trap=mission_complete arg=0"
+            self.write(host, friend)
+            with self.assertRaises(RUN.StepFailed):
+                for step in self.final(downed):
+                    self.run_step(step)
+
+    def test_final_steps_accept_host_correlated_native_completion(self):
+        for downed in (0, 1):
+            self.ctx.saved = {"deaths_before": 0}
+            host, friend = traces(downed, "good")
+            host += "\n[mission-mirror] host end trap=mission_complete arg=0"
+            friend += "\n[mission-mirror] client end observed file=TT19_MS602.bar path=native-local replays=0 census=complete living=0 hpSum=0"
+            self.write(host, friend)
+            for step in self.final(downed):
+                self.run_step(step)
 
 
 if __name__ == "__main__":

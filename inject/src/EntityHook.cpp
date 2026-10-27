@@ -4331,7 +4331,8 @@ bool Initialize(uintptr_t exeBase) {
     }, &enemysync::NoteSpawnPickOp);
     enemysync::SetSpawnPickLive(spawnPickLive);  // review F1: no detour, no shared bit
     resourcetrace::Initialize(exeBase, spawncontroller::GetTraceStats().constructionConfigured);
-    lifecycletrace::Install(exeBase, &Log, &enemysync::ActivationRole, spawnTrace);
+    lifecycletrace::Install(exeBase, &Log, &enemysync::ActivationRole, spawnTrace,
+                           &enemysync::CaptureNativeEnemyDeath, &enemysync::CompleteNativeEnemyDeath);
     cloneneutral::Install(exeBase); // VUH-1489: default off (KH2COOP_CLONE_NEUTRAL_INPUT)
     playerkit::SetBcNeutralReady(&cloneneutral::Enabled);
     // Ally hits (KH2COOP_ALLY_HIT): after the handle resolver is verified. Default (unset) is puppet mode

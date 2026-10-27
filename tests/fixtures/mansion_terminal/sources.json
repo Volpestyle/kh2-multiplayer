@@ -1,0 +1,79 @@
+[
+  {
+    "fixture": "193245.log",
+    "run": "20261026-193245_net_prologue_mansion_hall_1",
+    "source": "kh2coop_inject_157120.log",
+    "sourceSha256": "7ca29ca90111d600f6e6007f014a4e061857070685f62b9c3ab61415db5c23ab",
+    "selectedLines": 138
+  },
+  {
+    "fixture": "194057.log",
+    "run": "20261026-194057_net_prologue_mansion_hall_host_down_1",
+    "source": "kh2coop_inject_238900.log",
+    "sourceSha256": "d4955d8e8fc5704b16ef60096a0668448123722de77396d2578f90969b2d117a",
+    "selectedLines": 151
+  },
+  {
+    "fixture": "194738.log",
+    "run": "20261026-194738_net_prologue_mansion_hall_friend_down_1",
+    "source": "kh2coop_inject_99924.log",
+    "sourceSha256": "aaebbe1a3be30ea6076fd0be6129bfdeb557c4139ce0f4e98daaa7bf099f78a5",
+    "selectedLines": 167
+  },
+  {
+    "fixture": "180147.log",
+    "run": "20261026-180147_net_seat_activation_calling_1",
+    "source": "kh2coop_inject_233804.log",
+    "sourceSha256": "37a66e9783a5d1249f69bf2c7788b12f410e92a7b2ee6fd06de2942ab534ac88",
+    "selectedLines": 1
+  },
+  {
+    "fixture": "193245-friend.log",
+    "run": "20261026-193245_net_prologue_mansion_hall_1",
+    "source": "kh2coop_inject_188396.log",
+    "sourceSha256": "ceaf81a2e661a1683dbb671fac96ac85116901da65730f08edaa28b7e74740b2",
+    "selectedLines": 48
+  },
+  {
+    "fixture": "194057-friend.log",
+    "run": "20261026-194057_net_prologue_mansion_hall_host_down_1",
+    "source": "kh2coop_inject_162672.log",
+    "sourceSha256": "a44d43758a1e3caf260416783814eaf0f0319054614dd3502ca0b9555916a1d0",
+    "selectedLines": 61
+  },
+  {
+    "fixture": "194738-friend.log",
+    "run": "20261026-194738_net_prologue_mansion_hall_friend_down_1",
+    "source": "kh2coop_inject_236068.log",
+    "sourceSha256": "2cee47c8a97f44aa83073e06141a483cdfcc5b5f79e73fabd6ca3eb34580fca9",
+    "selectedLines": 134
+  },
+  {
+    "fixture": "200433.log",
+    "run": "20261026-200433_net_prologue_mansion_hall_host_down_1",
+    "source": "kh2coop_inject_100968.log",
+    "sourceSha256": "49843a5bd6cad368773552a86a61272830eea1a2b2f4523f01e02d0ae20fb31a",
+    "selectedLines": 89
+  },
+  {
+    "fixture": "200433-friend.log",
+    "run": "20261026-200433_net_prologue_mansion_hall_host_down_1",
+    "source": "kh2coop_inject_179272.log",
+    "sourceSha256": "2e122e1cde2f60f00fab07483516be1a1b2596f298be618f642d5b3f1bbee1f8",
+    "selectedLines": 258
+  },
+  {
+    "fixture": "201309.log",
+    "run": "20261026-201309_net_prologue_mansion_hall_friend_down_1",
+    "source": "kh2coop_inject_156668.log",
+    "sourceSha256": "ea686bde87654da92e7a6b127a4f2485acf8a28f9cb0c1baadee5a4c6dfa45f7",
+    "selectedLines": 131
+  },
+  {
+    "fixture": "201309-friend.log",
+    "run": "20261026-201309_net_prologue_mansion_hall_friend_down_1",
+    "source": "kh2coop_inject_89568.log",
+    "sourceSha256": "5c3f3d6ad468836834bf7d9bfbce59baa617364008184422ad1c66c3237fe82d",
+    "selectedLines": 113
+  }
+]

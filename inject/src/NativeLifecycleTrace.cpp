@@ -53,6 +53,8 @@ spawncontroller::LogFn g_log = nullptr;
 spawncontroller::RoleFn g_role = nullptr;
 PairFn g_removal = nullptr, g_deathBook = nullptr;
 OneFn g_disposal = nullptr, g_deathMark = nullptr, g_count = nullptr;
+nativedeath::Receipt (*g_beginDeath)(uintptr_t) noexcept = nullptr;
+void (*g_endDeath)(const nativedeath::Receipt&) noexcept = nullptr;
 PredicateFn g_predicate = nullptr, g_script = nullptr, g_auxiliary = nullptr;
 std::atomic<bool> g_requested {false};
 std::atomic<std::uint32_t> g_verified {0}, g_installed {0}, g_failed {0}, g_exception {0};
@@ -69,6 +71,7 @@ struct Frame {Event event{};uintptr_t anchor{};std::uint64_t serial{};bool predi
 struct Local {unsigned depth{};std::array<Frame,kDepthCap> frames{};};
 tracefiber::Store<Local> g_storage;
 std::atomic<bool> g_recording{};
+std::atomic<bool> g_deathObserverRetained{};
 std::atomic<std::uint32_t> g_enableAttempted{};
 std::atomic<std::uint64_t> g_scopeSerial{};
 Frame* Parent(Local*& local) {
@@ -281,7 +284,9 @@ void FinishEvent(Event& event, bool completed) {
 // and validated retained-frame restoration on normal return or unwind. Events publish child-first;
 // sequence/parent/depth express entry order rather than queue order.
 void Run(Kind kind,void* controller,void* actor,uintptr_t caller) {
-    const auto error=GetLastError();Local* local=nullptr;(void)Parent(local);
+    const auto error=GetLastError();
+    if(!g_recording) {SetLastError(error);InvokeOriginal(kind,controller,actor);return;}
+    Local* local=nullptr;(void)Parent(local);
     if(!g_recording || !local || local->depth>=kDepthCap) {
         if(local && local->depth>=kDepthCap)g_storage.Reject(local);
         ++g_dropped;SetLastError(error);InvokeOriginal(kind,controller,actor);return;
@@ -447,7 +452,17 @@ std::uint8_t __fastcall AuxiliaryPredicate(void* auxiliary) { return RunPredicat
 
 void __fastcall Removal(void* controller, void* actor) { Run(Kind::RemovalBookkeeping, controller, actor, reinterpret_cast<uintptr_t>(_ReturnAddress())); }
 void __fastcall Disposal(void* actor) { Run(Kind::Disposal, nullptr, actor, reinterpret_cast<uintptr_t>(_ReturnAddress())); }
-void __fastcall DeathMark(void* actor) { Run(Kind::DeathMark, nullptr, actor, reinterpret_cast<uintptr_t>(_ReturnAddress())); }
+void __fastcall DeathMark(void* actor) {
+    const auto error=GetLastError();
+    const auto receipt=g_beginDeath?g_beginDeath(reinterpret_cast<uintptr_t>(actor)):nativedeath::Receipt{};
+    SetLastError(error);
+    Run(Kind::DeathMark, nullptr, actor, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+    // A native exception never reaches this completion. No additional native
+    // call, death/count/cache mutation or inferred disappearance is introduced.
+    const auto nativeError=GetLastError();
+    if(receipt.available && g_endDeath)g_endDeath(receipt);
+    SetLastError(nativeError);
+}
 void __fastcall DeathBook(void* controller, void* actor) { Run(Kind::DeathBookkeeping, controller, actor, reinterpret_cast<uintptr_t>(_ReturnAddress())); }
 void __fastcall Count(void* controller) { Run(Kind::CountDecrement, controller, nullptr, reinterpret_cast<uintptr_t>(_ReturnAddress())); }
 
@@ -491,11 +506,28 @@ bool InstallOne(Kind kind, const std::uint8_t* bytes, std::size_t length, void* 
 
 } // namespace
 
-bool Install(uintptr_t exeBase, spawncontroller::LogFn log, spawncontroller::RoleFn role, bool trace) {
+bool Install(uintptr_t exeBase, spawncontroller::LogFn log, spawncontroller::RoleFn role, bool trace,
+             nativedeath::Receipt (*beginDeath)(uintptr_t) noexcept,
+             void (*endDeath)(const nativedeath::Receipt&) noexcept) {
     if (g_installed.load()) return true;
     if (g_enableAttempted.load()) {if(log)log("[lifecycletrace] unavailable reason=retained-partial-install");return false;}
     g_requested.store(trace);
-    if (!trace) return false;
+    if (!trace && (!beginDeath || !endDeath)) return false;
+    // The production observer needs just the existing byte-verified lethal
+    // boundary. Diagnostic storage and all other hooks remain opt-in.
+    if (!trace) {
+        HMODULE module=nullptr;
+        if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,
+            reinterpret_cast<LPCWSTR>(&Install),&module)) {
+            if(log)log("[lifecycletrace] lethal observer unavailable reason=module-pin");
+            return false;
+        }
+        g_deathObserverRetained=true;
+        g_exeBase=exeBase;g_log=log;g_role=role;
+        g_beginDeath=beginDeath;g_endDeath=endDeath;
+        return InstallOne(Kind::DeathMark,kDeathMarkBytes,sizeof(kDeathMarkBytes),
+                          reinterpret_cast<void*>(&DeathMark),reinterpret_cast<void**>(&g_deathMark));
+    }
     if(tracefiber::PrepareRequested()){if(log)log("[lifecycletrace] unavailable reason=PREPARE-enabled diagnostic-profile");return false;}
     if(!g_storage.Init(reinterpret_cast<const void*>(&Install))){if(log)log("[lifecycletrace] unavailable reason=FLS-storage");return false;}
     g_recording=true;
@@ -503,6 +535,7 @@ bool Install(uintptr_t exeBase, spawncontroller::LogFn log, spawncontroller::Rol
     g_imageSize = ReadImageSize(exeBase);
     g_log = log;
     g_role = role;
+    g_beginDeath=beginDeath;g_endDeath=endDeath;
     ++g_coverageGeneration;
     g_verified.store(0); g_failed.store(0);
     InstallOne(Kind::RemovalBookkeeping, kRemovalBytes, sizeof(kRemovalBytes), reinterpret_cast<void*>(&Removal), reinterpret_cast<void**>(&g_removal));
@@ -544,9 +577,9 @@ bool PopEvent(Event& event) {
 
 void Shutdown() {
     g_recording=false;
-    if(g_storage.Ready()) {++g_coverageGeneration;
+    if(g_storage.Ready() || g_deathObserverRetained.load()) {++g_coverageGeneration;
         for(unsigned i=0;i<kRvas.size();++i)if(g_enableAttempted.load()&(1u<<i))MH_DisableHook(reinterpret_cast<void*>(g_exeBase+kRvas[i]));
-        return; // originals/trampolines/FLS retained for suspended fibers
+        return; // originals/trampolines/module (and diagnostic FLS) retained for suspended native calls
     }
     ++g_coverageGeneration;
     const auto installed = g_installed.exchange(0);

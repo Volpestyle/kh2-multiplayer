@@ -1,0 +1,134 @@
+946: [statehash] role=client epoch=3 frame=1508 room=02/13 door=0 map=134 btl=134 evt=134 enemies=BA21A59C progress=CED49606 count=4 unmatched=0 observed=4 tickMs=795374750
+989: [statehash] role=client epoch=3 frame=1566 room=02/13 door=0 map=134 btl=134 evt=134 enemies=BA21A59C progress=CED49606 count=4 unmatched=0 observed=4 tickMs=795375750
+1068: [statehash] role=client epoch=3 frame=1624 room=02/13 door=0 map=134 btl=134 evt=134 enemies=EA6B27AC progress=CED49606 count=4 unmatched=0 observed=4 tickMs=795376750
+1111: [statehash] role=client epoch=3 frame=1684 room=02/13 door=0 map=134 btl=134 evt=134 enemies=F013B8E8 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=795377750
+1147: [statehash] role=client epoch=3 frame=1744 room=02/13 door=0 map=134 btl=134 evt=134 enemies=F013B8E8 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=795378750
+1226: [statehash] role=client epoch=3 frame=1804 room=02/13 door=0 map=134 btl=134 evt=134 enemies=6E895910 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=795379750
+1274: [statehash] role=client epoch=3 frame=1864 room=02/13 door=0 map=134 btl=134 evt=134 enemies=06FE07A4 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=795380750
+1321: [statehash] role=client epoch=3 frame=1924 room=02/13 door=0 map=134 btl=134 evt=134 enemies=E05CA8B0 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=795381750
+1368: [statehash] role=client epoch=3 frame=1984 room=02/13 door=0 map=134 btl=134 evt=134 enemies=17EF8A28 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=795382750
+1404: [statehash] role=client epoch=3 frame=2044 room=02/13 door=0 map=134 btl=134 evt=134 enemies=17EF8A28 progress=CED49606 count=4 unmatched=0 observed=4 tickMs=795383765
+1412: [enemysync] client: host death epoch 3 netId 3 left=0
+1452: [statehash] role=client epoch=3 frame=2104 room=02/13 door=0 map=134 btl=134 evt=134 enemies=439922E5 progress=CED49606 count=3 unmatched=0 observed=4 tickMs=795384765
+1503: [statehash] role=client epoch=3 frame=2164 room=02/13 door=0 map=134 btl=134 evt=134 enemies=B6261E4E progress=CED49606 count=3 unmatched=0 observed=3 tickMs=795385765
+1553: [enemysync] client: host death epoch 3 netId 2 left=0
+1564: [statehash] role=client epoch=3 frame=2224 room=02/13 door=0 map=134 btl=134 evt=134 enemies=8A7475DC progress=CED49606 count=2 unmatched=0 observed=3 tickMs=795386765
+1612: [statehash] role=client epoch=3 frame=2284 room=02/13 door=0 map=134 btl=134 evt=134 enemies=8A7475DC progress=CED49606 count=2 unmatched=0 observed=3 tickMs=795387765
+1649: [statehash] role=client epoch=3 frame=2344 room=02/13 door=0 map=134 btl=134 evt=134 enemies=064E8C44 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795388765
+1698: [statehash] role=client epoch=3 frame=2404 room=02/13 door=0 map=134 btl=134 evt=134 enemies=0E9A5F74 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795389765
+1736: [statehash] role=client epoch=3 frame=2464 room=02/13 door=0 map=134 btl=134 evt=134 enemies=4C876AA8 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795390765
+1772: [statehash] role=client epoch=3 frame=2524 room=02/13 door=0 map=134 btl=134 evt=134 enemies=4C876AA8 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795391765
+1810: [statehash] role=client epoch=3 frame=2584 room=02/13 door=0 map=134 btl=134 evt=134 enemies=D840F898 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795392765
+1848: [statehash] role=client epoch=3 frame=2644 room=02/13 door=0 map=134 btl=134 evt=134 enemies=F1EF3864 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795393765
+1876: [statehash] role=client epoch=3 frame=2704 room=02/13 door=0 map=134 btl=134 evt=134 enemies=F1EF3864 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795394765
+1909: [statehash] role=client epoch=3 frame=2764 room=02/13 door=0 map=134 btl=134 evt=134 enemies=F1EF3864 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795395765
+1932: [enemysync] client: host death epoch 3 netId 4 left=0
+1948: [statehash] role=client epoch=3 frame=2824 room=02/13 door=0 map=134 btl=134 evt=134 enemies=0363724A progress=CED49606 count=1 unmatched=0 observed=2 tickMs=795396765
+1972: [enemysync] client: host death epoch 3 netId 1 left=0
+1990: [statehash] role=client epoch=3 frame=2884 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C55ADD59 progress=CED49606 count=2 unmatched=0 observed=4 tickMs=795397765
+2023: [statehash] role=client epoch=3 frame=2944 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C55ADD59 progress=CED49606 count=2 unmatched=0 observed=3 tickMs=795398765
+2067: [statehash] role=client epoch=3 frame=3004 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C55ADD59 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795399765
+2097: [statehash] role=client epoch=3 frame=3063 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C55ADD59 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795400765
+2134: [statehash] role=client epoch=3 frame=3123 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C55ADD59 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795401765
+2166: [statehash] role=client epoch=3 frame=3183 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C55ADD59 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795402765
+2191: [statehash] role=client epoch=3 frame=3243 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C55ADD59 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795403765
+2217: [statehash] role=client epoch=3 frame=3303 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C55ADD59 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795404765
+2244: [statehash] role=client epoch=3 frame=3363 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C55ADD59 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795405765
+2288: [statehash] role=client epoch=3 frame=3423 room=02/13 door=0 map=134 btl=134 evt=134 enemies=0B15106A progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795406765
+2317: [statehash] role=client epoch=3 frame=3483 room=02/13 door=0 map=134 btl=134 evt=134 enemies=0B15106A progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795407765
+2350: [statehash] role=client epoch=3 frame=3543 room=02/13 door=0 map=134 btl=134 evt=134 enemies=85DC90BE progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795408765
+2386: [statehash] role=client epoch=3 frame=3603 room=02/13 door=0 map=134 btl=134 evt=134 enemies=85DC90BE progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795409765
+2416: [statehash] role=client epoch=3 frame=3663 room=02/13 door=0 map=134 btl=134 evt=134 enemies=85DC90BE progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795410765
+2452: [statehash] role=client epoch=3 frame=3723 room=02/13 door=0 map=134 btl=134 evt=134 enemies=85DC90BE progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795411765
+2481: [statehash] role=client epoch=3 frame=3783 room=02/13 door=0 map=134 btl=134 evt=134 enemies=85DC90BE progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795412765
+2514: [statehash] role=client epoch=3 frame=3843 room=02/13 door=0 map=134 btl=134 evt=134 enemies=85DC90BE progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795413765
+2540: [statehash] role=client epoch=3 frame=3903 room=02/13 door=0 map=134 btl=134 evt=134 enemies=85DC90BE progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795414765
+2580: [statehash] role=client epoch=3 frame=3963 room=02/13 door=0 map=134 btl=134 evt=134 enemies=83189FAE progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795415765
+2615: [statehash] role=client epoch=3 frame=4023 room=02/13 door=0 map=134 btl=134 evt=134 enemies=C105AAE2 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795416781
+2646: [statehash] role=client epoch=3 frame=4083 room=02/13 door=0 map=134 btl=134 evt=134 enemies=0A027A56 progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795417781
+2677: [statehash] role=client epoch=3 frame=4143 room=02/13 door=0 map=134 btl=134 evt=134 enemies=88A081CE progress=CED49606 count=2 unmatched=0 observed=2 tickMs=795418781
+2701: [enemysync] client: host death epoch 3 netId 6 left=0
+2704: [enemysync] client: host death netId 6 applied (hp 4 -> 0)
+2720: [statehash] role=client epoch=3 frame=4203 room=02/13 door=0 map=134 btl=134 evt=134 enemies=2AEBF68D progress=CED49606 count=1 unmatched=0 observed=2 tickMs=795419781
+2751: [statehash] role=client epoch=3 frame=4263 room=02/13 door=0 map=134 btl=134 evt=134 enemies=2AEBF68D progress=CED49606 count=1 unmatched=0 observed=2 tickMs=795420781
+2783: [statehash] role=client epoch=3 frame=4323 room=02/13 door=0 map=134 btl=134 evt=134 enemies=2AEBF68D progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795421781
+2808: [statehash] role=client epoch=3 frame=4383 room=02/13 door=0 map=134 btl=134 evt=134 enemies=2AEBF68D progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795422781
+2838: [statehash] role=client epoch=3 frame=4443 room=02/13 door=0 map=134 btl=134 evt=134 enemies=2AEBF68D progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795423781
+2862: [statehash] role=client epoch=3 frame=4503 room=02/13 door=0 map=134 btl=134 evt=134 enemies=2AEBF68D progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795424781
+2897: [statehash] role=client epoch=3 frame=4563 room=02/13 door=0 map=134 btl=134 evt=134 enemies=63511FA1 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795425781
+2922: [statehash] role=client epoch=3 frame=4623 room=02/13 door=0 map=134 btl=134 evt=134 enemies=63511FA1 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795426781
+2950: [statehash] role=client epoch=3 frame=4683 room=02/13 door=0 map=134 btl=134 evt=134 enemies=63511FA1 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795427781
+2978: [statehash] role=client epoch=3 frame=4743 room=02/13 door=0 map=134 btl=134 evt=134 enemies=63511FA1 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795428781
+3012: [statehash] role=client epoch=3 frame=4803 room=02/13 door=0 map=134 btl=134 evt=134 enemies=63511FA1 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795429781
+3045: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3055: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3057: [statehash] role=client epoch=3 frame=4863 room=02/13 door=0 map=134 btl=134 evt=134 enemies=E4B31829 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795430781
+3060: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3061: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3062: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3064: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3065: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3069: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3070: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3071: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3072: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3073: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3074: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3075: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3076: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3077: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3078: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3080: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3081: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3082: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3083: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3085: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3086: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3087: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3088: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3089: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3090: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3091: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3093: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3094: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3095: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3096: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3098: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3099: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3100: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3101: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3102: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3104: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3105: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3106: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3107: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3108: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3109: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3110: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3111: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3112: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3113: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3115: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3116: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3117: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3118: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3119: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3121: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3122: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3123: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3124: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3125: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3126: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3129: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3130: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3134: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3135: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3137: [statehash] role=client epoch=3 frame=4923 room=02/13 door=0 map=134 btl=134 evt=134 enemies=E4B31829 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795431781
+3140: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3141: [mission-mirror] client end deferred file=TT19_MS602.bar reason=scoped-roster-live-or-unavailable
+3152: [statehash] role=client epoch=3 frame=4983 room=02/13 door=0 map=134 btl=134 evt=134 enemies=E4B31829 progress=CED49606 count=1 unmatched=0 observed=1 tickMs=795432781
+3167: [mission-mirror] client end like the host file=TT19_MS602.bar trap=mission_complete arg=4294967295 ok=1 path=frame-cap
+3180: [enemysync] client: host death epoch 3 netId 5 left=0
+3205: [mission-mirror] client release file=TT19_MS602.bar host=-
+3208: [enemysync] client: host death netId 5 applied (hp 7 -> 0)
+3209: [statehash] role=client epoch=3 frame=5312 room=02/13 door=0 map=134 btl=134 evt=134 enemies=17EFA678 progress=CED49606 count=0 unmatched=0 observed=1 tickMs=795438281

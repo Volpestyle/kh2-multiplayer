@@ -556,9 +556,8 @@ bool MissionEndRosterReady(const MR::Mission& local, uintptr_t expectedMission) 
     uintptr_t before=0,after=0;
     if(!current(&before) || before!=expectedMission)return false;
     const auto census=CaptureNativeCensus();
-    if(!CensusMatchesInstance(census) ||
-       std::any_of(census.enemies.begin(),census.enemies.end(),[](const auto& enemy){return enemy.hp>0;}))return false;
-    return current(&after) && after==before && CensusMatchesInstance(census);
+    const bool living=std::any_of(census.enemies.begin(),census.enemies.end(),[](const auto& enemy){return enemy.hp>0;});
+    return MR::EndRosterReady(current(&after) && after==before,CensusMatchesInstance(census),living);
 }
 
 void LogMissionEndOrphans(std::uint32_t frame) {
@@ -586,11 +585,27 @@ void LogMissionEndOrphans(std::uint32_t frame) {
 void ObserveNativeMissionEnd(std::uint32_t frame,const NativeCensus& census) {
     if(!g_log || g_role!=Role::Client || !g_mirrorRequested || !g_inst.live)return;
     // The mission object may outlive its room during egress. A new load is not
-    // another Bailey completion receipt for that retained object.
-    if(g_inst.world!=4 || g_inst.room!=8 || g_inst.door!=0 || g_inst.map!=52 || g_inst.btl!=52 || g_inst.evt!=0)return;
+    // another completion receipt for that retained object.
+    const bool baileyRoom=g_inst.world==4 && g_inst.room==8 && g_inst.door==0 &&
+        g_inst.map==52 && g_inst.btl==52 && g_inst.evt==0;
+    const bool hallRoom=g_inst.world==2 && g_inst.room==19 && g_inst.btl==134;
+    if(!baileyRoom && !hallRoom)return;
     uintptr_t base=0;
     const auto local=ReadMission(&base);
-    if(!MR::SameFile(local.file,"HB08_MS102.bar"))return;
+    const bool bailey=baileyRoom && MR::SameFile(local.file,"HB08_MS102.bar");
+    const bool hall=hallRoom && PrologueDuskMission(local);
+    if(!bailey && !hall)return;
+    // Hall acceptance counts this as following the host, so an independent
+    // local end earns no receipt until the same admitted host mission has
+    // completed too. Use the already admitted end occurrence: a later inactive
+    // snapshot must not erase it. This grants no census or actor access.
+    if(hall) {
+        HostMissionEnd end;bool producerCurrent=false;
+        if(!LatestHostMissionEnd(end,producerCurrent) || !producerCurrent || end.window ||
+           warp::TransitionPending() || end.load!=warp::LoadSerial() || end.load!=g_seenLoad ||
+           end.transition!=warp::TransitionSerial() || end.transition!=g_seenTransition ||
+           end.worldId!=g_inst.world || end.roomId!=g_inst.room || !MR::SameFile(end.file,local.file))return;
+    }
     MissionEndObservationContext(local,base,warp::LoadSerial());
     auto& observed=g_missionEndObservation;
     if(observed.nativeLogged || observed.replays || !MR::Ended(local) || MR::Failed(local))return;

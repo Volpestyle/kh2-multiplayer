@@ -284,6 +284,8 @@ else()
 endif()
 target_link_libraries(kh2coop_mission_mirror_test PRIVATE kh2coop_common)
 target_include_directories(kh2coop_mission_mirror_test PRIVATE inject/src)
+target_compile_definitions(kh2coop_mission_mirror_test PRIVATE
+    KH2COOP_TERMINAL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mansion_terminal")
 if(MSVC)
     target_compile_options(kh2coop_mission_mirror_test PRIVATE /W4 /WX)
 else()

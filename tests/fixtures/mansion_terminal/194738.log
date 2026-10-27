@@ -1,0 +1,167 @@
+822: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+831: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+832: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+833: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+834: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+838: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+839: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+840: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+864: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+882: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+885: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+889: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+893: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+918: [mission-mirror] host frame=3960 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+973: [mission-mirror] host frame=4080 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1025: [mission-mirror] host frame=4200 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1106: [mission-mirror] host frame=4320 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1177: [mission-mirror] host frame=4440 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1261: [mission-mirror] host frame=4560 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1335: [mission-mirror] host frame=4680 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1390: [enemysync] host native kill netId=3 objectId=318 epoch=3: recorded at the funnel
+1391: [enemysync] host death epoch 3 netId 3
+1411: [mission-mirror] host frame=4800 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1488: [mission-mirror] host frame=4920 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1500: [enemysync] host native kill netId=2 objectId=318 epoch=3: recorded at the funnel
+1502: [enemysync] host death epoch 3 netId 2
+1569: [mission-mirror] host frame=5040 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1626: [mission-mirror] host frame=5160 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1675: [mission-mirror] host frame=5280 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1730: [mission-mirror] host frame=5400 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1784: [mission-mirror] host frame=5520 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1792: [enemysync] host native kill netId=4 objectId=318 epoch=3: recorded at the funnel
+1793: [enemysync] host death epoch 3 netId 4
+1813: [statehash] native epoch=3 frame=5573 netId=5 objectId=309 hp=60 actor=7FF7F22C01E0
+1814: [statehash] native epoch=3 frame=5573 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+1826: [enemysync] host native kill netId=1 objectId=318 epoch=3: recorded at the funnel
+1827: [enemysync] host death epoch 3 netId 1
+1849: [statehash] native epoch=3 frame=5632 netId=5 objectId=309 hp=60 actor=7FF7F22C01E0
+1850: [statehash] native epoch=3 frame=5632 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+1855: [mission-mirror] host frame=5640 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1875: [statehash] native epoch=3 frame=5692 netId=5 objectId=309 hp=60 actor=7FF7F22C01E0
+1876: [statehash] native epoch=3 frame=5692 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+1898: [statehash] native epoch=3 frame=5752 netId=5 objectId=309 hp=60 actor=7FF7F22C01E0
+1899: [statehash] native epoch=3 frame=5752 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+1903: [mission-mirror] host frame=5760 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1923: [statehash] native epoch=3 frame=5812 netId=5 objectId=309 hp=60 actor=7FF7F22C01E0
+1924: [statehash] native epoch=3 frame=5812 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+1945: [statehash] native epoch=3 frame=5872 netId=5 objectId=309 hp=60 actor=7FF7F22C01E0
+1946: [statehash] native epoch=3 frame=5872 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+1951: [mission-mirror] host frame=5880 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+1971: [statehash] native epoch=3 frame=5932 netId=5 objectId=309 hp=60 actor=7FF7F22C01E0
+1972: [statehash] native epoch=3 frame=5932 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+1995: [statehash] native epoch=3 frame=5992 netId=5 objectId=309 hp=60 actor=7FF7F22C01E0
+1996: [statehash] native epoch=3 frame=5992 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+1999: [mission-mirror] host frame=6000 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2022: [statehash] native epoch=3 frame=6052 netId=5 objectId=309 hp=60 actor=7FF7F22C01E0
+2023: [statehash] native epoch=3 frame=6052 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+2047: [statehash] native epoch=3 frame=6111 netId=5 objectId=309 hp=52 actor=7FF7F22C01E0
+2048: [statehash] native epoch=3 frame=6111 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+2051: [mission-mirror] host frame=6120 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2074: [statehash] native epoch=3 frame=6171 netId=5 objectId=309 hp=47 actor=7FF7F22C01E0
+2075: [statehash] native epoch=3 frame=6171 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+2096: [statehash] native epoch=3 frame=6231 netId=5 objectId=309 hp=47 actor=7FF7F22C01E0
+2097: [statehash] native epoch=3 frame=6231 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+2102: [mission-mirror] host frame=6240 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2122: [statehash] native epoch=3 frame=6291 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2123: [statehash] native epoch=3 frame=6291 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+2145: [statehash] native epoch=3 frame=6351 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2146: [statehash] native epoch=3 frame=6351 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+2149: [mission-mirror] host frame=6360 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2169: [statehash] native epoch=3 frame=6411 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2170: [statehash] native epoch=3 frame=6411 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+2191: [statehash] native epoch=3 frame=6471 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2192: [statehash] native epoch=3 frame=6471 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+2195: [mission-mirror] host frame=6480 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2215: [statehash] native epoch=3 frame=6531 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2216: [statehash] native epoch=3 frame=6531 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+2237: [statehash] native epoch=3 frame=6591 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2238: [statehash] native epoch=3 frame=6591 netId=6 objectId=309 hp=60 actor=7FF7F22B8B40
+2241: [mission-mirror] host frame=6600 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2266: [statehash] native epoch=3 frame=6651 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2267: [statehash] native epoch=3 frame=6651 netId=6 objectId=309 hp=52 actor=7FF7F22B8B40
+2290: [statehash] native epoch=3 frame=6711 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2291: [statehash] native epoch=3 frame=6711 netId=6 objectId=309 hp=44 actor=7FF7F22B8B40
+2293: [mission-mirror] host frame=6720 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2315: [statehash] native epoch=3 frame=6771 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2316: [statehash] native epoch=3 frame=6771 netId=6 objectId=309 hp=32 actor=7FF7F22B8B40
+2340: [statehash] native epoch=3 frame=6831 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2341: [statehash] native epoch=3 frame=6831 netId=6 objectId=309 hp=20 actor=7FF7F22B8B40
+2343: [mission-mirror] host frame=6840 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2366: [statehash] native epoch=3 frame=6891 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2367: [statehash] native epoch=3 frame=6891 netId=6 objectId=309 hp=4 actor=7FF7F22B8B40
+2377: [enemysync] host native kill netId=6 objectId=309 epoch=3: recorded at the funnel
+2378: [enemysync] host death epoch 3 netId 6
+2393: [statehash] native epoch=3 frame=6951 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2394: [statehash] native epoch=3 frame=6951 netId=6 objectId=309 hp=0 actor=7FF7F22B8B40
+2397: [mission-mirror] host frame=6960 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2412: [enemysync] spawn 5 @7FF7F22B8B40 left the list (last hp 0)
+2418: [statehash] native epoch=3 frame=7011 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2437: [statehash] native epoch=3 frame=7071 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2440: [mission-mirror] host frame=7080 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2458: [statehash] native epoch=3 frame=7131 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2478: [statehash] native epoch=3 frame=7191 netId=5 objectId=309 hp=35 actor=7FF7F22C01E0
+2482: [mission-mirror] host frame=7200 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2503: [statehash] native epoch=3 frame=7251 netId=5 objectId=309 hp=27 actor=7FF7F22C01E0
+2523: [statehash] native epoch=3 frame=7311 netId=5 objectId=309 hp=15 actor=7FF7F22C01E0
+2527: [mission-mirror] host frame=7320 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2544: [statehash] native epoch=3 frame=7371 netId=5 objectId=309 hp=15 actor=7FF7F22C01E0
+2563: [statehash] native epoch=3 frame=7431 netId=5 objectId=309 hp=15 actor=7FF7F22C01E0
+2567: [mission-mirror] host frame=7440 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2584: [statehash] native epoch=3 frame=7491 netId=5 objectId=309 hp=15 actor=7FF7F22C01E0
+2606: [statehash] native epoch=3 frame=7551 netId=5 objectId=309 hp=7 actor=7FF7F22C01E0
+2610: [mission-mirror] host frame=7560 file=TT19_MS602.bar flags=1 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=0/0
+2619: [enemysync] host native kill netId=5 objectId=309 epoch=3: recorded at the funnel
+2620: [mission-mirror] host end trap=mission_complete arg=4294967295
+2627: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2642: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2646: [mission-mirror] host frame=7680 file=TT19_MS602.bar flags=15 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=3/4294967295
+2651: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2658: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2662: [mission-mirror] host frame=7800 file=TT19_MS602.bar flags=15 result=0 gauges=0.00/0.00/0.00 counts=0/0/0 timer=0/0 end=3/4294967295
+2667: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2670: [enemysync] spawn 4 @7FF7F22C01E0 left the list (last hp 0)
+2673: [enemysync] host death epoch 3 netId 5 (despawned, not refilled, left=0)
+2692: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2694: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2697: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2700: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2702: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2703: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2706: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2707: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2710: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2711: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2714: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2715: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2717: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2718: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2721: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2722: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2724: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2725: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2730: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2731: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2733: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2734: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2737: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2738: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2740: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2741: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2744: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2745: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2748: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2749: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2752: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2753: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2755: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2756: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2759: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2760: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2762: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2774: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2781: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2785: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2789: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2792: [enemysync] native census unavailable: gameplay gate at=0 nodes=0
+2795: [enemysync] native census unavailable: gameplay gate at=0 nodes=0

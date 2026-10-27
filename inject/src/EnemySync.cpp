@@ -205,6 +205,7 @@ struct Spawn {
     bool lifecycleRetired = false; // non-death membership retirement, no kill credit
     std::uint64_t goneSinceMs = 0;  // host: left the list alive at this time
     bool killed = false;      // client: native HP confirmed dead
+    nativedeath::Receipt nativeDeath{}; // host: monotonic terminal fact, independent of census HP
     bool deathAttempted = false; // at most one native lethal call per local spawn
     bool bossLeaveAttempted = false; // VUH-2367: at most one native leave after a boss refused the lethal
     std::uint32_t strayFrame = 0;    // client, VUH-2272: first frame this living copy's host enemy had left
@@ -2148,8 +2149,47 @@ bool PublishOrdinaryLifecycle(const NativeCensus&);
 bool OrdinaryLifecycleRoom();
 void BindOrdinaryCausalBirths(const NativeCensus&);
 
+bool HostNativeDeathScope(ordinarybinding::ScriptActorScope& out) {
+    if(!spawncontroller::IsDiagnosticGameThread() || !RuntimeWriterLive() ||
+       warp::TransitionPending())return false;
+    RoomTransition room;
+    if(!ActivationIdentityContext(Role::Host,room,false))return false;
+    out={};out.generation=WorldSessionGeneration();out.epoch=room.epoch;
+    out.load=g_seenLoad;out.transition=g_seenTransition;
+    out.hostConnection=g_bridge.ConnectionId(0);out.hostDelivery=g_bridge.PeerDeliverySerial(0);
+    out.writerDelivery=g_bridge.DeliverySerial();
+    out.location={room.worldId,room.roomId,room.door,room.mapProgram,room.battleProgram,room.eventProgram};
+    return out.generation && out.load && out.hostConnection && out.hostDelivery && out.writerDelivery;
+}
+
+// Called before publishing a mission snapshot, including held-census frames.
+// Reads only copied terminal receipts: a closed gameplay gate grants no actor
+// access. Ring pressure retains the receipt and keeps the end behind it.
+bool PublishHostNativeDeaths() {
+    // The opt-in BC lifecycle protocol owns its own terminal ordering. Keep
+    // its existing certified path rather than publishing ahead of its cut.
+    if(OrdinaryLifecycleRoom())return true;
+    if(std::none_of(g_inst.spawns.begin(),g_inst.spawns.end(),[](const auto& s) {
+        return s.nativeDeath.available && s.announced && !s.deathSent && !s.lifecycleRetired;
+    }))return true;
+    ordinarybinding::ScriptActorScope scope;
+    if(!HostNativeDeathScope(scope))return false;
+    for(auto& s:g_inst.spawns) {
+        if(!nativedeath::Pending(s.nativeDeath,scope,s.announced,s.deathSent,s.lifecycleRetired))continue;
+        EnemyDeath death;death.epoch=g_epoch;death.netId=static_cast<std::uint16_t>(s.spawnIndex+1);
+        const auto bytes=encode(death);const bool sent=Send(bytes);
+        if(combatcausal::Requested())combatcausal::engine.Packet(CausalScope(),combatcausal::Kind::DeathPublish,
+            death.netId,0,0,s.lastMaxHp,bytes.data(),static_cast<unsigned>(bytes.size()),sent,!s.present,combatcausal::Now());
+        if(!sent)return false;
+        s.deathSent=true;
+        SYNC_LOG("[enemysync] host death epoch %u netId %u (native terminal, left=0)",g_epoch,death.netId);
+    }
+    return true;
+}
+
 bool HostFrame(std::uint32_t frame, const std::vector<std::size_t>& newSpawns,
                const NativeCensus& census) {
+    if(!PublishHostNativeDeaths())return false;
     // The bounded event-control lane needs an authenticated empty host roster
     // before arming. An absent manifest is not evidence of an empty room.
     if (g_eventHoldProducerEnabled && !g_manifestSent && newSpawns.empty() &&
@@ -6252,7 +6292,8 @@ void OnFrameStart(std::uint32_t frame) {
         InterruptCensus(census.state == CensusState::Complete ? "instance changed" : census.reason,
                         census.failedAt, census.nodeCount);
         // VUH-2606: the host keeps publishing its mission through a mid-mission event.
-        if (missionmirror::rules::PublishWhileHeld(g_role == Role::Host, census.state == CensusState::Complete, census.reason))
+        if (missionmirror::rules::PublishWhileHeld(g_role == Role::Host, census.state == CensusState::Complete, census.reason) &&
+            PublishHostNativeDeaths())
             PublishMission(frame);
         DrainSpawnTrace(census);
         DrainLifecycleTrace(census);
@@ -6301,7 +6342,6 @@ void OnFrameStart(std::uint32_t frame) {
         TickHostPartyLayout();
     } else if (g_role == Role::Client) {
         BindFieldObjects(census);
-        ApplyMission(frame);
         // Reporting only: clients never lock policy from asynchronous arrival.
         // HP stores consult the live advertised mode and the host HP sample.
         if (g_lastRoomPacket) {
@@ -6325,6 +6365,9 @@ void OnFrameStart(std::uint32_t frame) {
         if(!RefreshOrdinaryPresence(census)) {DrainPendingSpawnTrace(false);return;}
         if(!ConsumeOrdinaryRetirements(frame,census)) {DrainPendingSpawnTrace(false);return;}
         if (!ClientFrame(census)) { DrainPendingSpawnTrace(false); return; }
+        // A native lethal can close gameplay/start the native mission end.
+        // ApplyMission takes its own new census; never reuse this pre-call one.
+        ApplyMission(frame);
         // Cache the independently read post-store binding for the NEXT frame;
         // never carry a pre-native-call census into an absence certificate.
         if(!RefreshOrdinaryPresence(CaptureNativeCensus())) {DrainPendingSpawnTrace(false);return;}
@@ -6968,14 +7011,45 @@ bool SendCapturedWorld(const std::vector<std::uint8_t>& packet, const ProducerWo
 }
 
 void NoteNativeEnemyHp(uintptr_t actor, int hp) noexcept {
-    if (hp > 0 || g_role != Role::Host || !g_inst.live || !actor) return;
-    const auto found = g_inst.byActor.find(actor);
-    if (found == g_inst.byActor.end() || found->second >= g_inst.spawns.size()) return;
-    auto& s = g_inst.spawns[found->second];
-    if (s.actor != actor || !s.announced || s.deathSent || s.lifecycleRetired || s.lastHp <= 0) return;
+    if(hp>0)return;
+    const auto receipt=CaptureNativeEnemyDeath(actor);
+    if(!receipt.available)return;
+    auto& s=g_inst.spawns[receipt.netId-1];
+    if(s.nativeDeath.available)return;
+    // The funnel's normal HP result is already terminal evidence. Retain it
+    // even if a later census still contains a pre-call positive HP sample.
+    s.nativeDeath=receipt;
     s.lastHp = 0;
     SYNC_LOG("[enemysync] host native kill netId=%u objectId=%u epoch=%u: recorded at the funnel", s.spawnIndex + 1,
              s.objectId, g_epoch);
+}
+
+nativedeath::Receipt CaptureNativeEnemyDeath(uintptr_t actor) noexcept {
+    nativedeath::Receipt out;
+    if(!actor || !HostNativeDeathScope(out.scope))return {};
+    const auto found=g_inst.byActor.find(actor);
+    if(found==g_inst.byActor.end() || found->second>=g_inst.spawns.size())return {};
+    const auto& s=g_inst.spawns[found->second];
+    if(!s.announced || s.deathSent || s.lifecycleRetired)return {};
+    NativeEnemy native;bool enemy=false;
+    if(!ReadNativeEnemy(actor,native,enemy) || !enemy || native.objectId!=s.objectId ||
+       native.objentry!=s.objentry || native.status!=s.status || !s.identityRead)return {};
+    if(!ReadOrdinaryIdentity(native,out.identity) ||
+       out.identity.controller!=s.controller || out.identity.record!=s.record ||
+       !ReadNative(actor+0x9B8,out.flags))return {};
+    ordinarybinding::ScriptActorScope repeated;
+    if(!HostNativeDeathScope(repeated) || repeated!=out.scope)return {};
+    out.netId=static_cast<std::uint32_t>(found->second+1);out.available=true;
+    return out;
+}
+
+void CompleteNativeEnemyDeath(const nativedeath::Receipt& before) noexcept {
+    const auto after=CaptureNativeEnemyDeath(before.identity.actor);
+    if(!nativedeath::Completed(before,after))return;
+    auto& s=g_inst.spawns[before.netId-1];
+    s.nativeDeath=after;s.lastHp=0;
+    SYNC_LOG("[enemysync] host native kill netId=%u objectId=%u epoch=%u: recorded at lethal notification",
+             before.netId,s.objectId,g_epoch);
 }
 
 std::uint8_t ActivationRole() {
