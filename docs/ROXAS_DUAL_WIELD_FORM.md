@@ -82,8 +82,9 @@ waves, then Axel II. Each asserts per seat:
   `deferred group=1`/`released` lines around the whole window, and a hold that expired is a setup failure. The hit
   must leave the observer's HP and every byte of the SAVE character records (`SAVE+0x24F0`, `0xE04`) and drive-form
   rows (`0x230`) unchanged, read just before and just after;
+- right after the admission release, one logical down and partner revive per owner (`owner_downs`: an Axel
+  downing counts, otherwise the DownedSpike Kill; both seats down is a harness failure);
 - each owner's move, jump and attacks filmed on both screens, with the clone playing the owner's motions;
-- one forced down and partner revive per owner;
 - a full-party down and the native Continue to `02/15 d99`, after which each seat holds only its selected body
   (Sora restored by the encounter exit), no dual-wield body or keyblade pair remains, and the old clone is never
   driven again.

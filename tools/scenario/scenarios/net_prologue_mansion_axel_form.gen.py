@@ -8,9 +8,10 @@ FM-02 rehearsal route (the committed Computer Room -> Basement Hall pilot, both 
 for both. Inside the host's combat-admission hold (proven around the window, else a setup failure), one
 synthetic 1-HP native hit lands on each seat's clone: the observer's own HP, every SAVE character record
 (SAVE+0x24F0, 0xE04) and every drive-form row (SAVE+0x32F4, 0x230: the row a dual-wield status +0x254
-references) must be byte-identical just before and just after the hits. Each owner then moves, jumps and
-attacks alone, filmed on both seats; each owner is downed once (DownedSpike fixture Kill) and revived by the
-other seat; then both are downed and the host takes the native Continue to the Computer Room 02/15 d99, where
+references) must be byte-identical just before and just after the hits. Right after the admission release
+each owner is downed once and revived by the other seat (owner_downs: an Axel downing counts, else the
+DownedSpike fixture Kill; both seats down is a harness failure). Each owner then moves, jumps and attacks
+alone, filmed on both seats; then both are downed and the host takes the native Continue to the Computer Room 02/15 d99, where
 each seat holds only its selected body: no dual-wield body, keyblade pair or old clone. Video-only paired
 clips (lead amendment). Rehearsal save, no save.
 """
@@ -84,20 +85,6 @@ def motions(i):
     # The puppet driver's motion lines for this seat's Axel II clone (its address from the probe).
     return (f"sorted({{m['b'] for m in log_matches(r'\\[puppet 0\\] frame \\d+ motion \\d+ -> (?P<b>\\d+) [^\\n]*actor=0*(?P<a>[0-9A-F]+)', {i}) "
             f"if int(m['a'],16) == int(saved['probe_before'][{i}]['clone'],16)}})")
-
-
-def down_revive(downed, reviver):
-    tag = f"down{downed}"
-    return [{"do": "save", "as": f"{tag}_before", "expr": f"log_count('[downed] revive returned', {downed})"},
-            {"do": "revive_guard", "host": downed, "friend": reviver},
-            *clip_pair(f"{tag}_revive", 12),
-            {"do": "downed_kill", "instance": downed},
-            {"do": "wait_until", "expr": f"log_count('[downed] revive returned', {downed}) > saved['{tag}_before']",
-             "timeoutMs": 60000, "pollMs": 250},
-            {"do": "wait", "ms": 1500},
-            {"do": "revive_guard", "on": False, "as": f"{tag}_guard"},
-            {"do": "clip_wait"},
-            {"do": "save", "as": f"{tag}_after", "expr": f"[{census(0)}, {census(1)}]"}]
 
 
 def gone_after_retry(i):
@@ -188,22 +175,25 @@ def steps_for(selection):
         {"do": "wait_until", "expr": f"log_count('{RELEASED_AXEL}', 0) > 0 and log_count('{RELEASED_AXEL}', 1) > 0",
          "timeoutMs": 60000, "pollMs": 100},
         {"do": "wait_until", "expr": "log_count('[combat-admission] released admitted ', 0) > 0", "timeoutMs": 30000, "pollMs": 100},
+        # One logical down and partner revive per owner, right after the release (run vuh2911-axel-01: on the
+        # 22-HP FM-02 save Axel downed the host before a fixed forced down). A natural down counts once revived.
+        {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000},
+        {"do": "clip_wait"},
+        {"do": "save", "as": "downs_after", "expr": f"[{census(0)}, {census(1)}]"},
+        {"do": "assert", "expr": f"all(saved['owner_downs']['owners'][k] for k in ('0', '1')) and "
+                                 f"all(saved['downs_after'][i]['btlf'] == {btlf} for i in (0, 1))",
+         "message": "each owner must be downed once and revived by the other seat, keeping both seats' bodies"},
         # Each owner alone moves, jumps and attacks, filmed on both screens.
         *clip_pair("owner0", 6), *owner_actions(0), {"do": "clip_wait"},
         *clip_pair("owner1", 6), *owner_actions(1), {"do": "clip_wait"},
         {"do": "save", "as": "clone_motions", "expr": f"[{motions(0)}, {motions(1)}]"},
         {"do": "assert", "expr": "all(len(saved['clone_motions'][i]) >= 3 for i in (0, 1))",
          "message": "each seat's clone must play its owner's motions (puppet receipts)"},
-        # One logical down and partner revive per owner.
-        *down_revive(1, 0),
-        *down_revive(0, 1),
-        {"do": "assert", "expr": f"log_count('[downed] full party down', 0) == 0 and "
-                                 f"all(saved[t][i]['btlf'] == {btlf} for t in ('down1_after', 'down0_after') for i in (0, 1))",
-         "message": "a single down/revive must keep both seats' bodies and never end the party"},
-        # Full-party down, then the host's native Continue to the Computer Room checkpoint.
+        # Full-party down (a seat Axel already downed refuses its Kill with WrongState), then the host's native
+        # Continue to the Computer Room checkpoint.
         {"do": "save", "as": "arrivals_before_retry", "expr": "log_count('[enemysync] client arrived epoch=', 1)"},
-        {"do": "downed_kill", "instance": 1},
-        {"do": "downed_kill", "instance": 0},
+        {"do": "downed_kill", "instance": 1, "require": False},
+        {"do": "downed_kill", "instance": 0, "require": False},
         {"do": "wait_until", "expr": "log_count('[downed] full party down', 0) > 0 and int(str(peek('0x2AE8050','u64',0)),0) != 0",
          "timeoutMs": 30000, "pollMs": 250},
         {"do": "wait", "ms": 7000},

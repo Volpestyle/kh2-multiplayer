@@ -1957,6 +1957,7 @@ protected actor. Protection is best effort during loads.
 | `kh2ctl` | `instance args` or `argsExpr`, `as` | Run the supplied argument array against that instance; `as` saves its JSON reply (VUH-2911: a `hit damage`'s `hpBefore`/`hpAfter`). `argsExpr` evaluates an expression to an array, for explicit reversible fixture writes |
 | `transition_check` | `as after instances target timeoutMs capture` | Wait for completed-load parity, relay ACKs, and restored puppet slots; save structured evidence under `as` (default `transition`). `after` names an earlier checkpoint whose epoch must advance; `target` is the expected `[world, room]`. Default instances are `[0,1,2]`, default timeout 30 s. On timeout, capture every participating instance and preserve the last observation as `<as>_failed.json`. `capture: true` also captures successful checkpoints |
 
+| `owner_downs` | `owners as clipSeconds gapMs holdMs timeoutMs` | VUH-2911: one logical down and partner revive per owner, tolerant of natural downs. Two `ReviveGuard`s run, one per direction: each keeps its seat away from enemies and revives the other after any downing. An owner (default `[1, 0]`) counts once the other seat revives it, whether an enemy downed it (`natural`) or the step's DownedSpike Kill did (`forced`, only while neither seat is down and no forced down is open, `gapMs` 1500 after the last revive). Both seats down, a host full-party down or `timeoutMs` (240000) is a named HARNESS FAILURE, never a pass. Each downing starts a paired background clip (`clipSeconds` 12); follow with `clip_wait`. Both seats must be standing at the start. Saves per owner `{kind, seat}`, the events and both guards' events |
 | `press_continue` | `instance as presses gapMs timeoutMs` | VUH-2911: the host's native Continue after a full-party Game Over. Presses Cross only while the game-over task is live and the menu byte is 8, at most `presses` (5) times `gapMs` (3000) apart, until the `[combat-admission] continue-retry` receipt appears; refuses a log that already holds one and fails without one. Saves the receipt's destination `[world, room, door, map, btl, evt]` and `armed` under `as` (`retry`) |
 | `progress_snapshot` | `as instances compare extraRanges only` | `extraRanges` (VUH-2911): extra `[label, saveOffset, length]` SAVE ranges, such as the drive-form rows `["forms", 0x32F4, 0x230]`; the default ranges are unchanged. `only` (VUH-2911): read just these labels (default or extra), for a short window such as a hold; an unknown label fails. Save actual allow-listed progress and complete personal byte ranges to JSON. Optional `compare` names a prior snapshot and emits each changed SAVE offset and before/after byte |
 | `statehash_check` | `as instances minEnemies timeoutMs` | Require fresh post-arrival hashes on all peers at the same completed epoch and exact six-field location, nonempty native enemy rows, zero unmatched actors, and matching netID/object/HP populations. Save evidence or a failure artifact |
@@ -3495,15 +3496,17 @@ site `tt20-137`):
   combat-admission hold. The hold is proven around the whole window, and an expired hold is a SETUP FAILURE.
   `progress_snapshot` with `only: ["characters", "forms"]` reads every SAVE character-record and drive-form-row
   byte just before and just after, and none may change, nor the observer's HP;
-- each owner's move, jump and attacks filmed as a pair, and one forced down (`downed_kill`) per owner, revived by
-  a `revive_guard` pointed at the downed seat;
+- right after the admission release, `owner_downs`: one logical down per owner, revived by the other seat. An
+  Axel downing counts (run `vuh2911-axel-01` lost its fixed forced order to one on the 22-HP save), otherwise the
+  DownedSpike Kill; both seats down is a harness failure;
+- each owner's move, jump and attacks filmed as a pair;
 - last, a full-party down, `press_continue` to `[2,21,99,2,0,0]`, and retirement: each seat holds only its
   selected body (a Sora seat logs `[prologue] encounter exit at=02/15`), with no `P_EX110_BTLF`, no keyblade pair
   and no puppet line for the old clone after the Continue load.
 The drive-form rows (`extraRanges`) must also be unchanged from boot after the hits and after the Continue.
 `tests/test_axel_form_fixture.py` evaluates these assertions against synthetic data, with negative controls.
-PC1's FM-02 Roxas has 22 HP, so a natural down can land before a forced one; a `downed_kill` refusal
-(`WrongState`) there is a harness failure, not a form failure.
+PC1's FM-02 Roxas has 22 HP, so natural downs are expected. `owner_downs` counts them, and the full-party
+Kills take `require: false`, so a seat Axel already downed refuses with `WrongState` and the run goes on.
 `docs/ROXAS_DUAL_WIELD_FORM.md` has the design and static RE.
 
 ### Waiting for the friend's arrival before `coop_verdict` (VUH-2898)

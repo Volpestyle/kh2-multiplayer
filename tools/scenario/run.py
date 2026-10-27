@@ -1855,6 +1855,93 @@ def step_revive_guard(ctx: Context, step: dict) -> dict:
     return {"events": guard.events, "keepAwaySteps": guard.keepAwaySteps, "openError": guard.openError}
 
 
+DOWNED_DOWN, DOWNED_REVIVED, DOWNED_FULL = "[downed] gate intercept", "[downed] revive returned", "[downed] full party down"
+
+
+def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guard=None, _clip=None,
+                     _now=None, _sleep=None) -> dict:
+    """VUH-2911: one logical down and partner revive per owner, tolerant of natural downs (lead decision on
+    run vuh2911-axel-01, where Axel downed the host before the fixed forced down and both seats went down).
+    Two ReviveGuards run, one per direction: each keeps its seat away from enemies and revives the other seat
+    after any downing. An owner in `owners` (default [1, 0]) counts once the other seat revives it, whether an
+    enemy downed it (natural) or this step's DownedSpike Kill did (forced, only while neither seat is down and
+    no forced down is still open, `gapMs` after the last revive). Both seats down at once, or a host full-party
+    down, is a named harness failure, never a pass; so is `timeoutMs`. Each downing starts a paired background
+    clip (`clipSeconds`, 12) when none is running. Both seats must be standing when the step starts. Saved
+    `as` (`owner_downs`): per owner {kind, seat}, the downing events and both guards' events."""
+    owners = [int(o) for o in step.get("owners", [1, 0])]
+    name = step.get("as", "owner_downs")
+
+    def log_count(index: int, needle: str) -> int:
+        try:
+            return (LOGS / f"kh2coop_inject_{ctx.inst(index).pid}.log").read_text(encoding="utf-8", errors="replace").count(needle)
+        except OSError:
+            return 0
+
+    def film(label: str) -> None:
+        if not any(thread.is_alive() for thread, _, _ in ctx.saved.get("_background_clips", [])):
+            for index in (0, 1):
+                step_clip(ctx, {"instance": index, "seconds": int(step.get("clipSeconds", 12)), "fps": 30,
+                                "background": True, "name": label})
+
+    count = _count or log_count
+    kill = _kill or (lambda index: step_downed_kill(ctx, {"instance": index, "require": False})["result"])
+    guard = _guard or (lambda downed, reviver: ReviveGuard(ctx, downed, reviver, step.get("holdMs")))
+    clip = _clip or film
+    now, sleep = _now or time.monotonic, _sleep or ctx.sleep
+    base = {i: (count(i, DOWNED_DOWN), count(i, DOWNED_REVIVED)) for i in (0, 1)}
+    full = count(0, DOWNED_FULL)
+    start, deadline = now(), now() + step.get("timeoutMs", 240000) / 1000
+    owed = {o: None for o in owners}         # owner -> {"kind", "seat"} once revived
+    forced: dict[int, int] = {}              # seat -> its down count when this step's Kill landed
+    seen, kinds, events = {0: 0, 1: 0}, {0: [], 1: []}, []
+    last_revive = start
+    guards = [guard(0, 1), guard(1, 0)]      # guards[i] revives seat i with the other seat
+    for g in guards:
+        g.thread.start()
+    try:
+        while any(v is None for v in owed.values()):
+            ctx.check_all()
+            downs = {i: count(i, DOWNED_DOWN) - base[i][0] for i in (0, 1)}
+            ups = {i: count(i, DOWNED_REVIVED) - base[i][1] for i in (0, 1)}
+            for i in (0, 1):
+                while downs[i] > seen[i]:
+                    seen[i] += 1
+                    kind = "forced" if forced.get(i) == seen[i] else "natural"
+                    kinds[i].append(kind)
+                    events.append({"seat": i, "kind": kind, "down": seen[i], "atS": round(now() - start, 1)})
+                    clip(f"{name}_{i}{kind}{seen[i]}")
+                if i in owed and owed[i] is None and ups[i] >= 1:
+                    owed[i] = {"kind": kinds[i][0] if kinds[i] else "natural", "seat": i}
+                    events.append({"seat": i, "revived": ups[i], "atS": round(now() - start, 1)})
+                    last_revive = now()
+            down_now = [i for i in (0, 1) if downs[i] > ups[i]]
+            if len(down_now) == 2 or count(0, DOWNED_FULL) > full:
+                raise StepFailed(f"owner_downs: HARNESS FAILURE, both seats down (events {events}); not a form result")
+            open_forced = [s for s in forced if owed.get(s) is None]
+            pending = [o for o in owners if owed[o] is None and o not in forced]
+            if not down_now and not open_forced and pending and now() - last_revive >= step.get("gapMs", 1500) / 1000:
+                o = pending[0]
+                result = kill(o)
+                events.append({"seat": o, "kill": result, "atS": round(now() - start, 1)})
+                if result == "Ok":
+                    forced[o] = downs[o] + 1
+                elif result != "WrongState":  # WrongState: already down, its natural downing is counted
+                    raise StepFailed(f"owner_downs: Kill on seat {o} returned {result} (events {events})")
+            if any(v is None for v in owed.values()) and now() >= deadline:
+                raise StepFailed(f"owner_downs: HARNESS FAILURE, no revive within {step.get('timeoutMs', 240000)} ms "
+                                 f"(events {events}); not a form result")
+            sleep(0.25)
+    finally:
+        for g in guards:
+            g.stop.set()
+        for g in guards:
+            g.thread.join(timeout=10)
+        ctx.saved[name] = {"owners": {str(o): v for o, v in owed.items()}, "events": events,
+                           "guards": [g.events for g in guards]}
+    return ctx.saved[name]
+
+
 CONTINUE_RETRY = re.compile(r"\[combat-admission\] continue-retry from=(\S+) btl=(\d+) to=(\S+) door=(\d+) map=(\d+) "
                             r"btl=(\d+) evt=(\d+) transition=(\d+) armed=(\d+)")
 GAME_OVER_TASK_RVA, MENU_RVA, GAME_OVER_MENU = 0x2AE8050, 0x7435D0, 8
@@ -5448,6 +5535,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check, "coop_verdict": step_coop_verdict,
          "hp_ledger": step_hp_ledger,
          "revive_guard": step_revive_guard, "downed_kill": step_downed_kill, "press_continue": step_press_continue,
+         "owner_downs": step_owner_downs,
          "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "pilot_wait": step_pilot_wait, "pilot_until": step_pilot_until, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,

@@ -61,6 +61,25 @@ class AxelFormFixtureTest(unittest.TestCase):
         self.assertFalse(held({"window_open": [1, 0], "window_close": 1})(expr))  # released inside the window
         self.assertFalse(held({"window_open": [0, 0], "window_close": 0})(expr))  # never held
 
+    def test_owner_downs_follow_the_release_and_tolerate_a_natural_down(self):
+        for name in ("net_prologue_mansion_axel_form", "net_prologue_mansion_axel_form_sora_host",
+                     "net_prologue_mansion_axel_form_sora_friend"):
+            steps = load(name)
+            dos = [s["do"] for s in steps]
+            release = next(i for i, s in enumerate(steps) if "released admitted" in s.get("expr", "") and s["do"] == "wait_until")
+            downs = dos.index("owner_downs")
+            self.assertEqual(downs, release + 1, name)  # right after the admission release (lead decision)
+            self.assertLess(downs, next(i for i, s in enumerate(steps) if s.get("args", [None])[0] == "player-input"), name)
+            self.assertEqual(steps[downs]["owners"], [1, 0])
+            self.assertNotIn("revive_guard", dos)
+            kills = [s for s in steps if s["do"] == "downed_kill"]
+            self.assertEqual([(s["instance"], s["require"]) for s in kills], [(1, False), (0, False)], name)
+            expr = assertion(steps, "each owner must be downed once")
+            ok = {"owner_downs": {"owners": {"0": {"kind": "natural"}, "1": {"kind": "forced"}}},
+                  "downs_after": [{"btlf": 2 if name.endswith("form") else 1}] * 2}
+            self.assertTrue(held(ok)(expr), name)
+            self.assertFalse(held({**ok, "owner_downs": {"owners": {"0": None, "1": {"kind": "forced"}}}})(expr), name)
+
     def census(self, member0, roxas=0, sora=0, btlf=0, w=0):
         return {"btlf": btlf, "roxas": roxas, "sora": sora, "w10": w, "w20": w, "member0": member0}
 

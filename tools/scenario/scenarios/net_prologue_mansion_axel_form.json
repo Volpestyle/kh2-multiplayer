@@ -1,6 +1,6 @@
 {
  "name": "net_prologue_mansion_axel_form",
- "description": "FM-02 rehearsal route (the committed Computer Room -> Basement Hall pilot, both Dusk waves) into Axel II, 02/14 btl137 (checked site tt20-137). A default Roxas seat builds the native encounter body 0x323 (P_EX110_BTLF) for its local and for its clone on the other seat, with both keyblades; a Sora seat keeps Sora for both. Inside the host's combat-admission hold (proven around the window, else a setup failure), one synthetic 1-HP native hit lands on each seat's clone: the observer's own HP, every SAVE character record (SAVE+0x24F0, 0xE04) and every drive-form row (SAVE+0x32F4, 0x230: the row a dual-wield status +0x254 references) must be byte-identical just before and just after the hits. Each owner then moves, jumps and attacks alone, filmed on both seats; each owner is downed once (DownedSpike fixture Kill) and revived by the other seat; then both are downed and the host takes the native Continue to the Computer Room 02/15 d99, where each seat holds only its selected body: no dual-wield body, keyblade pair or old clone. Video-only paired clips (lead amendment). Rehearsal save, no save. Selections: host 0x5A, friend 0x5A.",
+ "description": "FM-02 rehearsal route (the committed Computer Room -> Basement Hall pilot, both Dusk waves) into Axel II, 02/14 btl137 (checked site tt20-137). A default Roxas seat builds the native encounter body 0x323 (P_EX110_BTLF) for its local and for its clone on the other seat, with both keyblades; a Sora seat keeps Sora for both. Inside the host's combat-admission hold (proven around the window, else a setup failure), one synthetic 1-HP native hit lands on each seat's clone: the observer's own HP, every SAVE character record (SAVE+0x24F0, 0xE04) and every drive-form row (SAVE+0x32F4, 0x230: the row a dual-wield status +0x254 references) must be byte-identical just before and just after the hits. Right after the admission release each owner is downed once and revived by the other seat (owner_downs: an Axel downing counts, else the DownedSpike fixture Kill; both seats down is a harness failure). Each owner then moves, jumps and attacks alone, filmed on both seats; then both are downed and the host takes the native Continue to the Computer Room 02/15 d99, where each seat holds only its selected body: no dual-wield body, keyblade pair or old clone. Video-only paired clips (lead amendment). Rehearsal save, no save. Selections: host 0x5A, friend 0x5A.",
  "playerDefaults": true,
  "protect": [],
  "steps": [
@@ -295,6 +295,29 @@
    "pollMs": 100
   },
   {
+   "do": "owner_downs",
+   "owners": [
+    1,
+    0
+   ],
+   "as": "owner_downs",
+   "clipSeconds": 12,
+   "timeoutMs": 240000
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "save",
+   "as": "downs_after",
+   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(saved['owner_downs']['owners'][k] for k in ('0', '1')) and all(saved['downs_after'][i]['btlf'] == 2 for i in (0, 1))",
+   "message": "each owner must be downed once and revived by the other seat, keeping both seats' bodies"
+  },
+  {
    "do": "clip",
    "instance": 0,
    "seconds": 6,
@@ -494,127 +517,18 @@
   },
   {
    "do": "save",
-   "as": "down1_before",
-   "expr": "log_count('[downed] revive returned', 1)"
-  },
-  {
-   "do": "revive_guard",
-   "host": 1,
-   "friend": 0
-  },
-  {
-   "do": "clip",
-   "instance": 0,
-   "seconds": 12,
-   "fps": 30,
-   "background": true,
-   "name": "down1_revive_0"
-  },
-  {
-   "do": "clip",
-   "instance": 1,
-   "seconds": 12,
-   "fps": 30,
-   "background": true,
-   "name": "down1_revive_1"
-  },
-  {
-   "do": "downed_kill",
-   "instance": 1
-  },
-  {
-   "do": "wait_until",
-   "expr": "log_count('[downed] revive returned', 1) > saved['down1_before']",
-   "timeoutMs": 60000,
-   "pollMs": 250
-  },
-  {
-   "do": "wait",
-   "ms": 1500
-  },
-  {
-   "do": "revive_guard",
-   "on": false,
-   "as": "down1_guard"
-  },
-  {
-   "do": "clip_wait"
-  },
-  {
-   "do": "save",
-   "as": "down1_after",
-   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
-  },
-  {
-   "do": "save",
-   "as": "down0_before",
-   "expr": "log_count('[downed] revive returned', 0)"
-  },
-  {
-   "do": "revive_guard",
-   "host": 0,
-   "friend": 1
-  },
-  {
-   "do": "clip",
-   "instance": 0,
-   "seconds": 12,
-   "fps": 30,
-   "background": true,
-   "name": "down0_revive_0"
-  },
-  {
-   "do": "clip",
-   "instance": 1,
-   "seconds": 12,
-   "fps": 30,
-   "background": true,
-   "name": "down0_revive_1"
-  },
-  {
-   "do": "downed_kill",
-   "instance": 0
-  },
-  {
-   "do": "wait_until",
-   "expr": "log_count('[downed] revive returned', 0) > saved['down0_before']",
-   "timeoutMs": 60000,
-   "pollMs": 250
-  },
-  {
-   "do": "wait",
-   "ms": 1500
-  },
-  {
-   "do": "revive_guard",
-   "on": false,
-   "as": "down0_guard"
-  },
-  {
-   "do": "clip_wait"
-  },
-  {
-   "do": "save",
-   "as": "down0_after",
-   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
-  },
-  {
-   "do": "assert",
-   "expr": "log_count('[downed] full party down', 0) == 0 and all(saved[t][i]['btlf'] == 2 for t in ('down1_after', 'down0_after') for i in (0, 1))",
-   "message": "a single down/revive must keep both seats' bodies and never end the party"
-  },
-  {
-   "do": "save",
    "as": "arrivals_before_retry",
    "expr": "log_count('[enemysync] client arrived epoch=', 1)"
   },
   {
    "do": "downed_kill",
-   "instance": 1
+   "instance": 1,
+   "require": false
   },
   {
    "do": "downed_kill",
-   "instance": 0
+   "instance": 0,
+   "require": false
   },
   {
    "do": "wait_until",
