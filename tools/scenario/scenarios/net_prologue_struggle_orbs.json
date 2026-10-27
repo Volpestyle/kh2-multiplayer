@@ -1,6 +1,6 @@
 {
  "name": "net_prologue_struggle_orbs",
- "description": "VUH-2865, PC1 loopback from FM-01 with a host warp to the Day 5 Struggle (02/05 btl84, site tt05-84, Hayner). Shipped defaults: the friend sees and collects the host's orbs (protocol 34, rule A in docs/PROLOGUE_ENCOUNTERS.md). Both seats fight until the host's match ends; the friend must end once, like the host, with worker-hook receipts marshalled to its entity thread. Rehearsal warp, not opening-route evidence. No save.",
+ "description": "VUH-2865, PC1 loopback from FM-01 with a host warp to the Day 5 Struggle (02/05 btl84, site tt05-84, Hayner). Shipped defaults: the friend sees and collects the host's orbs (protocol 34, rule A in docs/PROLOGUE_ENCOUNTERS.md). First a staged brush-past, three passes: the host walks away from Hayner, the friend alone fights until 6 orbs are born, backs off, then walks straight through the uncollected births' centroid and 250 units past it, with paired 20 s clips and both seats' actor paths recorded (brush_paths.csv); whether the friend's clone on the host collects what the friend brushes through is read from those, not asserted. Then both seats fight until the host's match ends; the friend must end once, like the host, with worker-hook receipts marshalled to its entity thread. Rehearsal warp, not opening-route evidence. No save.",
  "playerDefaults": true,
  "protect": [],
  "steps": [
@@ -379,6 +379,268 @@
    "do": "assert",
    "expr": "log_count('[struggle-orbs] configured=1 hooked=1', 0) == 1 and log_count('[struggle-orbs] configured=1 hooked=1', 1) == 1",
    "message": "the orb hooks must be installed on both seats"
+  },
+  {
+   "do": "save",
+   "as": "brush_start",
+   "expr": "len(log_matches(r'\\[struggle-orbs\\] sent epoch=\\d+ seq=(?P<seq>\\d+) (?P<k>birth|collect) orb=(?P<o>\\d+) type=\\d+ point=\\((?P<x>-?\\d+)\\.\\d+,[-\\d.]+,(?P<z>-?\\d+)\\.\\d+\\) collector=(?P<c>\\d+)', 0))"
+  },
+  {
+   "do": "record",
+   "as": "brush_paths",
+   "instances": [
+    0,
+    1
+   ]
+  },
+  {
+   "do": "walk_to",
+   "instance": 0,
+   "body": "self",
+   "as": "host_away_1",
+   "targetExpr": "(lambda h, e: (h['x'] + 900 * (h['x'] - e['x']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z']))), h['z'] + 900 * (h['z'] - e['z']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z'])))))(actors(0)[0]['position'], [a for a in actors(0) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0][0]['position'])",
+   "radius": 50,
+   "timeoutMs": 3000,
+   "until": "not [a for a in actors(0) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0]"
+  },
+  {
+   "do": "save",
+   "as": "burst_start_1",
+   "expr": "len(log_matches(r'\\[struggle-orbs\\] sent epoch=\\d+ seq=(?P<seq>\\d+) (?P<k>birth|collect) orb=(?P<o>\\d+) type=\\d+ point=\\((?P<x>-?\\d+)\\.\\d+,[-\\d.]+,(?P<z>-?\\d+)\\.\\d+\\) collector=(?P<c>\\d+)', 0))"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    1
+   ],
+   "seconds": 15,
+   "reach": 250,
+   "as": "burst_1",
+   "until": "len([r for r in log_matches(r'\\[struggle-orbs\\] sent epoch=\\d+ seq=(?P<seq>\\d+) (?P<k>birth|collect) orb=(?P<o>\\d+) type=\\d+ point=\\((?P<x>-?\\d+)\\.\\d+,[-\\d.]+,(?P<z>-?\\d+)\\.\\d+\\) collector=(?P<c>\\d+)', 0)[saved['burst_start_1']:] if r['k'] == 'birth']) >= 6"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 20,
+   "fps": 30,
+   "name": "brush_host_1",
+   "background": true
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 20,
+   "fps": 30,
+   "name": "brush_friend_1",
+   "background": true
+  },
+  {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "as": "back_1",
+   "targetExpr": "(lambda h, e: (h['x'] + 900 * (h['x'] - e['x']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z']))), h['z'] + 900 * (h['z'] - e['z']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z'])))))(actors(1)[0]['position'], [a for a in actors(1) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0][0]['position'])",
+   "radius": 50,
+   "timeoutMs": 2500,
+   "until": "not [a for a in actors(1) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0]"
+  },
+  {
+   "do": "wait",
+   "ms": 1000
+  },
+  {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "as": "through_1",
+   "targetExpr": "(lambda R, p: (lambda u: (sum(int(r['x']) for r in u) / len(u), sum(int(r['z']) for r in u) / len(u)) if u else (p['x'], p['z']))([r for r in R if r['k'] == 'birth' and r['o'] not in {c['o'] for c in R if c['k'] == 'collect'}]))(log_matches(r'\\[struggle-orbs\\] sent epoch=\\d+ seq=(?P<seq>\\d+) (?P<k>birth|collect) orb=(?P<o>\\d+) type=\\d+ point=\\((?P<x>-?\\d+)\\.\\d+,[-\\d.]+,(?P<z>-?\\d+)\\.\\d+\\) collector=(?P<c>\\d+)', 0)[saved['burst_start_1']:], actors(1)[0]['position'])",
+   "radius": 40,
+   "timeoutMs": 6000
+  },
+  {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "as": "beyond_1",
+   "targetExpr": "(lambda s, t: (t[0] + 250 * (t[0] - s[0]) / max(1.0, dist((s[0], s[2]), (t[0], t[1]))), t[1] + 250 * (t[1] - s[2]) / max(1.0, dist((s[0], s[2]), (t[0], t[1])))))(saved['through_1']['start'], saved['through_1']['target'])",
+   "radius": 60,
+   "timeoutMs": 3000
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "walk_to",
+   "instance": 0,
+   "body": "self",
+   "as": "host_away_2",
+   "targetExpr": "(lambda h, e: (h['x'] + 900 * (h['x'] - e['x']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z']))), h['z'] + 900 * (h['z'] - e['z']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z'])))))(actors(0)[0]['position'], [a for a in actors(0) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0][0]['position'])",
+   "radius": 50,
+   "timeoutMs": 3000,
+   "until": "not [a for a in actors(0) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0]"
+  },
+  {
+   "do": "save",
+   "as": "burst_start_2",
+   "expr": "len(log_matches(r'\\[struggle-orbs\\] sent epoch=\\d+ seq=(?P<seq>\\d+) (?P<k>birth|collect) orb=(?P<o>\\d+) type=\\d+ point=\\((?P<x>-?\\d+)\\.\\d+,[-\\d.]+,(?P<z>-?\\d+)\\.\\d+\\) collector=(?P<c>\\d+)', 0))"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    1
+   ],
+   "seconds": 15,
+   "reach": 250,
+   "as": "burst_2",
+   "until": "len([r for r in log_matches(r'\\[struggle-orbs\\] sent epoch=\\d+ seq=(?P<seq>\\d+) (?P<k>birth|collect) orb=(?P<o>\\d+) type=\\d+ point=\\((?P<x>-?\\d+)\\.\\d+,[-\\d.]+,(?P<z>-?\\d+)\\.\\d+\\) collector=(?P<c>\\d+)', 0)[saved['burst_start_2']:] if r['k'] == 'birth']) >= 6"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 20,
+   "fps": 30,
+   "name": "brush_host_2",
+   "background": true
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 20,
+   "fps": 30,
+   "name": "brush_friend_2",
+   "background": true
+  },
+  {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "as": "back_2",
+   "targetExpr": "(lambda h, e: (h['x'] + 900 * (h['x'] - e['x']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z']))), h['z'] + 900 * (h['z'] - e['z']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z'])))))(actors(1)[0]['position'], [a for a in actors(1) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0][0]['position'])",
+   "radius": 50,
+   "timeoutMs": 2500,
+   "until": "not [a for a in actors(1) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0]"
+  },
+  {
+   "do": "wait",
+   "ms": 1000
+  },
+  {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "as": "through_2",
+   "targetExpr": "(lambda R, p: (lambda u: (sum(int(r['x']) for r in u) / len(u), sum(int(r['z']) for r in u) / len(u)) if u else (p['x'], p['z']))([r for r in R if r['k'] == 'birth' and r['o'] not in {c['o'] for c in R if c['k'] == 'collect'}]))(log_matches(r'\\[struggle-orbs\\] sent epoch=\\d+ seq=(?P<seq>\\d+) (?P<k>birth|collect) orb=(?P<o>\\d+) type=\\d+ point=\\((?P<x>-?\\d+)\\.\\d+,[-\\d.]+,(?P<z>-?\\d+)\\.\\d+\\) collector=(?P<c>\\d+)', 0)[saved['burst_start_2']:], actors(1)[0]['position'])",
+   "radius": 40,
+   "timeoutMs": 6000
+  },
+  {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "as": "beyond_2",
+   "targetExpr": "(lambda s, t: (t[0] + 250 * (t[0] - s[0]) / max(1.0, dist((s[0], s[2]), (t[0], t[1]))), t[1] + 250 * (t[1] - s[2]) / max(1.0, dist((s[0], s[2]), (t[0], t[1])))))(saved['through_2']['start'], saved['through_2']['target'])",
+   "radius": 60,
+   "timeoutMs": 3000
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "walk_to",
+   "instance": 0,
+   "body": "self",
+   "as": "host_away_3",
+   "targetExpr": "(lambda h, e: (h['x'] + 900 * (h['x'] - e['x']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z']))), h['z'] + 900 * (h['z'] - e['z']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z'])))))(actors(0)[0]['position'], [a for a in actors(0) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0][0]['position'])",
+   "radius": 50,
+   "timeoutMs": 3000,
+   "until": "not [a for a in actors(0) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0]"
+  },
+  {
+   "do": "save",
+   "as": "burst_start_3",
+   "expr": "len(log_matches(r'\\[struggle-orbs\\] sent epoch=\\d+ seq=(?P<seq>\\d+) (?P<k>birth|collect) orb=(?P<o>\\d+) type=\\d+ point=\\((?P<x>-?\\d+)\\.\\d+,[-\\d.]+,(?P<z>-?\\d+)\\.\\d+\\) collector=(?P<c>\\d+)', 0))"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    1
+   ],
+   "seconds": 15,
+   "reach": 250,
+   "as": "burst_3",
+   "until": "len([r for r in log_matches(r'\\[struggle-orbs\\] sent epoch=\\d+ seq=(?P<seq>\\d+) (?P<k>birth|collect) orb=(?P<o>\\d+) type=\\d+ point=\\((?P<x>-?\\d+)\\.\\d+,[-\\d.]+,(?P<z>-?\\d+)\\.\\d+\\) collector=(?P<c>\\d+)', 0)[saved['burst_start_3']:] if r['k'] == 'birth']) >= 6"
+  },
+  {
+   "do": "clip",
+   "instance": 0,
+   "seconds": 20,
+   "fps": 30,
+   "name": "brush_host_3",
+   "background": true
+  },
+  {
+   "do": "clip",
+   "instance": 1,
+   "seconds": 20,
+   "fps": 30,
+   "name": "brush_friend_3",
+   "background": true
+  },
+  {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "as": "back_3",
+   "targetExpr": "(lambda h, e: (h['x'] + 900 * (h['x'] - e['x']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z']))), h['z'] + 900 * (h['z'] - e['z']) / max(1.0, dist((h['x'], h['z']), (e['x'], e['z'])))))(actors(1)[0]['position'], [a for a in actors(1) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0][0]['position'])",
+   "radius": 50,
+   "timeoutMs": 2500,
+   "until": "not [a for a in actors(1) if a.get('objectType') in (3, 4) and not a['name'].startswith('F_') and a.get('hp', -1) > 0]"
+  },
+  {
+   "do": "wait",
+   "ms": 1000
+  },
+  {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "as": "through_3",
+   "targetExpr": "(lambda R, p: (lambda u: (sum(int(r['x']) for r in u) / len(u), sum(int(r['z']) for r in u) / len(u)) if u else (p['x'], p['z']))([r for r in R if r['k'] == 'birth' and r['o'] not in {c['o'] for c in R if c['k'] == 'collect'}]))(log_matches(r'\\[struggle-orbs\\] sent epoch=\\d+ seq=(?P<seq>\\d+) (?P<k>birth|collect) orb=(?P<o>\\d+) type=\\d+ point=\\((?P<x>-?\\d+)\\.\\d+,[-\\d.]+,(?P<z>-?\\d+)\\.\\d+\\) collector=(?P<c>\\d+)', 0)[saved['burst_start_3']:], actors(1)[0]['position'])",
+   "radius": 40,
+   "timeoutMs": 6000
+  },
+  {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "as": "beyond_3",
+   "targetExpr": "(lambda s, t: (t[0] + 250 * (t[0] - s[0]) / max(1.0, dist((s[0], s[2]), (t[0], t[1]))), t[1] + 250 * (t[1] - s[2]) / max(1.0, dist((s[0], s[2]), (t[0], t[1])))))(saved['through_3']['start'], saved['through_3']['target'])",
+   "radius": 60,
+   "timeoutMs": 3000
+  },
+  {
+   "do": "wait",
+   "ms": 3000
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "record_stop",
+   "as": "brush_paths"
+  },
+  {
+   "do": "save",
+   "as": "brush",
+   "expr": "{'rows': log_matches(r'\\[struggle-orbs\\] sent epoch=\\d+ seq=(?P<seq>\\d+) (?P<k>birth|collect) orb=(?P<o>\\d+) type=\\d+ point=\\((?P<x>-?\\d+)\\.\\d+,[-\\d.]+,(?P<z>-?\\d+)\\.\\d+\\) collector=(?P<c>\\d+)', 0)[saved['brush_start']:], 'bursts': [saved['burst_start_' + str(k)] for k in (1, 2, 3)]}"
   },
   {
    "do": "fight",
