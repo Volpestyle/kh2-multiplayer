@@ -302,8 +302,8 @@ void __fastcall HookedRequestTransition(const LocationPacket* to, std::uint32_t 
     }
     BeginTransition();
     {   // VUH-2897: release a held admission while the old room's native identity still matches,
-        // then arm only the exact Mansion -> Axel request, or (VUH-2906) the game over's Continue
-        // retry into the exact Axel room. Never forwards the request later.
+        // then arm only the exact Mansion -> Axel request. Never forwards the request later.
+        // VUH-2906: a game over's Continue retry is logged with its destination.
         const auto from = ReadLocation();
         combatadmission::NoteHostRequest({from.worldId, from.roomId, from.door, from.mapProgram, from.battleProgram,
                                           from.eventProgram},

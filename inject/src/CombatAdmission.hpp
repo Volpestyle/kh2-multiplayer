@@ -196,16 +196,13 @@ public:
     bool Held() const { return lease_.phase == Phase::Held; }
 
     // Host's own native request (before it is forwarded). Arms only the exact
-    // Mansion -> Axel request, or the game over's Continue retry into the exact
-    // Axel room (VUH-2906; the retry is a room request, issued while the game-over
-    // task is live). Any other request disarms. A retry is a new load, so it gets
-    // a new lease and challenge; the previous lease is retired by that load (S2).
-    void NoteRequest(const Destination& from, const Destination& to, std::uint32_t transition,
-                     bool continueRetry = false) {
+    // Mansion -> Axel request; any other request disarms. A game over's Continue
+    // in Axel I lands at the Computer Room checkpoint (02/15, live on 4edbff6), so
+    // a retry reaches Axel through this same request again: a new load, lease and
+    // challenge, with the previous lease retired by the reload (S2, VUH-2906).
+    void NoteRequest(const Destination& from, const Destination& to, std::uint32_t transition) {
         armed_ = {};
-        if ((AxelSource(from) || continueRetry) && to == AxelTarget) {
-            armed_.transition = transition; armed_.requested = true;
-        }
+        if (AxelSource(from) && to == AxelTarget) { armed_.transition = transition; armed_.requested = true; }
     }
     // Native load finalizers returned. Binds an armed request to its load and
     // retires (never replays) a lease from an older load: the native load path
@@ -418,9 +415,8 @@ private:
                 return Outcome::SeatReplaced;
         }
         if (s.hostDowned) return Outcome::HostDowned;
-        // A peer downing counts only in this lease's own published room. A friend still downed in the
-        // room it has not left yet (a game over before the Continue retry reloads the same 02/14) has
-        // the previous epoch and never ends the retry's hold.
+        // A peer downing counts only in this lease's own published room: a stale downed pose stamped
+        // with an earlier epoch never ends the hold.
         for (const auto epoch : s.peerDownedEpoch)
             if (lease_.epoch && epoch == lease_.epoch) return Outcome::PeerDowned;
         if (lease_.epoch && !MissingSeats()) return Outcome::Arrived;

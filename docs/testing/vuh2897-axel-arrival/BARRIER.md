@@ -15,20 +15,18 @@ The barrier is offline-qualified only. Kestrel runs the live checks listed at th
 - **Arm:** only the authenticated host's own native request from `02/13 btl134` to
   `02/14 door0 map137 btl137 evt137`, bound to that transition and its load. Solo,
   offline, client, already-published and every other room path stay native.
-- **Re-arm on Continue (VUH-2906).** The game over's Continue retry is a room request too
-  (`Warp.cpp`, run `20261019-142129`), issued while the game-over task `2AE8050` is live.
-  A retry whose destination is exactly that Axel room arms like the first arrival: a
-  new lease, incarnation and challenge, its own 15 s deadline, ownership and ordered
-  release. The retry is a new load, so S2 retires any earlier lease without a release.
-  Its challenge and epoch never admit the new one. A co-op game over means the whole party
-  was down, so at the retried intro the friend is still downed in the same `02/14`. A peer
-  downing therefore counts only under the lease's own published epoch (the pose's
-  `downedEpoch`); before VUH-2906 any fresh downed pose in the room counted. Every Continue
-  retry logs
-  `continue-retry … to=… armed=`, armed or not. A Continue that lands at a checkpoint
-  elsewhere does not arm here. In run `20261019-151151` a Basement Hall game over continued
-  at the Computer Room (`02/15 door 99`). The route back then reaches Axel through the
-  ordinary `02/13 btl134` request, which arms as before.
+- **Re-arm after a game over (VUH-2906).** The game over's Continue retry is a room
+  request too (`Warp.cpp`, run `20261019-142129`), issued while the game-over task
+  `2AE8050` is live. In Axel I it lands at the Computer Room checkpoint: live on `4edbff6`,
+  `continue-retry from=02/14 btl=137 to=02/15 door=99 map=2 btl=0 evt=0 … armed=0`
+  (as in run `20261019-151151` from the Basement Hall). The Continue itself never arms. The
+  route back reaches Axel through the ordinary `02/13 btl134` request, which arms like the
+  first arrival: a new lease, incarnation and challenge, its own 15 s deadline, ownership
+  and ordered release. The Continue's load retires any earlier lease without a release (S2),
+  and that lease's challenge and epoch never admit the new one. Every Continue still logs
+  `continue-retry … to=… armed=` as a diagnostic. A peer downing counts only under the
+  lease's own published epoch (the pose's `downedEpoch`), so a stale downed pose from an
+  earlier epoch cannot end a hold; before VUH-2906 any fresh downed pose in the room counted.
 - **Defer:** only the intro teardown's two group releases, `3BF2E0(0)` returning to
   `3ACC03` and `3BF2E0(1)` returning to `3ACC0D` (3AC750 case 9 inside 3AC000). Both run
   in one native call on the owner thread, while the intro's event context is still set.
