@@ -175,7 +175,8 @@
   {
    "do": "coop_verdict",
    "as": "verdict",
-   "require": true
+   "require": true,
+   "arrivalTimeoutMs": 20000
   }
  ]
 }

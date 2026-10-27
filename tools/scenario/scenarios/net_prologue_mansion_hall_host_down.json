@@ -1,6 +1,6 @@
 {
  "name": "net_prologue_mansion_hall_host_down",
- "description": "VUH-2866 downed variant of net_prologue_mansion_hall.json (ordering: VUH-2869). Both seats fight wave 1 until two of its four Dusks are dead, so wave 2 cannot have started. Then the host is downed through the DownedSpike fixture channel's Kill (KH2COOP_DOWNED_SPIKE_FIXTURE=1, a test channel product play never maps; the downing itself is the product's logical downing), and the run waits until both seats name that fresh episode. Only then does the other seat finish wave 1 and fight wave 2 alone. downed_wave_order (tools/scenario/downed_order.py) must show, in each seat's own log, the episode before the first wave-2 (309) line, and the downed seat's hold end, revive or return for that episode. Both seats then load Axel I's room. Rehearsal save. No save.",
+ "description": "VUH-2866 downed variant of net_prologue_mansion_hall.json (ordering: VUH-2869). Both seats fight wave 1 until two of its four Dusks are dead, so wave 2 cannot have started. Then the host is downed through the DownedSpike fixture channel's Kill (KH2COOP_DOWNED_SPIKE_FIXTURE=1, a test channel product play never maps; the downing itself is the product's logical downing), and the run waits until both seats name that fresh episode. Only then does the other seat finish wave 1 and fight wave 2 alone. downed_wave_order (tools/scenario/downed_order.py) must show, in each seat's own log, the episode before the first wave-2 (309) line, and the downed seat's hold end, revive or return for that episode. Both seats then load Axel I's room. Rehearsal save. No save. VUH-2898: from the confirmed forced downing until the wave-2 fight ends, the lone fighting friend is protected (team 0), so native Dusk damage can't down it too and end the run in a full-party down before wave 2 spawns (220631, 200433). It still deals damage as claims; this variant makes no claim about the friend taking hits.",
  "playerDefaults": true,
  "protect": [],
  "steps": [
@@ -145,6 +145,10 @@
    "message": "wave 2 started before both seats knew the forced episode"
   },
   {
+   "do": "protect",
+   "instance": 1
+  },
+  {
    "do": "fight",
    "instances": [
     1
@@ -167,6 +171,11 @@
      "name": "wave2_friend"
     }
    ]
+  },
+  {
+   "do": "protect",
+   "instance": 1,
+   "on": false
   },
   {
    "do": "save",
@@ -223,7 +232,8 @@
   {
    "do": "coop_verdict",
    "as": "verdict",
-   "require": true
+   "require": true,
+   "arrivalTimeoutMs": 20000
   }
  ]
 }

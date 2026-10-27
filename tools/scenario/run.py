@@ -916,21 +916,52 @@ def step_protect(ctx: Context, step: dict) -> dict:
 
 def step_coop_verdict(ctx: Context, step: dict) -> dict:
     """VUH-2344: co-op verdict from this run's host, friend and relay logs so far
-    (tools/scenario/coop_verdict.py). Fails the step unless `require` is false."""
+    (tools/scenario/coop_verdict.py). Fails the step unless `require` is false.
+
+    `arrivalTimeoutMs` (VUH-2898): first wait, at most that long, until every friend
+    has logged its arrival in the host's latest room and its first statehash there.
+    A scenario that ends right after a host room change otherwise judges a friend
+    still loading (the Mansion runs tore down ~1 s after the host reached Axel's
+    room; the friend arrives ~5.7 s after the host). A friend still missing at the
+    timeout fails as before, with the wait named in the message."""
     host = step.get("host", 0)
     friends = step.get("friends", [i for i in range(len(ctx.instances)) if i != host])
     text = lambda path: path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
     log = lambda i: text(LOGS / f"kh2coop_inject_{ctx.inst(i).pid}.log")
+    wait = None
+    if step.get("arrivalTimeoutMs"):
+        timeout, start = step["arrivalTimeoutMs"] / 1000, time.monotonic()
+        while True:
+            epochs = [int(m["epoch"]) for m in _coop_verdict.HOST_ARRIVED.finditer(log(host))]
+            epoch = epochs[-1] if epochs else None
+            waiting = []
+            for i in friends if epoch is not None else ():
+                arrived = [m for m in _coop_verdict.CLIENT_ARRIVED.finditer(log(i)) if int(m["epoch"]) == epoch]
+                if not arrived or epoch not in _coop_verdict.first_ticks(log(i)[arrived[-1].end():]):
+                    waiting.append(f"friend{i}")
+            elapsed = time.monotonic() - start
+            if not waiting or elapsed >= timeout:
+                break
+            time.sleep(step.get("pollMs", 250) / 1000)
+        wait = {"epoch": epoch, "seconds": round(elapsed, 2), "timeoutSeconds": timeout, "waiting": waiting}
     result = _coop_verdict.verdict(log(host), {f"friend{i}": log(i) for i in friends},
                                    text(ctx.run_dir / "relay.log"), ctx.run_dir / "desync-reports")
+    if wait:
+        result["arrivalWait"] = wait
     name = step.get("as", "coop_verdict")
     path = ctx.run_dir / f"{name}.json"
     path.write_text(json.dumps(result, indent=2), encoding="utf-8")
     ctx.artifacts.append(path.name)
     ctx.saved[name] = result
     if step.get("require", True) and not result["pass"]:
-        raise StepFailed(f"co-op verdict: {result['problems']}")
-    return {"pass": result["pass"], "rooms": len(result["host"]["rooms"]), "problems": result["problems"]}
+        waited = (f" after waiting {wait['seconds']} s (limit {wait['timeoutSeconds']} s) for "
+                  f"{', '.join(wait['waiting'])} to arrive at host epoch {wait['epoch']}") if wait and wait["waiting"] else ""
+        raise StepFailed(f"co-op verdict: {result['problems']}{waited}")
+    # The latest room's arrival timing per friend: the real follow time, not a pass/fail input.
+    last = {name: {k: f["rooms"][-1][k] for k in ("epoch", "result", "hostTickMs", "friendTickMs", "lagMs")}
+            for name, f in result["friends"].items() if f["rooms"]}
+    return {"pass": result["pass"], "rooms": len(result["host"]["rooms"]), "problems": result["problems"],
+            "arrivalWait": wait, "lastRoom": last}
 
 
 def step_hang_check(ctx: Context, step: dict) -> dict:

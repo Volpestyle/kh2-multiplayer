@@ -7,7 +7,12 @@ not how fast:
 
 - every room the host published (`host arrived epoch=E`) has a friend arrival
   for that epoch at the same location; an epoch the host left before the friend
-  issued it is a warning, and the host's last epoch is required;
+  issued it is a warning, and the host's last epoch is required. Each room row
+  also records, without judging it, when each seat got there: the first
+  `[statehash] ... epoch=E ... tickMs=` stamp per seat (GetTickCount, logged
+  with the arrival and then about once a second in gameplay) and the friend's
+  lag behind the host (VUH-2898). Only one-PC runs share that clock;
+  between two PCs lagMs is meaningless;
 - every progress version a friend applied (at room boundaries, so skipped
   intermediate versions are normal) has the host's hash for that version, and
   personal SAVE bytes stayed unchanged; the host's latest version not applied
@@ -47,6 +52,7 @@ HOLD_TIMEOUT = re.compile(r"\[event-control\] owner did not converge")
 EXIT_BLOCKED = re.compile(r"\[warp\] client native exit blocked")
 DESYNC = re.compile(r"Desync: (?P<detail>(?P<peer>\S+) fields=(?P<fields>\d+) epoch=(?P<epoch>\d+).*)")
 CLIENT_ISSUED = re.compile(r"\[warp\] client issued epoch=(?P<epoch>\d+)")
+STATEHASH_TICK = re.compile(r"\[statehash\] role=(?:host|client) epoch=(?P<epoch>\d+) .*?tickMs=(?P<tick>\d+)")
 DESYNC_PROGRESS = 4  # DesyncField::DesyncProgress
 
 
@@ -57,6 +63,14 @@ def location(m: re.Match) -> dict:
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def first_ticks(text: str) -> dict[int, int]:
+    """Epoch -> the seat's first statehash tickMs in it (its arrival, to about a frame)."""
+    out: dict[int, int] = {}
+    for m in STATEHASH_TICK.finditer(text):
+        out.setdefault(int(m["epoch"]), int(m["tick"]))
+    return out
 
 
 def boundary_applies(text: str) -> list[dict]:
@@ -89,16 +103,21 @@ def desync_details(desync_dir: Path | None) -> dict:
 
 
 def friend_report(text: str, host_rooms: list[dict], host_progress: list[dict]) -> dict:
-    arrivals = {}
+    arrivals, arrived_at = {}, {}
     for m in CLIENT_ARRIVED.finditer(text):
         arrivals[int(m["epoch"])] = location(m)
+        arrived_at[int(m["epoch"])] = m.end()
     applied = {int(m["version"]): {"hash": m["hash"], "personalUnchanged": m["personal"] == "1"}
                for m in CLIENT_PROGRESS.finditer(text)}
     problems, warnings, rooms = [], [], []
     for i, host in enumerate(host_rooms):
         got = arrivals.get(host["epoch"])
         last = i == len(host_rooms) - 1
-        row = {"epoch": host["epoch"], "host": host["location"], "friend": got}
+        friend_tick = first_ticks(text[arrived_at[host["epoch"]]:]).get(host["epoch"]) if got is not None else None
+        row = {"epoch": host["epoch"], "host": host["location"], "friend": got,
+               "hostTickMs": host.get("tickMs"), "friendTickMs": friend_tick,
+               "lagMs": friend_tick - host["tickMs"] if friend_tick is not None and host.get("tickMs") is not None
+               else None}
         if got is None:
             row["result"] = "missing" if last else "superseded"
             (problems if last else warnings).append(
@@ -139,7 +158,9 @@ def friend_report(text: str, host_rooms: list[dict], host_progress: list[dict]) 
 
 def verdict(host_text: str, friend_texts: dict[str, str], relay_text: str = "",
             desync_dir: Path | None = None) -> dict:
-    host_rooms = [{"epoch": int(m["epoch"]), "location": location(m)} for m in HOST_ARRIVED.finditer(host_text)]
+    host_rooms = [{"epoch": int(m["epoch"]), "location": location(m),
+                   "tickMs": first_ticks(host_text[m.end():]).get(int(m["epoch"]))}
+                  for m in HOST_ARRIVED.finditer(host_text)]
     host_progress = [{"version": int(m["version"]), "kind": m["kind"], "hash": m["hash"]}
                      for m in HOST_PROGRESS.finditer(host_text)]
     result = {

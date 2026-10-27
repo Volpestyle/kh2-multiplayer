@@ -87,6 +87,22 @@ class CoopVerdictTest(unittest.TestCase):
     def test_no_host_room_fails(self):
         self.assertFalse(coop_verdict.verdict("", {"friend": ""})["pass"])
 
+    def test_room_rows_time_each_arrival_from_the_shared_tick(self):
+        # VUH-2898: line formats from run 20261026-193245 (Axel I's room, friend 5.75 s behind).
+        host = HOST + "[statehash] role=host epoch=2 frame=8309 room=08/00 door=50 map=0 btl=0 evt=19 count=1 tickMs=794568187\n"
+        friend = FRIEND.replace(
+            "[enemysync] client arrived epoch=2",
+            "[statehash] role=client epoch=2 frame=4100 room=08/00 count=0 tickMs=794571000\n"  # before its arrival: not it
+            "[enemysync] client arrived epoch=2") + \
+            "[statehash] role=client epoch=2 frame=4200 room=08/00 door=50 map=0 btl=0 evt=19 count=1 tickMs=794573937\n"
+        v = coop_verdict.verdict(host, {"friend": friend})
+        self.assertTrue(v["pass"], v["problems"])
+        last = v["friends"]["friend"]["rooms"][-1]
+        self.assertEqual((last["hostTickMs"], last["friendTickMs"], last["lagMs"]), (794568187, 794573937, 5750))
+        self.assertEqual(v["host"]["rooms"][-1]["tickMs"], 794568187)
+        first = v["friends"]["friend"]["rooms"][0]
+        self.assertEqual((first["hostTickMs"], first["friendTickMs"], first["lagMs"]), (None, None, None))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3393,6 +3393,45 @@ other seat finish both waves. The end requires `ok`. Test:
 `tests/test_downed_wave_order.py`, which covers the checker and the variants'
 own steps through the runner's Context.
 
+The host-down variant leaves a single stand-in to finish wave 1 and fight all of
+wave 2. Twice (`20261026-200433`, `-220631`) native Dusk damage downed it as
+well, before any 309 spawned. That made a full-party down, and the variant never
+reached the wave it exists to test. So from the confirmed downing until the
+wave-2 fight ends, that seat is protected (`{"do": "protect", "instance": 1}`,
+then `"on": false`). The friend-down variant needs no protection: its host
+cleared wave 2 alone in every run. Protection makes the friend's mirrored Dusks
+miss it, but the friend still lands its hits as claims
+(`net_client_hit_claims.json`). The host-down variant therefore claims nothing
+about the friend taking hits. The forced downing, its order before wave 2, and
+the 6/6 deaths and end checks are unchanged.
+
+### Waiting for the friend's arrival before `coop_verdict` (VUH-2898)
+
+`coop_verdict` judges the logs as they are when it runs, and the host's latest
+room must have a friend arrival. The Mansion scenarios end right after both
+seats read Axel I's room (02/14). They tore down 0.9 s (`20261026-215808`) and
+1.1 s (`-221605`) after the host arrived, but the friend arrives 5.64 to 5.75 s
+after the host (`193245`, `194057`, `194738`, `201309`). So the verdict failed
+`no friend arrival` on a friend that was still loading.
+
+The step's `"arrivalTimeoutMs": N` first waits up to N ms until every friend has
+logged `client arrived` for the host's latest epoch, and its first statehash
+there. If a friend is still missing at the limit, the step fails as before, and
+the message names how long it waited. The three Mansion scenarios use 20000 ms:
+about 3.5 times the worst measured lag, from a wait that starts about 1 s after
+the host's arrival. That leaves room for slower loads and still bounds the run.
+
+Each verdict room row now records arrival timing, which is reported, not
+judged:
+- `hostTickMs` and `friendTickMs`: each seat's first `[statehash] ... tickMs=`
+  stamp in that epoch, at or after its arrival line;
+- `lagMs`: the friend's lag behind the host.
+
+`tickMs` is GetTickCount, so only seats on one PC share it. A seat may log its
+first stamp up to its once-a-second cadence after arriving, so treat `lagMs` as
+±1 s. The step result's `lastRoom` carries the latest room's row per friend.
+Tests: `tests/test_mansion_verdict_wait.py` and `tests/test_coop_verdict.py`.
+
 
 Thorn fight routes may opt into `blockedThornProbe`: after one second with less
 than15 units of canonical movement just outside melee reach, a selected live307
