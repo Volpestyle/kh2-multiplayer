@@ -431,7 +431,7 @@
   },
   {
    "do": "assert",
-   "expr": "len(log_matches(r'\\[struggle-orbs\\] thread site=NoteGameThread tid=\\d+ gameTid=\\d+', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] thread site=NoteGameThread tid=\\d+ gameTid=\\d+', 1)) > 0 and len(log_matches(r'\\[struggle-orbs\\] thread site=pick-[ab] tid=\\d+ gameTid=\\d+', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] thread site=pick-[ab] tid=\\d+ gameTid=\\d+', 1)) > 0",
+   "expr": "len(log_matches(r'\\[struggle-orbs\\] thread site=NoteGameThread tid=\\d+ gameTid=\\d+', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] thread site=NoteGameThread tid=\\d+ gameTid=\\d+', 1)) > 0 and len(log_matches(r'\\[struggle-orbs\\] thread site=pick-[ab] tid=\\d+ gameTid=\\d+', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] thread site=pick-[ab] tid=\\d+ gameTid=\\d+', 1)) > 0 and all(len(log_matches(r'\\[struggle-orbs\\] thread site=' + site + r' tid=\\d+ gameTid=\\d+', 0)) > 0 for site in ('create', 'init', 'fly'))",
    "message": "orb hook and entity-thread TIDs must be recorded on both seats"
   },
   {
@@ -441,8 +441,8 @@
   },
   {
    "do": "assert",
-   "expr": "len(log_matches(r'\\[struggle-orbs\\] stats .*collects=[1-9]', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] sent .* collect orb=', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] received .* collect orb=', 1)) > 0 and len(log_matches(r'\\[struggle-orbs\\] client shown=\\d+ created=\\d+ vanished=[1-9]', 1)) > 0",
-   "message": "host pickups must be booked and sent, then received and flown or faded on the friend"
+   "expr": "len(log_matches(r'\\[struggle-orbs\\] stats .*collects=[1-9]', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] sent .* collect orb=', 0)) > 0 and len(log_matches(r'\\[struggle-orbs\\] received .* collect orb=', 1)) > 0 and len(log_matches(r'\\[struggle-orbs\\] client shown=\\d+ created=\\d+ vanished=[1-9]', 1)) > 0 and len(log_matches(r'\\[struggle-orbs\\] stats .*dropsSuppressed=[1-9]\\d* picksSuppressed=[1-9]\\d*', 1)) > 0 and {(m['epoch'], m['seq'], m['orb']) for m in log_matches('\\\\[struggle-orbs\\\\] sent epoch=(?P<epoch>\\\\d+) seq=(?P<seq>\\\\d+) collect orb=(?P<orb>\\\\d+) ', 0)} == {(m['epoch'], m['seq'], m['orb']) for m in log_matches('\\\\[struggle-orbs\\\\] received epoch=(?P<epoch>\\\\d+) seq=(?P<seq>\\\\d+) collect orb=(?P<orb>\\\\d+)(?:\\\\s|$)', 1)} and len({(m['epoch'], m['orb']) for m in log_matches('\\\\[struggle-orbs\\\\] sent epoch=(?P<epoch>\\\\d+) seq=\\\\d+ collect orb=(?P<orb>\\\\d+) [^\\\\r\\\\n]*collector=2 ', 0)} & {(m['epoch'], m['orb']) for m in log_matches('\\\\[struggle-orbs\\\\] applied epoch=(?P<epoch>\\\\d+) collect orb=(?P<orb>\\\\d+) collector=2 netId=0 ok=1', 1)}) > 0",
+   "message": "host pickups must be booked and sent, then received and flown or faded on the friend; matching collect IDs/epochs/sequences, a clone collect applied, and nonzero friend drop/pick suppression are required"
   },
   {
    "do": "assert",

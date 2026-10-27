@@ -447,6 +447,7 @@ void ManagerReplacement() {
 // Counting fakes for the detours' environment.
 struct FakeNative {
     static inline thread_local std::uint32_t thread = 0;
+    static inline thread_local std::uintptr_t stack = 1;
     static inline thread_local unsigned reads = 0;
     static inline thread_local std::function<void()> readStep;
     static inline unsigned births = 0, collects = 0;
@@ -461,6 +462,7 @@ struct FakeNative {
         lastNetId = 0; lastCollector = 0; memory.clear();
     }
     static std::uint32_t Thread() { return thread; }
+    static std::uintptr_t Stack() { return stack; }
     static bool Read(std::uintptr_t a, void* out, std::size_t n) {
         ++reads;
         if (readStep) { auto f = std::move(readStep); f(); }
@@ -540,7 +542,10 @@ void AdapterGate() {
     check(originals == 4, "withdrawn during native read: old follow token cannot suppress a pickup");
     (void)g.Publish(9, OrbScope(), Collectors());
     const auto create = [&] {
-        return ad::Create(g, env, [&](std::uintptr_t, std::uintptr_t, const float*) { ++originals; return kRecord; },
+        return ad::Create(g, env, [&](std::uintptr_t m, std::uintptr_t d, const float* p) {
+            ++originals;
+            return ad::Init(g, env, [](std::uintptr_t r, std::uintptr_t, std::uintptr_t, const float*, std::uintptr_t) { return r; },
+                            kRecord, m, d, p, 0); },
                           kManager, kBase + so::kDescriptorsRva, point);
     };
     check(create() == kRecord && FakeNative::births == 0 && g.queued == 1,
@@ -550,11 +555,14 @@ void AdapterGate() {
     const auto pick = [&](std::uintptr_t actor, bool switches) {
         Record();
         ad::Pickup(g, env, [&] { ++originals; if (switches) {
-            FakeNative::memory[kRecord + so::kRecordUpdate] = 2;
-            FakeNative::memory[kRecord + so::kRecordCollector] = actor;
+            ad::Flight(g, env, [&](std::uintptr_t r, std::uintptr_t a, int) {
+                FakeNative::memory[r + so::kRecordUpdate] = 2;
+                FakeNative::memory[r + so::kRecordCollector] = a;
+            }, kRecord, actor, 0);
         } }, kRecord);
     };
     for (const auto actor : {0x111u, 0x222u, 0x333u, 0x444u}) {
+        if (actor != 0x111) { (void)create(); ad::Drain(g, env, g.Publish(9, OrbScope(), Collectors())); }
         pick(actor, true);
         const auto before = FakeNative::collects;
         ad::Drain(g, env, g.Publish(9, OrbScope(), {})); // refreshed mapping must not rename captured collector
@@ -565,14 +573,33 @@ void AdapterGate() {
     }
     check(FakeNative::lastNetId == 0 && g.unresolved == 1,
           "unmapped collector fades; worker never calls collectorOf");
+    const auto queued = g.queued.load();
     pick(0x111, false); pick(0, true);
-    check(g.queued == 5, "no switch or no collector: no collection");
+    check(g.queued == queued, "no flight or no collector: no collection");
     Record(); FakeNative::memory[kRecord + so::kRecordDescriptor] += 1;
-    ad::Pickup(g, env, [&] { ++originals; FakeNative::memory[kRecord + so::kRecordUpdate] = 2; }, kRecord);
-    check(g.queued == 5, "wrong descriptor: no collection");
+    ad::Flight(g, env, [&](std::uintptr_t, std::uintptr_t, int) { ++originals; }, kRecord, 0x111, 0);
+    check(g.queued == queued, "wrong descriptor: no collection");
     Record();
-    check(throws([&] { ad::Pickup(g, env, [] { throw std::runtime_error("native unwind"); }, kRecord); }) && g.queued == 5,
+    check(throws([&] { ad::Pickup(g, env, [] { throw std::runtime_error("native unwind"); }, kRecord); }) && g.queued == queued,
           "native unwind: no receipt, no lock retained");
+    (void)create(); ad::Drain(g, env, g.Publish(9, OrbScope(), Collectors()));
+    const auto collected = FakeNative::collects;
+    check(throws([&] { ad::Flight(g, env, [](std::uintptr_t, std::uintptr_t, int) {
+        throw std::runtime_error("native flight unwind"); }, kRecord, 0x111, 0); }), "native flight unwind propagates");
+    ad::Drain(g, env, g.Publish(9, OrbScope(), Collectors()));
+    check(FakeNative::collects == collected && g.pending.empty(), "failed native flight neither emits a false collect nor stalls the prefix");
+
+    env.stack = &FakeNative::Stack;
+    const auto beforeFiber = g.queued.load();
+    ad::Create(g, env, [&](std::uintptr_t m, std::uintptr_t d, const float* p) {
+        FakeNative::stack = 2; // initializer on another native stack cannot borrow the outer TLS frame
+        const auto r = ad::Init(g, env, [](std::uintptr_t r, std::uintptr_t, std::uintptr_t, const float*, std::uintptr_t) { return r; },
+                               kRecord, m, d, p, 0);
+        FakeNative::stack = 1; return r;
+    }, kManager, kBase + so::kDescriptorsRva, point);
+    check(g.queued == beforeFiber && !g.records.contains(kRecord),
+          "another fiber's initializer cannot borrow this create call or leave the old incarnation current");
+    env.stack = nullptr;
 
     // Every scope component fences queued receipts. An in-flight call returning after reset is stale.
     for (int field = 0; field < 7; ++field) {
@@ -584,10 +611,13 @@ void AdapterGate() {
         (void)g.Publish(9, OrbScope(), Collectors());
     }
     auto token = g.Capture(17); g.Reset(); (void)g.Publish(9, OrbScope(), Collectors());
-    check(!g.Submit(token, {}) && g.stale >= 8, "reset fences an in-flight native call even at identical addresses");
+    check(!g.ReserveBirth(token, kRecord, 0, {}) && g.stale >= 8, "reset fences an in-flight native call even at identical addresses");
     token = g.Capture(17);
-    for (std::size_t i = 0; i < ad::Gate::kCapacity; ++i) (void)g.Submit(token, {});
-    check(!g.Submit(token, {}) && g.overflow == 1, "bounded mailbox reports overflow");
+    for (std::size_t i = 0; i < ad::Gate::kCapacity; ++i) {
+        const auto receipt = g.ReserveBirth(token, kRecord + i * 0x80, 0, {});
+        g.CompleteBirth(token, receipt, {}, true);
+    }
+    check(!g.ReserveBirth(token, kRecord + ad::Gate::kCapacity * 0x80, 0, {}) && g.overflow == 1, "bounded mailbox reports overflow");
     check(g.Publish(17, OrbScope(), {}).empty() && g.Publish(9, OrbScope(), {}).size() == ad::Gate::kCapacity,
           "worker cannot publish or steal owner receipts");
     for (std::size_t i = 0; i < static_cast<std::size_t>(ad::Site::Count); ++i) {
@@ -613,11 +643,15 @@ void WorkerMailbox() {
             const auto record = kRecord + w * 0x10000 + i * 0x80;
             Record(record);
             float point[4] {1, 2, 3, 1};
-            ad::Create(g, env, [&](std::uintptr_t, std::uintptr_t, const float*) { return record; },
+            ad::Create(g, env, [&](std::uintptr_t m, std::uintptr_t d, const float* p) {
+                return ad::Init(g, env, [](std::uintptr_t r, std::uintptr_t, std::uintptr_t, const float*, std::uintptr_t) { return r; },
+                                record, m, d, p, 0); },
                        kManager, kBase + so::kDescriptorsRva, point);
             ad::Pickup(g, env, [&] {
-                FakeNative::memory[record + so::kRecordUpdate] = 2;
-                FakeNative::memory[record + so::kRecordCollector] = 0x222;
+                ad::Flight(g, env, [&](std::uintptr_t r, std::uintptr_t a, int) {
+                    FakeNative::memory[r + so::kRecordUpdate] = 2;
+                    FakeNative::memory[r + so::kRecordCollector] = a;
+                }, record, 0x222, 0);
             }, record);
         }
     });
@@ -625,8 +659,8 @@ void WorkerMailbox() {
     for (int i = 0; i < 100; ++i) ad::Drain(g, env, g.Publish(9, OrbScope(), Collectors()));
     for (auto& w : workers) w.join();
     ad::Drain(g, env, g.Publish(9, OrbScope(), Collectors()));
-    check(FakeNative::births == 300 && FakeNative::collects == 300 && g.queued == 600 && g.drained == 600 &&
-          g.overflow == 0 && g.stale == 0 && g.offThread == 600, "three workers + concurrent owner: every receipt drained once");
+    check(FakeNative::births + g.elided == 300 && FakeNative::collects == FakeNative::births && g.queued == 600 && g.drained == 600 &&
+          g.overflow == 0 && g.stale == 0 && g.offThread == 900, "three workers + concurrent owner: every incarnation drained or atomically elided once");
     check(!FakeNative::wrongCallbackThread, "all EnemySync callbacks executed on the owner thread");
 }
 
@@ -636,7 +670,7 @@ struct FakeOps {
     bool failApply = false;
     std::vector<int> removed;
     unsigned created = 0, queued = 0;
-    bool trampoline[5] {};  // a created hook's original trampoline; MH_RemoveHook frees it
+    bool trampoline[7] {};  // a created hook's original trampoline; MH_RemoveHook frees it
     std::function<void()> duringApply;
     bool Create(std::size_t i) { if (i == failCreate) return false; ++created; trampoline[i] = true; return true; }
     bool Queue(std::size_t i) { if (i == failQueue) return false; ++queued; return true; }
@@ -652,17 +686,17 @@ void AdapterInstall() {
     namespace ad = so::adapter;
     ad::Env env;
     env.exeBase = kBase; env.thread = &FakeNative::Thread; env.read = &FakeNative::Read; env.cb = &kFakeCallbacks;
-    for (std::size_t at = 0; at < 5; ++at) {
+    for (std::size_t at = 0; at < 7; ++at) {
         ad::Gate g; g.gameThread.store(9); FakeOps ops; ops.failCreate = at;
-        const auto r = ad::Install(g, 5, ops);
+        const auto r = ad::Install(g, 7, ops);
         check(!r.active && !g.active && std::string(r.failedAt) == "create" && r.created == at && ops.removed.size() == at &&
               r.rollbackFailures == 0, "install: a failed create " + std::to_string(at) + " removes the earlier ones; inactive");
     }
-    for (std::size_t at = 0; at < 5; ++at) {
+    for (std::size_t at = 0; at < 7; ++at) {
         ad::Gate g; FakeOps ops; ops.failQueue = at;
-        const auto r = ad::Install(g, 5, ops);
-        check(!r.active && !g.active && std::string(r.failedAt) == "queue" && ops.removed.size() == 5,
-              "install: a failed queue " + std::to_string(at) + " removes all five; inactive");
+        const auto r = ad::Install(g, 7, ops);
+        check(!r.active && !g.active && std::string(r.failedAt) == "queue" && ops.removed.size() == 7,
+              "install: a failed queue " + std::to_string(at) + " removes all seven; inactive");
     }
     {
         ad::Gate g; g.gameThread.store(9); FakeOps ops; ops.failApply = true;
@@ -676,8 +710,8 @@ void AdapterInstall() {
             ad::Pickup(g, env, [&] { ++originals; }, kRecord);
             paused = [&] { if (ops.trampoline[1]) ++originals; else ++freedCalls; };
         };
-        const auto r = ad::Install(g, 5, ops);
-        check(!r.active && !g.active && std::string(r.failedAt) == "apply" && r.retained == 5 && ops.removed.empty() &&
+        const auto r = ad::Install(g, 7, ops);
+        check(!r.active && !g.active && std::string(r.failedAt) == "apply" && r.retained == 7 && ops.removed.empty() &&
               r.rollbackFailures == 0, "install: a failed apply keeps every hook, inactive, and removes none");
         check(originals == 2 && g.dropsSuppressed == 0 && g.picksSuppressed == 0 && FakeNative::reads == 0,
               "install: a detour reached while applying passes straight through");
@@ -691,17 +725,17 @@ void AdapterInstall() {
     }
     {
         ad::Gate g; FakeOps ops; ops.failQueue = 2; ops.failRemove = 3;
-        const auto r = ad::Install(g, 5, ops);
-        check(!r.active && r.retained == 0 && ops.removed.size() == 5 && r.rollbackFailures == 1 && ops.trampoline[3] && !ops.trampoline[0],
+        const auto r = ad::Install(g, 7, ops);
+        check(!r.active && r.retained == 0 && ops.removed.size() == 7 && r.rollbackFailures == 1 && ops.trampoline[3] && !ops.trampoline[0],
               "install: hooks never applied are reclaimed, and a removal that fails is counted");
     }
     {
         ad::Gate g; g.gameThread.store(9); FakeOps ops;
         bool openDuringApply = true;
         ops.duringApply = [&] { openDuringApply = g.active.load(); };
-        const auto r = ad::Install(g, 5, ops);
-        check(r.active && g.active && !openDuringApply && ops.created == 5 && ops.queued == 5 && ops.removed.empty(),
-              "install: the gate opens only after all five apply");
+        const auto r = ad::Install(g, 7, ops);
+        check(r.active && g.active && !openDuringApply && ops.created == 7 && ops.queued == 7 && ops.removed.empty(),
+              "install: the gate opens only after all seven apply");
     }
 }
 

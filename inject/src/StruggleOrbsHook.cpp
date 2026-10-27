@@ -29,6 +29,8 @@ static_assert(kCollectorNone == static_cast<std::uint8_t>(OrbCollector::None) &&
 namespace {
 
 using CreateFn = std::uintptr_t(__fastcall*)(std::uintptr_t manager, std::uintptr_t descriptor, const float* point);
+using InitFn = std::uintptr_t(__fastcall*)(std::uintptr_t record, std::uintptr_t manager, std::uintptr_t descriptor,
+                                         const float* point, std::uintptr_t update);
 using PassFn = void(__fastcall*)(void* a, void* b, void* c, void* d);
 using FlyFn = void(__fastcall*)(std::uintptr_t record, std::uintptr_t actor, int mode);
 
@@ -36,6 +38,7 @@ LogFn g_log = nullptr;
 Callbacks g_cb{};
 std::uintptr_t g_exeBase = 0;
 CreateFn g_create = nullptr;
+InitFn g_init = nullptr;
 PassFn g_hitDrop = nullptr, g_drop = nullptr, g_pickA = nullptr, g_pickB = nullptr;
 FlyFn g_fly = nullptr;
 adapter::Gate g_gate;
@@ -50,6 +53,7 @@ bool CopyCode(std::uintptr_t address, void* out, std::size_t size) {
     }
 }
 std::uint32_t ThreadNow() { return static_cast<std::uint32_t>(GetCurrentThreadId()); }
+std::uintptr_t StackNow() { return reinterpret_cast<std::uintptr_t>(reinterpret_cast<NT_TIB*>(NtCurrentTeb())->StackBase); }
 bool ReadNative(std::uintptr_t address, void* out, std::size_t size) {
     return CopyCode(address, out, size);
 }
@@ -91,6 +95,19 @@ void __fastcall HitDropDetour(void* a, void* b, void* c, void* d) {
     TraceThread(adapter::Site::HitDrop);
     adapter::Drop(g_gate, g_env, [&] { error.Call([&] { g_hitDrop(a, b, c, d); }); });
 }
+std::uintptr_t __fastcall InitDetour(std::uintptr_t record, std::uintptr_t manager, std::uintptr_t descriptor,
+                                    const float* point, std::uintptr_t update) {
+    NativeError error;
+    TraceThread(adapter::Site::Init);
+    return adapter::Init(g_gate, g_env, [&](std::uintptr_t r, std::uintptr_t m, std::uintptr_t d, const float* p, std::uintptr_t u) {
+        return error.Call([&] { return g_init(r, m, d, p, u); }); }, record, manager, descriptor, point, update);
+}
+void __fastcall FlyDetour(std::uintptr_t record, std::uintptr_t actor, int mode) {
+    NativeError error;
+    TraceThread(adapter::Site::Fly);
+    adapter::Flight(g_gate, g_env, [&](std::uintptr_t r, std::uintptr_t a, int m) {
+        error.Call([&] { g_fly(r, a, m); }); }, record, actor, mode);
+}
 void __fastcall DropDetour(void* a, void* b, void* c, void* d) {
     NativeError error;
     TraceThread(adapter::Site::Drop);
@@ -110,10 +127,12 @@ void __fastcall PickBDetour(void* a, void* b, void* c, void* d) {
 struct Target { std::uintptr_t rva; void* detour; void** original; };
 const Target kTargets[] = {
     {kCreateRva, reinterpret_cast<void*>(&CreateDetour), reinterpret_cast<void**>(&g_create)},
+    {kInitRva, reinterpret_cast<void*>(&InitDetour), reinterpret_cast<void**>(&g_init)},
     {kHitDropRva, reinterpret_cast<void*>(&HitDropDetour), reinterpret_cast<void**>(&g_hitDrop)},
     {kDropRva, reinterpret_cast<void*>(&DropDetour), reinterpret_cast<void**>(&g_drop)},
     {kPickARva, reinterpret_cast<void*>(&PickADetour), reinterpret_cast<void**>(&g_pickA)},
     {kPickBRva, reinterpret_cast<void*>(&PickBDetour), reinterpret_cast<void**>(&g_pickB)},
+    {kFlyRva, reinterpret_cast<void*>(&FlyDetour), reinterpret_cast<void**>(&g_fly)},
 };
 struct MinHookOps {
     std::uintptr_t base;
@@ -146,14 +165,14 @@ bool Install(std::uintptr_t exeBase, LogFn log, const Callbacks& callbacks) {
         if (log) log("[struggle-orbs] configured=1 hooked=0 reason=callbacks");
         return false;
     }
-    // Every prerequisite is in place before the first hook exists; the gate opens only after all five apply.
+    // Every prerequisite is in place before the first hook exists; the gate opens only after all seven apply.
     g_exeBase = exeBase;
     g_cb = callbacks;
-    g_fly = reinterpret_cast<FlyFn>(exeBase + kFlyRva);
     g_env.exeBase = exeBase;
     g_env.thread = &ThreadNow;
     g_env.read = &ReadNative;
     g_env.cb = &g_cb;
+    g_env.stack = &StackNow;
     MinHookOps ops{exeBase};
     const auto r = adapter::Install(g_gate, std::size(kTargets), ops);
     if (!r.active) {
@@ -162,10 +181,11 @@ bool Install(std::uintptr_t exeBase, LogFn log, const Callbacks& callbacks) {
                      r.retained || r.rollbackFailures ? " (kept inactive for the DLL's lifetime: they pass straight through)" : "");
         return false;
     }
-    if (log) log("[struggle-orbs] configured=1 hooked=1 create=%llX drops=%llX/%llX picks=%llX/%llX manager=%llX",
+    if (log) log("[struggle-orbs] configured=1 hooked=1 create=%llX drops=%llX/%llX picks=%llX/%llX manager=%llX init=%llX fly=%llX",
                  static_cast<unsigned long long>(kCreateRva), static_cast<unsigned long long>(kHitDropRva),
                  static_cast<unsigned long long>(kDropRva), static_cast<unsigned long long>(kPickARva),
-                 static_cast<unsigned long long>(kPickBRva), static_cast<unsigned long long>(kManagerRva));
+                 static_cast<unsigned long long>(kPickBRva), static_cast<unsigned long long>(kManagerRva),
+                 static_cast<unsigned long long>(kInitRva), static_cast<unsigned long long>(kFlyRva));
     return true;
 }
 
@@ -182,15 +202,15 @@ void NoteGameThread() {
     const HookStats n = Stats();
     if (n.births == logged.births && n.collects == logged.collects && n.dropsSuppressed == logged.dropsSuppressed &&
         n.picksSuppressed == logged.picksSuppressed && n.offThread == logged.offThread && n.queued == logged.queued &&
-        n.drained == logged.drained && n.stale == logged.stale && n.overflow == logged.overflow)
+        n.drained == logged.drained && n.stale == logged.stale && n.overflow == logged.overflow && n.elided == logged.elided)
         return;
     logged = n;
-    g_log("[struggle-orbs] stats births=%llu collects=%llu unresolved=%llu dropsSuppressed=%llu picksSuppressed=%llu offThread=%llu queued=%llu drained=%llu stale=%llu overflow=%llu",
+    g_log("[struggle-orbs] stats births=%llu collects=%llu unresolved=%llu dropsSuppressed=%llu picksSuppressed=%llu offThread=%llu queued=%llu drained=%llu stale=%llu overflow=%llu elided=%llu",
           static_cast<unsigned long long>(n.births), static_cast<unsigned long long>(n.collects),
           static_cast<unsigned long long>(n.unresolved), static_cast<unsigned long long>(n.dropsSuppressed),
           static_cast<unsigned long long>(n.picksSuppressed), static_cast<unsigned long long>(n.offThread),
           static_cast<unsigned long long>(n.queued), static_cast<unsigned long long>(n.drained),
-          static_cast<unsigned long long>(n.stale), static_cast<unsigned long long>(n.overflow));
+          static_cast<unsigned long long>(n.stale), static_cast<unsigned long long>(n.overflow), static_cast<unsigned long long>(n.elided));
     for (std::size_t i = 0; i < static_cast<std::size_t>(adapter::Site::Count); ++i) {
         const auto& t = g_gate.sites[i];
         if (t.entries.load(std::memory_order_relaxed))
@@ -259,6 +279,7 @@ HookStats Stats() {
     s.drained = g_gate.drained.load(std::memory_order_relaxed);
     s.stale = g_gate.stale.load(std::memory_order_relaxed);
     s.overflow = g_gate.overflow.load(std::memory_order_relaxed);
+    s.elided = g_gate.elided.load(std::memory_order_relaxed);
     return s;
 }
 

@@ -36,7 +36,7 @@ struct Callbacks {
     void (*collectors)(std::vector<Collector>& out) = nullptr; // copied host identities, game thread only
 };
 
-// Checks the pins and installs the five detours, all or none (StruggleOrbsAdapter.hpp). Logs one
+// Checks the pins and installs the seven detours, all or none (StruggleOrbsAdapter.hpp). Logs one
 // "[struggle-orbs] configured=..." line.
 bool Install(std::uintptr_t exeBase, LogFn log, const Callbacks& callbacks);
 bool Installed();
@@ -58,7 +58,7 @@ bool StartFlight(const VanishRequest& request);
 
 struct HookStats {
     std::uint64_t births{}, collects{}, unresolved{}, dropsSuppressed{}, picksSuppressed{}, offThread{}, inactive{};
-    std::uint64_t queued{}, drained{}, stale{}, overflow{};
+    std::uint64_t queued{}, drained{}, stale{}, overflow{}, elided{};
 };
 HookStats Stats();
 

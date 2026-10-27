@@ -12,8 +12,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <utility>
 
 #include "StruggleOrbs.hpp"
@@ -21,12 +23,12 @@
 
 namespace kh2coop::inject::struggleorbs::adapter {
 
-enum class Site : std::size_t { Create, HitDrop, Drop, PickA, PickB, Frame, Count };
-inline constexpr const char* kSiteNames[] = {"create", "hit-drop", "drop", "pick-a", "pick-b", "NoteGameThread"};
+enum class Site : std::size_t { Create, Init, HitDrop, Drop, PickA, PickB, Fly, Frame, Count };
+inline constexpr const char* kSiteNames[] = {"create", "init", "hit-drop", "drop", "pick-a", "pick-b", "fly", "NoteGameThread"};
 
 struct Event {
     enum class Kind { Birth, Collect } kind{};
-    std::uintptr_t manager{}, record{};  // opaque book keys; never dereferenced by the consumer
+    std::uintptr_t manager{}, record{};  // record is an incarnation key, never a native pointer at drain
     std::uint8_t type{}, collector{};
     std::uint16_t netId{};
     std::array<float, 4> point{};
@@ -44,7 +46,7 @@ struct Gate {
     std::atomic<std::uint32_t> gameThread{0};
     std::atomic<std::uint64_t> inactive{0}, offThread{0};
     std::atomic<std::uint64_t> births{0}, collects{0}, unresolved{0}, dropsSuppressed{0}, picksSuppressed{0};
-    std::atomic<std::uint64_t> queued{0}, drained{0}, stale{0}, overflow{0};
+    std::atomic<std::uint64_t> queued{0}, drained{0}, stale{0}, overflow{0}, elided{0};
     struct ThreadSite {
         std::atomic<std::uint32_t> last{0}, changes{0};
         std::atomic<std::uint64_t> entries{0}, foreign{0};
@@ -53,7 +55,16 @@ struct Gate {
     // workers, so a worker must never wait for a lock held across an entity/native update.
     std::mutex mutex;
     std::shared_ptr<const Context> context;
-    std::vector<Event> pending;
+    struct Receipt {
+        Event event{};
+        bool ready = false, cancelled = false, consumed = false;
+        std::uintptr_t nativeRecord{};
+        std::shared_ptr<Receipt> birth;
+    };
+    using Ticket = std::shared_ptr<Receipt>;
+    std::deque<Ticket> pending;
+    std::unordered_map<std::uintptr_t, Ticket> records;
+    std::uintptr_t incarnation = 0;
     std::uint64_t serial = 1;
 
     using Token = std::shared_ptr<const Context>;
@@ -70,7 +81,7 @@ struct Gate {
     }
     void Reset() {
         std::lock_guard lock(mutex);
-        stale += pending.size(); pending.clear(); context.reset();
+        stale += pending.size(); pending.clear(); records.clear(); context.reset();
         ++serial;
     }
     // Only the noted entity thread publishes/drains. Matching scopes retain in-flight tokens while
@@ -82,21 +93,82 @@ struct Gate {
         const bool live = active.load(std::memory_order_acquire) && scope.mode != Mode::Off && scope.manager &&
                           scope.generation && scope.epoch && scope.delivery;
         if (!live || !context || context->scope != scope) {
-            stale += pending.size(); pending.clear(); ++serial;
+            stale += pending.size(); pending.clear(); records.clear(); ++serial;
         }
         if (!live) { context.reset(); return {}; }
         context = std::make_shared<Context>(Context{scope, serial, std::move(collectors)});
         std::vector<Event> out;
-        out.swap(pending);
-        drained += out.size();
+        // A birth is reserved BEFORE native initialization can publish its record. Do not let a
+        // completed collect pass its unfinished birth. A native call never waits for this drain.
+        while (!pending.empty() && pending.front()->ready) {
+            auto receipt = std::move(pending.front()); pending.pop_front(); ++drained;
+            receipt->consumed = true;
+            if (receipt->cancelled || (receipt->birth && receipt->birth->cancelled)) {
+                if (receipt->event.kind == Event::Kind::Birth) ++elided;
+                continue;
+            }
+            out.push_back(receipt->event);
+        }
         return out;
     }
-    bool Submit(const Token& token, const Event& event) {
+    bool CurrentLocked(const Token& token) const {
+        return token && context && token->serial == context->serial;
+    }
+    void RetireRecord(std::uintptr_t nativeRecord) {
         std::lock_guard lock(mutex);
-        if (!context || token->serial != context->serial) { ++stale; return false; }
-        if (pending.size() == kCapacity) { ++overflow; return false; }
-        pending.push_back(event); ++queued;
-        return true;
+        const auto it = records.find(nativeRecord);
+        if (it == records.end()) return;
+        if (!it->second->consumed) it->second->cancelled = true;
+        records.erase(it); // even an untracked initializer must not leave the old incarnation current
+    }
+    Ticket ReserveBirth(const Token& token, std::uintptr_t nativeRecord, std::uint8_t type,
+                        const std::array<float, 4>& point) {
+        std::lock_guard lock(mutex);
+        if (!CurrentLocked(token)) { ++stale; return {}; }
+        if (pending.size() == kCapacity || (!records.contains(nativeRecord) && records.size() == kCapacity) ||
+            incarnation == UINTPTR_MAX) { ++overflow; return {}; }
+        auto& prior = records[nativeRecord];
+        if (prior && !prior->consumed) prior->cancelled = true; // reused before a birth was observable
+        auto receipt = std::make_shared<Receipt>();
+        receipt->nativeRecord = nativeRecord;
+        receipt->event.kind = Event::Kind::Birth; receipt->event.manager = token->scope.manager;
+        receipt->event.record = ++incarnation; receipt->event.type = type; receipt->event.point = point;
+        prior = receipt; pending.push_back(receipt); ++queued;
+        return receipt;
+    }
+    bool IsCurrentBirth(const Token& token, const Ticket& birth) {
+        std::lock_guard lock(mutex);
+        const auto it = birth ? records.find(birth->nativeRecord) : records.end();
+        return CurrentLocked(token) && birth && !birth->cancelled && it != records.end() && it->second == birth;
+    }
+    void CompleteBirth(const Token& token, const Ticket& birth, const std::array<float, 3>& velocity, bool valid) {
+        std::lock_guard lock(mutex);
+        if (!birth) return;
+        if (!CurrentLocked(token)) { ++stale; return; }
+        const auto it = records.find(birth->nativeRecord);
+        birth->cancelled = birth->cancelled || !valid || it == records.end() || it->second != birth;
+        birth->event.velocity = velocity; birth->ready = true;
+    }
+    Ticket ReserveCollect(const Token& token, std::uintptr_t nativeRecord, std::uint8_t collector, std::uint16_t netId) {
+        std::lock_guard lock(mutex);
+        if (!CurrentLocked(token)) { ++stale; return {}; }
+        const auto it = records.find(nativeRecord);
+        if (it == records.end()) return {}; // born before this scope was observed
+        if (pending.size() == kCapacity) { ++overflow; return {}; }
+        auto receipt = std::make_shared<Receipt>(); receipt->birth = it->second;
+        receipt->event.kind = Event::Kind::Collect; receipt->event.manager = token->scope.manager;
+        receipt->event.record = it->second->event.record;
+        receipt->event.collector = collector; receipt->event.netId = netId;
+        // A collection before the birth's owner drain is an atomic elision. Never read its flight
+        // velocity as birth scatter, or show an already-collected/reused native record to a friend.
+        if (!it->second->consumed) it->second->cancelled = true;
+        pending.push_back(receipt); ++queued; return receipt;
+    }
+    void CompleteCollect(const Token& token, const Ticket& receipt, bool valid = true) {
+        std::lock_guard lock(mutex);
+        if (!receipt) return;
+        if (!CurrentLocked(token)) { ++stale; return; }
+        receipt->cancelled = !valid; receipt->ready = true;
     }
     // Bounded TID changes per site, including the first entry; counts continue after the log cap.
     bool Trace(Site site, std::uint32_t thread) {
@@ -113,6 +185,7 @@ struct Env {
     std::uint32_t (*thread)() = nullptr;
     bool (*read)(std::uintptr_t address, void* out, std::size_t size) = nullptr;
     const Callbacks* cb = nullptr; // used only by the entity-thread Drain below
+    std::uintptr_t (*stack)() = nullptr; // current native/fiber stack identity, production supplies StackBase
 };
 template <class T> bool Read(const Env& env, std::uintptr_t address, T& out) { return env.read(address, &out, sizeof(T)); }
 inline bool Current(const Env& env, const Gate::Token& token) {
@@ -134,21 +207,61 @@ inline void Drain(Gate& g, const Env& env, const std::vector<Event>& events) {
     }
 }
 
-// Birth and collect take the same mailbox, including entity-thread births: record reuse cannot let
-// a newer birth overtake an earlier worker collection. A native call is made exactly once.
+// Per-native-create call, on the calling stack. The initializer has the record argument before it
+// writes/publishes that incarnation; the outer allocator does not know it until too late. Select by
+// native stack identity as well as arguments: TLS alone must not borrow another fiber's call.
+struct BirthCall {
+    inline static thread_local BirthCall* calls = nullptr;
+    BirthCall* next = calls;
+    Gate::Token token;
+    Gate::Ticket ticket;
+    std::uintptr_t manager{}, descriptor{}, pointAddress{}, stack{};
+    std::array<float, 4> point{};
+    BirthCall() { calls = this; }
+    BirthCall(const BirthCall&) = delete;
+    BirthCall& operator=(const BirthCall&) = delete;
+    ~BirthCall() {
+        for (auto** at = &calls; *at; at = &(*at)->next) if (*at == this) { *at = next; break; }
+    }
+};
+inline std::uintptr_t Stack(const Env& env) { return env.stack ? env.stack() : env.thread(); }
+
+template <class Original>
+std::uintptr_t Init(Gate& g, const Env& env, Original&& original, std::uintptr_t record, std::uintptr_t manager,
+                    std::uintptr_t descriptor, const float* point, std::uintptr_t update) {
+    g.RetireRecord(record);
+    const auto stack = Stack(env);
+    for (auto* call = BirthCall::calls; call; call = call->next) {
+        if (call->stack != stack || call->manager != manager || call->descriptor != descriptor ||
+            call->pointAddress != reinterpret_cast<std::uintptr_t>(point)) continue;
+        if (record && call->token && !call->ticket && Current(env, call->token))
+            call->ticket = g.ReserveBirth(call->token, record,
+                static_cast<std::uint8_t>(DescriptorType(env.exeBase, descriptor)), call->point);
+        break;
+    }
+    return original(record, manager, descriptor, point, update);
+}
+
 template <class Original>
 std::uintptr_t Create(Gate& g, const Env& env, Original&& original, std::uintptr_t manager, std::uintptr_t descriptor,
                       const float* point) {
-    const auto token = g.Capture(env.thread());
-    const std::uintptr_t record = original(manager, descriptor, point);
-    if (!record || !point || !token || token->scope.mode != Mode::Host || manager != token->scope.manager ||
-        !Current(env, token)) return record;
+    BirthCall call;
+    call.token = g.Capture(env.thread()); call.manager = manager; call.descriptor = descriptor;
+    call.pointAddress = reinterpret_cast<std::uintptr_t>(point); call.stack = Stack(env);
     const int type = DescriptorType(env.exeBase, descriptor);
-    Event e; e.kind = Event::Kind::Birth; e.manager = manager; e.record = record;
-    if (type < 0 || !env.read(reinterpret_cast<std::uintptr_t>(point), e.point.data(), sizeof(e.point)) ||
-        !env.read(record + kRecordVelocity, e.velocity.data(), sizeof(e.velocity))) return record;
-    e.type = static_cast<std::uint8_t>(type);
-    g.Submit(token, e);
+    if (!call.token || call.token->scope.mode != Mode::Host || manager != call.token->scope.manager ||
+        type < 0 || !point || !env.read(call.pointAddress, call.point.data(), sizeof(call.point))) call.token.reset();
+    const auto finish = [&](std::uintptr_t record) {
+        std::array<float, 3> velocity{};
+        const bool valid = record && call.ticket && call.ticket->nativeRecord == record && Current(env, call.token) &&
+            g.IsCurrentBirth(call.token, call.ticket) && env.read(record + kRecordVelocity, velocity.data(), sizeof(velocity)) &&
+            g.IsCurrentBirth(call.token, call.ticket);
+        g.CompleteBirth(call.token, call.ticket, velocity, valid);
+    };
+    std::uintptr_t record;
+    try { record = original(manager, descriptor, point); }
+    catch (...) { finish(0); throw; }
+    finish(record);
     return record;
 }
 
@@ -167,30 +280,34 @@ void Pickup(Gate& g, const Env& env, Original&& original, std::uintptr_t record)
         if (g.Owns(token)) ++g.picksSuppressed; else original();
         return;
     }
-    std::uintptr_t owner = 0, descriptor = 0, actorBefore = 0;
-    std::uint32_t before = 0;
-    const bool host = record && token->scope.mode == Mode::Host &&
-        Read(env, record + kRecordManager, owner) && owner == token->scope.manager &&
-        Read(env, record + kRecordDescriptor, descriptor) && DescriptorType(env.exeBase, descriptor) >= 0 &&
-        Read(env, record + kRecordCollector, actorBefore) && !actorBefore && Read(env, record + kRecordUpdate, before);
     original();
-    std::uint32_t after = 0;
-    std::uintptr_t actor = 0, ownerAfter = 0, descriptorAfter = 0;
-    if (!host || !Current(env, token) || !Read(env, record + kRecordManager, ownerAfter) || ownerAfter != owner ||
-        !Read(env, record + kRecordDescriptor, descriptorAfter) || descriptorAfter != descriptor ||
-        !Read(env, record + kRecordUpdate, after) || after == before ||
-        !Read(env, record + kRecordCollector, actor) || !actor) return;
-    Event e; e.kind = Event::Kind::Collect; e.manager = owner; e.record = record; e.collector = kCollectorUnresolved;
-    // Resolve against the identities copied before this native call, not a possibly recycled actor
-    // address at drain time. Unknown collectors still remove the orb (the friend fades it).
-    for (const auto& c : token->collectors) if (c.actor == actor) {
-        e.collector = c.kind; e.netId = c.kind == kCollectorEnemy ? c.netId : 0;
-        break;
+    (void)record; // host collection is observed at the native flight transition, before this call returns
+}
+
+// FUN_413650 unconditionally starts flight to its actor argument. Capture the incarnation BEFORE
+// calling it, not from record fields after a pickup returns (the pool may already have reused them).
+template<class Original>
+void Flight(Gate& g, const Env& env, Original&& original, std::uintptr_t record, std::uintptr_t actor, int mode) {
+    const auto token = g.Capture(env.thread());
+    std::uintptr_t manager = 0, descriptor = 0;
+    Gate::Ticket receipt;
+    if (record && actor && mode == 0 && token && token->scope.mode == Mode::Host && Current(env, token) &&
+        Read(env, record + kRecordManager, manager) && manager == token->scope.manager &&
+        Read(env, record + kRecordDescriptor, descriptor) && DescriptorType(env.exeBase, descriptor) >= 0) {
+        std::uint8_t collector = kCollectorUnresolved; std::uint16_t netId = 0;
+        // Resolve copied identities before native code, never a recycled address at owner drain.
+        for (const auto& c : token->collectors) if (c.actor == actor) {
+            collector = c.kind; netId = c.kind == kCollectorEnemy ? c.netId : 0;
+            break;
+        }
+        if (collector == kCollectorNone || (collector == kCollectorEnemy && !netId)) {
+            collector = kCollectorUnresolved; netId = 0;
+        }
+        receipt = g.ReserveCollect(token, record, collector, netId);
     }
-    if (e.collector == kCollectorNone || (e.collector == kCollectorEnemy && !e.netId)) {
-        e.collector = kCollectorUnresolved; e.netId = 0;
-    }
-    g.Submit(token, e);
+    try { original(record, actor, mode); }
+    catch (...) { g.CompleteCollect(token, receipt, false); throw; } // no false collect or unfinished prefix on unwind
+    g.CompleteCollect(token, receipt);
 }
 
 struct InstallResult {

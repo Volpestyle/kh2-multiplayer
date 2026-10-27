@@ -364,8 +364,10 @@ void FlushSpawnEmissions(const NativeCensus& census) {
         if(g_emissionOutbox.empty() || g_emissionOutbox.front().value.sequence!=pending.value.sequence ||
            g_emissionOutbox.front().generation!=pending.generation)return;
         if (pending.value.kind != SpawnEmissionKind::Controller) {
-            if (g_log && g_orbLogs < 400) {
-                ++g_orbLogs;
+            // Collection identity receipts must not disappear behind the shared birth/summary
+            // log budget. Orb IDs bound collections to 65535 per room; births keep their old cap.
+            if (g_log && (pending.value.kind == SpawnEmissionKind::OrbCollect || g_orbLogs < 400)) {
+                if (g_orbLogs < 400) ++g_orbLogs;
                 g_log("[struggle-orbs] sent epoch=%u seq=%llu %s orb=%u type=%u point=(%.1f,%.1f,%.1f) collector=%u netId=%u",
                     room.epoch, static_cast<unsigned long long>(pending.value.sequence),
                     pending.value.kind == SpawnEmissionKind::OrbBirth ? "birth" : "collect", pending.value.orbId,
@@ -388,8 +390,8 @@ void ReceiveSpawnEmission(const WorldScope& scope, const SpawnEmission& value) {
         !sameActivationLocation(value.location, *g_lastRoomPacket)) return;
     if (!g_emissionLedger.Add(value) || !g_log) return;
     if (value.kind != SpawnEmissionKind::Controller) {
-        if (g_orbLogs < 400) {
-            ++g_orbLogs;
+        if (value.kind == SpawnEmissionKind::OrbCollect || g_orbLogs < 400) {
+            if (g_orbLogs < 400) ++g_orbLogs;
             g_log("[struggle-orbs] received epoch=%u seq=%llu %s orb=%u", value.location.epoch,
                 static_cast<unsigned long long>(value.sequence), value.kind == SpawnEmissionKind::OrbBirth ? "birth" : "collect", value.orbId);
         }

@@ -101,6 +101,11 @@ Native facts behind it (read-only Ghidra of the installed exe, nothing copied):
 
 How the friend sees the host's orbs (protocol 34; `inject/src/StruggleOrbs.hpp`, `StruggleOrbsAdapter.hpp`,
 `StruggleOrbsHook.cpp`):
+- The worker-to-owner adapter reserves an incarnation at the record initializer before publication,
+  captures collections at the native flight call, and drains only completed reservations. Reusing a
+  native address cannot rename a delayed collection. A birth collected before it can be observed is
+  atomically elided with its collect; `elided` counts those births. No lock spans native code. See the
+  [thread/ordering analysis](testing/vuh2881-orb-thread/README.md).
 - The host gives every orb born at its orb manager (`*(exe+0x2AEA190)`, through `FUN_1403dc950`) an ID
   and sends its birth (descriptor, point, scatter) and later its collection (the host's player, the
   friend's clone, an enemy by netId, or Unresolved when it cannot name the collector: the collection

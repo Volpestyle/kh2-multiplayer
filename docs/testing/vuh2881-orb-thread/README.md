@@ -2,6 +2,7 @@
 
 Source candidate; live acceptance remains with the lead. No game, desk, live,
 Steam/install or save action is part of this work.
+The review delta is based on main `aa0d64c` (VUH-2898's arrival wait).
 
 ## What the historical run proves
 
@@ -32,29 +33,107 @@ in `tests/fixtures/struggle_orb_threads/sources.json`; they remain failing contr
 
 `OrbTick` publishes an immutable snapshot of the admitted session generation,
 delivery, epoch, native transition/load, manager, role and collector identities.
-A detour on any thread reads that snapshot. Native birth/pickup code runs once
-on its original caller; after normal return the detour copies a birth or a
-verified new flight transition into the same FIFO. It never invokes EnemySync
-or resolves an actor through live containers on a worker. Unknown collectors
-are sent unresolved, so the friend fades the orb rather than guessing.
+A detour on any thread reads that snapshot. Native code runs once on its
+original caller. Workers never invoke EnemySync or resolve an actor through
+live containers. Unknown collectors are sent unresolved, so the friend fades
+the orb rather than guessing.
 
 `Pump` on the noted entity thread drains copied receipts into the existing
-host book and emission outbox. The drain treats captured record addresses only
-as opaque book keys. Births and collects share ordering across native record
-reuse. The mailbox holds at most 4096 receipts; overflow is counted and fails
+host book and emission outbox. Its book keys are monotonic incarnation IDs,
+not reusable record addresses. The mailbox holds at most 4096 receipts and
+4096 record-address mappings; overflow is counted and fails
 acceptance. Scope/manager/role changes and room resets retire queued and
 in-flight receipts, including a manager returning at the same address. No lock
 is held over a native call or a callback. Worker client-local drops and picks
 use copied policy, rechecking the native manager and live policy before skipping.
 
-Each actual detour (`create`, `hit-drop`, `drop`, `pick-a`, `pick-b`) and
+Each actual detour (`create`, `init`, `hit-drop`, `drop`, `pick-a`, `pick-b`, `fly`) and
 `NoteGameThread` emits `thread site=... tid=... gameTid=...`, bounded to the
 first 16 TID changes per site. Periodic per-site totals retain entry, foreign
 and change counts. `offThread` now records observed foreign entries; it is not
 a failure or a worker relabelled as the entity thread. Native input/output
 LastError is preserved around tracing and receipt work.
 
-## Offline verification
+### Sorrel's ordering finding and the revised boundary
+
+The first candidate's post-return FIFO claim was wrong. An allocator can publish
+record R, pause before submitting its birth, and be overtaken by another worker's
+collect of R. The owner then drops the unknown collect and eventually mirrors a
+permanent orb. Likewise an old pickup's delayed return can name a reused record.
+This is an admitted interleaving, not an observed failure in the historical run.
+
+Read-only queries of the existing analyzed program establish a narrower native
+boundary (raw decompiles in `.local/ghidra-orb-{review,lifetime,init,base}.log`):
+
+- `3DC950(manager, descriptor, point)` calls `413F00` once and then sets scatter.
+- `413F00` gets a pool record, calls `412D40(record, manager, descriptor, point,
+  update)`, and only then sets the record's enabled byte `+1A=1`.
+- `412D40` calls `4118E0`, clears flags `+28` and collector `+48`, and initializes
+  the manager/descriptor and life. `4118E0` initially sets `+1A=0`. There is no
+  native incarnation counter in those fields that a delayed outer return can use.
+- Both Struggle pickups call `413650(record, actor, 0)`. It unconditionally writes
+  that actor to `+48`, establishes flight life/update, and returns. Its arguments
+  identify the collection without rereading a potentially reused record later.
+
+The revision therefore hooks the pinned initializer and flight function too:
+
+1. The initializer reserves an incarnation **before native initialization**,
+   while the native record argument is known and before the caller enables it.
+   The reservation belongs to the outer create call on that native stack; stack
+   identity and exact arguments prevent a different fiber borrowing its TLS frame.
+2. The outer allocator completes that reservation with copied scatter only if
+   the incarnation is still current before and after the native read. A new
+   initializer invalidates the old identity before writing any new record fields.
+3. The flight detour captures the incarnation and copied collector identity at
+   entry, reserves its collect, calls native, then completes that same ticket.
+   A delayed return never consults the record again or adopts a newer identity.
+4. The owner drains only a completed queue prefix. A collect cannot pass an
+   unfinished birth, and a new birth cannot pass a reserved old collection. If
+   collection/reuse happens before a birth becomes observable, the adapter elides
+   it atomically, including its collect. `elided` reports those births. It neither
+   reads flight velocity as birth scatter nor creates an orb already gone.
+
+This preserves native call concurrency; it adds no lock or wait across a native
+call. It handles delayed observer returns rather than assuming KH2 never overlaps
+two workers on one pool address. All seven hooks apply together or stay inactive.
+
+Controlled wrapper tests force two workers onto **the same owned native record**:
+allocation post-write pauses while another thread collects and the owner pumps;
+then native flight post-write pauses while another thread reinitializes that
+address. The first must elide without any wire birth; the second must send the
+old ID's collection and leave the new ID displayed. Sequential reuse remains a
+separate control. Scope retirement during the inner flight also must not book
+into its replacement.
+
+The scenario now requires nonzero friend drop **and** pickup suppression,
+matching sets of sent/received `(epoch, sequence, orb ID)` collections, and a
+clone-owned collection with a successful matching friend application receipt.
+Zero suppression, mismatched IDs/epochs/sequences, an extra unmatched collect,
+missing/failed application and zero clone collections are negative controls.
+The receipt proves the native flight/fade call succeeded, not that a video shows
+its motion. Per-seat mapping of every site (explicitly naming unexercised sites),
+paired visual evidence and a deliberate clone touch opportunity remain live work.
+
+**Delta verification:** after Juniper's batch ended and the lead cleared PC1,
+the branch rebased cleanly onto `aa0d64c`. `git range-diff` confirms the two
+previously reviewed commits retained their content. Fresh serial/background
+Release build passed; **CTest 280/280 passed in 275.89 s**, including **44/44
+Python files**, **46/46 actual-wrapper checks**, **456/456 adapter/rule checks**,
+and **10/10 scenario controls**. The unchanged resync test passed in 15.83 s.
+Gate snapshots show no desk job before/after these jobs. The first focused
+wrapper run exposed a test-accounting error (the normal owner collector-snapshot
+callback was counted as an unexpected booking); the assertion now counts actual
+birth/collect callbacks, and the focused and full suites pass.
+
+Fresh `run.py --validate` checks **118/122** fixtures, including the updated orb
+scenario. Its four failures are the unchanged, pre-existing unknown-`do` cases:
+`net_player_progress_route`, `net_safe_field_recovery`, `net_twilight_thorn_legA`,
+`net_twilight_thorn_postfield`. The delta receipt and native decompile excerpts
+are attached to [VUH-2881](https://linear.app/vuhlp/issue/VUH-2881); raw checks and
+gate snapshots are in this worktree's `.local/review-*` files. No native affinity,
+visual flight/fade or clone brush-past claim follows from these offline results.
+
+## Original candidate verification (historical)
 
 - `kh2coop_struggle_orbs_test`: adapter controls and three real producer threads
   submitting 600 receipts concurrently with owner drain. Scope changes,

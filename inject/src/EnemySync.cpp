@@ -7516,6 +7516,7 @@ bool OrbClientFollow() {
            sameActivationLocation(room, *g_lastRoomPacket);
 }
 void OrbHostBirth(std::uintptr_t manager, std::uintptr_t record, std::uint8_t type, const float* point, const float* velocity) {
+    // Adapter passes an incarnation key here, not the reusable native record address.
     const auto orb = g_orbBook.Birth(manager, record);
     if (!orb.id) {
         if (g_log && g_orbLogs < 64) { ++g_orbLogs; g_log("[struggle-orbs] host birth refused: no orb ID left in this room"); }
@@ -7563,7 +7564,14 @@ void OrbTick() {
     g_orbDisplay.Receive(g_emissionLedger.TakeOrbs());
     if (!g_orbDisplay.Queued()) return;
     const auto before = g_orbDisplay.Stats();
-    g_orbDisplay.Tick(manager, &struggleorbs::CreateDisplay, &struggleorbs::StartFlight);
+    g_orbDisplay.Tick(manager, &struggleorbs::CreateDisplay, [](const struggleorbs::VanishRequest& request) {
+        const auto epoch = g_host.epoch;
+        const bool ok = struggleorbs::StartFlight(request);
+        if (ok && g_log && g_host.epoch == epoch && OrbClientFollow())
+            g_log("[struggle-orbs] applied epoch=%u collect orb=%u collector=%u netId=%u ok=1", epoch, request.id,
+                  static_cast<unsigned>(request.collector), request.netId);
+        return ok;
+    });
     const auto& after = g_orbDisplay.Stats();
     if (g_log && g_orbLogs < 400 && (after.createFailed != before.createFailed || after.vanishFailed != before.vanishFailed ||
                                      after.created / 16 != before.created / 16 || after.vanished != before.vanished)) {

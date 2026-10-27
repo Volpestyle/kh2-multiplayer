@@ -17,6 +17,9 @@ SCENARIO = json.loads((ROOT / "tools/scenario/scenarios/net_prologue_struggle_or
 PREDICATES = [s for s in SCENARIO["steps"] if s.get("message", "").startswith(
     ("orb hook and entity-thread", "worker receipts must", "host pickups must"))]
 HOST = """[struggle-orbs] thread site=NoteGameThread tid=10 gameTid=10
+[struggle-orbs] thread site=create tid=10 gameTid=10
+[struggle-orbs] thread site=init tid=10 gameTid=10
+[struggle-orbs] thread site=fly tid=20 gameTid=10
 [struggle-orbs] thread site=pick-a tid=20 gameTid=10
 [struggle-orbs] stats births=242 collects=3 unresolved=0 dropsSuppressed=0 picksSuppressed=0 offThread=41208 queued=245 drained=245 stale=0 overflow=0
 [struggle-orbs] sent epoch=2 seq=243 collect orb=2 type=0 point=(0,0,0) collector=2 netId=0
@@ -25,6 +28,7 @@ FRIEND = """[struggle-orbs] thread site=NoteGameThread tid=30 gameTid=30
 [struggle-orbs] thread site=pick-b tid=40 gameTid=30
 [struggle-orbs] stats births=0 collects=0 unresolved=0 dropsSuppressed=38 picksSuppressed=44591 offThread=44591 queued=0 drained=0 stale=0 overflow=0
 [struggle-orbs] received epoch=2 seq=243 collect orb=2
+[struggle-orbs] applied epoch=2 collect orb=2 collector=2 netId=0 ok=1
 [struggle-orbs] client shown=239 created=242 vanished=3 skipped=0 createFailed=0 vanishFailed=0 queued=0
 """
 
@@ -85,6 +89,44 @@ class ThreadPredicatesTest(unittest.TestCase):
                 self.write(host, friend)
                 with self.assertRaises(RUN.StepFailed):
                     RUN.STEPS["assert"](self.ctx, PREDICATES[predicate])
+
+    def test_zero_friend_suppression_fails_even_with_correlated_collects(self):
+        for old, new in (("dropsSuppressed=38", "dropsSuppressed=0"),
+                         ("picksSuppressed=44591", "picksSuppressed=0")):
+            with self.subTest(counter=old):
+                self.write(friend=FRIEND.replace(old, new))
+                with self.assertRaises(RUN.StepFailed):
+                    RUN.STEPS["assert"](self.ctx, PREDICATES[2])
+
+    def test_mismatched_collect_identity_fails(self):
+        for old, new in (("collect orb=2", "collect orb=999"), ("epoch=2", "epoch=3"), ("seq=243", "seq=244")):
+            with self.subTest(identity=old):
+                self.write(friend=FRIEND.replace(old, new))
+                with self.assertRaises(RUN.StepFailed):
+                    RUN.STEPS["assert"](self.ctx, PREDICATES[2])
+
+    def test_a_shared_collect_cannot_hide_an_additional_unmatched_collect(self):
+        self.write(friend=FRIEND + '[struggle-orbs] received epoch=2 seq=244 collect orb=999\n')
+        with self.assertRaises(RUN.StepFailed):
+            RUN.STEPS["assert"](self.ctx, PREDICATES[2])
+
+    def test_clone_collect_and_matching_successful_application_are_required(self):
+        cases = [(HOST.replace('collector=2', 'collector=1'), FRIEND),
+                 (HOST, FRIEND.replace('applied epoch=', 'not-applied epoch=')),
+                 (HOST, FRIEND.replace('applied epoch=2 collect orb=2', 'applied epoch=2 collect orb=999')),
+                 (HOST, FRIEND.replace('ok=1', 'ok=0'))]
+        for host, friend in cases:
+            with self.subTest(host=host, friend=friend):
+                self.write(host, friend)
+                with self.assertRaises(RUN.StepFailed):
+                    RUN.STEPS["assert"](self.ctx, PREDICATES[2])
+
+    def test_missing_initializer_or_flight_thread_evidence_fails(self):
+        for site in ('init', 'fly'):
+            with self.subTest(site=site):
+                self.write(host=HOST.replace('thread site='+site, 'not-a-receipt site='+site))
+                with self.assertRaises(RUN.StepFailed):
+                    RUN.STEPS["assert"](self.ctx, PREDICATES[0])
 
 
 if __name__ == "__main__":
