@@ -241,7 +241,7 @@
     {
       "do": "wait_until",
       "expr": "len(log_matches(r'\\[saveguard\\] redirected [^\\n]*me4\\.mp4 -> ',0))>=1",
-      "timeoutMs": 120000
+      "timeoutMs": 420000
     },
     {
       "do": "clip",
@@ -262,6 +262,11 @@
     },
     {
       "do": "pilot_wait"
+    },
+    {
+      "do": "wait_until",
+      "expr": "len(log_matches(r'\\[saveguard\\] redirected [^\\n]*me4\\.mp4 -> ',0))>=2",
+      "timeoutMs": 240000
     },
     {
       "do": "save",
