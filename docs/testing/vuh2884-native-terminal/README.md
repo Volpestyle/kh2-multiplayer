@@ -84,3 +84,16 @@ Independent review and the lead's live reruns remain: base, host-down and
 friend-down must each prove 6/6 actual deaths applied and one mission end settled
 before room exit. Native-notification coverage of the missing historical
 wave-two bodies remains unverified. No live run or Thorn victory testing occurred.
+
+## Review correction (Nora, 2026-10-26)
+
+The three completion predicates previously counted the native replay log prefix
+when its result was `ok=0`. They now count only `ok=1` replay receipts, alongside
+the existing host-correlated native-local receipt, still requiring exactly one.
+The production runner Context tests exercise all three committed predicates:
+failed and missing receipts fail; successful replay and native-local completion
+pass; duplicate replay and replay plus native-local completion fail.
+
+Delta checks: **16/16 Python tests passed**, and all three scenario JSONs passed
+offline validation. This changes scenario predicates/tests only; the previously
+verified DLL is unchanged. No new live evidence is claimed.

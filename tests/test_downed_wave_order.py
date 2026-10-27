@@ -230,6 +230,30 @@ class ScenarioStepsTest(unittest.TestCase):
             self.assertTrue(self.ctx.saved["order"]["ok"])
             self.assertGreaterEqual(self.ctx.saved["combat"]["hostDeaths"], 6)
 
+    def test_all_mansion_completion_predicates_require_a_successful_receipt(self):
+        replay = "[mission-mirror] client end like the host file=TT19_MS602.bar trap=mission_complete arg=0 ok={} path=clean-census"
+        native = "[mission-mirror] client end observed file=TT19_MS602.bar path=native-local replays=0 census=complete living=0 hpSum=0"
+        cases = [("missing", "", False), ("failed replay", replay.format(0), False),
+                 ("successful replay", replay.format(1), True), ("native-local", native, True),
+                 ("duplicate replay", replay.format(1) + "\n" + replay.format(1), False),
+                 ("replay plus native", replay.format(1) + "\n" + native, False)]
+        for suffix in ("", "_host_down", "_friend_down"):
+            path = ROOT / f"tools/scenario/scenarios/net_prologue_mansion_hall{suffix}.json"
+            steps = json.loads(path.read_text(encoding="utf-8"))["steps"]
+            save = next(s for s in steps if s.get("as") == "ends")
+            check = next(s for s in steps if s["do"] == "assert" and "saved['ends']" in s["expr"])
+            for name, receipt, passes in cases:
+                with self.subTest(scenario=path.name, receipt=name):
+                    self.ctx.saved = {"combat": {"fullPartyDown": 0}}
+                    self.write("[mission-mirror] host end trap=mission_complete arg=0", receipt)
+                    self.run_step(save)
+                    self.assertEqual(self.ctx.saved["ends"], [1, 1 if passes else 2 if "duplicate" in name or "plus" in name else 0])
+                    if passes:
+                        self.run_step(check)
+                    else:
+                        with self.assertRaises(RUN.StepFailed):
+                            self.run_step(check)
+
     def test_final_steps_reject_a_missing_friend_completion(self):
         for downed in (0, 1):
             self.ctx.saved = {"deaths_before": 0}

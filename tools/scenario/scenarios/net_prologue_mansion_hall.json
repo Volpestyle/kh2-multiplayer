@@ -150,7 +150,7 @@
   {
    "do": "save",
    "as": "ends",
-   "expr": "[log_count('[mission-mirror] host end trap=mission_complete', 0), log_count('client end like the host file=TT19_MS602.bar trap=mission_complete', 1) + log_count('client end observed file=TT19_MS602.bar path=native-local replays=0', 1)]"
+   "expr": "[log_count('[mission-mirror] host end trap=mission_complete', 0), len(log_matches(r'client end like the host file=TT19_MS602\\.bar trap=mission_complete arg=\\d+ ok=1 path=', 1)) + log_count('client end observed file=TT19_MS602.bar path=native-local replays=0', 1)]"
   },
   {
    "do": "assert",
