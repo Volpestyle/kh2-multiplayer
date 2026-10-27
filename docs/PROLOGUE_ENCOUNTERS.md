@@ -230,6 +230,20 @@ Day 5 Sandlot fights, FM-01 with a host warp (2026-10-21 UTC, PC1 loopback, VUH-
   host stopped publishing its mission, and the friend released and ran its own clock (run
   `20261021-005934`). The host now publishes through that hold (VUH-2606); in run `20261021-022350` the
   friend followed to the end and finished with the host's result (`client fail like the host`).
+- Axel I is this btl87 skirmish (02/05, `tt05-87`); Axel II is the Mansion fight (02/14 btl137). Run
+  `005604` never damaged Axel: the fight bot never connected, so Axel stayed at 150/150. VUH-2910's
+  `net_prologue_axel_sandlot_hp.json` judges shared HP with `tools/scenario/boss_hp_ledger.py`. Every
+  host HP change on Axel (objectId 2229, scaled 115→150 for two players) must join one host native hit
+  or one friend claim applied on the host. The friend's puppet hits must zero on the host, its own
+  hits must leave its copy alone, its copy's brain must stay skipped, and both seats must settle on the
+  host's HP.
+- On PC1's Critical saves (22-HP Roxas, 6-damage Axel hits), every solo round ended in a native game
+  over within about 10 s, whichever bot or revive aid ran. So the scenario judges one round with both
+  seats fighting, and the solo phases come from separate shakedowns:
+  - Host-only: `20261027-093915`, three host hits, 150→135, both seats settled at 135.
+  - Friend-only: `-092525`, five friend claims applied exactly once, 150→122.
+  - Interleaved: `-101224` passed (150→127 from one host hit and three friend claims, both seats at
+    127/150). The friend arrived in the room about 6.3 s after the host; late entry is VUH-2917's.
 
 More sites, FM-01 with a host warp (2026-10-21 UTC, PC1 loopback, VUH-2466), all from byte-identical
 receipts on both seats; in each run both seats released with both Roxases:

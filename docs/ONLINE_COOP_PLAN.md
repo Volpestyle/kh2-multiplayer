@@ -312,7 +312,10 @@ routing for attacks, RCs and grabs, whether the trigger is the boss, a projectil
 or a scene object. Do not assume every script's “Sora” means the host. Inventory
 the two fights' actual mechanisms before adding a per-fight patch. The old RE
 session's second pointer is a weapon attachment, not Axel
-(`docs/probes/AXEL_FIGHT_RE_SESSION.md`); use the current enemy census.
+(`docs/probes/AXEL_FIGHT_RE_SESSION.md`); use the current enemy census. Axel I
+is the Day 5 Sandlot skirmish (02/05 btl87) and Axel II is the Mansion fight
+(02/14 btl137). VUH-2910's shared-HP scenario and ledger are in
+`docs/PROLOGUE_ENCOUNTERS.md` (Day 5 Sandlot).
 
 Day 6 must qualify `P_EX110_BTLF` for local and remote construction, weapons,
 status, attack and downed poses (`docs/ROXAS_DUAL_WIELD_FORM.md`). Give both default
