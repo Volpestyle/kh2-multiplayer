@@ -1871,7 +1871,14 @@ protects a seat whose route pilot has finished, for a later bot `fight` only
 (VUH-2901). It refuses a seat that was never piloted or whose background pilot
 is still running, and `pilot` still refuses it while it is protected, so no
 pilot ever plays a protected seat. Reports then say "stand-in seat protected"
-and name the seats protected after their pilot.
+and name the seats protected after their pilot. Why it is allowed (lead-approved
+on VUH-2901): the rule exists so that a route proof is never made under
+invulnerability, and that still holds. After its route, a piloted seat can be
+the only one left fighting, like friend_down's host while the friend is
+forcibly downed. Without protection there, a bot losing a solo fight ends the
+run in a native game over before the claim under test (the downed seat's
+return) is due. Use it only over a window whose claims do not include that
+seat taking hits, and say so in the scenario.
 `{"do":"protect","on":false}` only stops that polling; it does not restore
 the previous team value. An incoming-damage test must use a fresh naturally
 damageable Sora and verify its canonical identity instead of reusing a
@@ -1894,7 +1901,7 @@ protected actor. Protection is best effort during loads.
 | `wait_until` | `expr timeoutMs pollMs` | Poll an expression until true |
 | `assert` | `expr message` | Fail the run unless the expression is true |
 | `save` | `as expr` | Store a value in `saved[...]` |
-| `protect` | `on` | Start/stop team-0 protection polling; stopping does not restore the previous team |
+| `protect` | `on`, `afterPilot` | Start/stop team-0 protection polling; stopping does not restore the previous team. `afterPilot: true` is required for, and only accepted on, a seat whose route pilot has finished (VUH-2901) |
 | `capture` | `name` | PNG from inside the renderer; retain the actual CLI response under `receipt` alongside the relative artifact `path` |
 | `clip` | `name seconds fps background` | MP4 → artifact with full CLI receipt and adjacent `.receipt.json` / `.capture-time.jsonl` sidecars. `background: true` films while the next steps run; `clip_wait` collects every background clip (do it before a `capture` on that instance) |
 | `clip_wait` | | Waits for the background clips and records their receipts |

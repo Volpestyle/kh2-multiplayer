@@ -389,7 +389,9 @@ class Context:
     # ---- Stand-in friend protection (team 0 is in no attack's hit mask) ----
     # A single-PC fixture aid only: it protects the player actor an unplayed
     # stand-in instance controls (Roxas P_EX110 in the TT prologue, Sora later),
-    # never a pilot-driven instance. The two-PC route uses no protect.
+    # never a pilot-driven instance. The two-PC route uses no protect. The one
+    # exception is protect's explicit afterPilot (VUH-2901, docs/SCENARIOS.md): a
+    # seat whose pilot has finished, for a later bot fight, never during a pilot.
     def controlled_actor(self, index: int) -> dict | None:
         """The actor the instance's camera follows (CAMERA_STRUCT+0x50), i.e. its
         own player, never a puppet clone of a remote player."""
