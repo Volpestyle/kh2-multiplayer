@@ -215,9 +215,16 @@ class RequiredClipsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "x.mp4"
             large = (1).to_bytes(4, "big") + b"mdat" + (16 + 8).to_bytes(8, "big") + b"y" * 8  # a 64-bit size
+            moov = box(b"moov", box(b"mvhd", b"z" * 92))
             for content, finalized in [(FINALIZED, True), (box(b"moov") + box(b"mdat"), True), (CUT, False),
                                        (box(b"ftyp") + large + box(b"moov"), True), (b"", False),
-                                       (box(b"ftyp") + (0).to_bytes(4, "big") + b"mdat", False)]:
+                                       (box(b"ftyp") + (0).to_bytes(4, "big") + b"mdat", False),
+                                       # Ione 1afb82ac NOTE: a moov whose header claims more than the file holds
+                                       (box(b"ftyp") + moov[:40], False), (box(b"ftyp") + moov[:8], False),
+                                       (box(b"ftyp") + moov, True),
+                                       (box(b"ftyp") + (0).to_bytes(4, "big") + b"moov" + b"w" * 16, True),
+                                       (box(b"ftyp") + (1).to_bytes(4, "big") + b"moov" + (16).to_bytes(4, "big"), False),
+                                       (box(b"ftyp") + (4).to_bytes(4, "big") + b"moov", False)]:
                 path.write_bytes(content)
                 self.assertEqual(RUN.mp4_finalized(path), finalized, content[:40])
             self.assertFalse(RUN.mp4_finalized(Path(directory) / "missing.mp4"))

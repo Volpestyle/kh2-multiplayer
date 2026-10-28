@@ -1099,21 +1099,28 @@ def film_into(result: dict, *args: str, pid: int, timeout: float) -> None:
 
 
 def mp4_finalized(path: Path) -> bool:
-    """True when the MP4's top-level boxes include moov. An encoder cut before it finishes leaves none, and the file
-    can't be decoded (vuh2912-hp-05)."""
+    """True when the MP4's top-level boxes include a moov that lies wholly inside the file. An encoder cut before it
+    finishes leaves none, and the file can't be decoded (vuh2912-hp-05); a moov whose header claims more bytes than
+    the file holds is cut too (Ione 1afb82ac NOTE). Every box before it must also fit, or the walk stops."""
     try:
+        end = path.stat().st_size
         with path.open("rb") as f:
-            while len(header := f.read(8)) == 8:
-                size, kind = int.from_bytes(header[:4], "big"), header[4:8]
+            pos = 0
+            while pos + 8 <= end:
+                f.seek(pos)
+                header = f.read(8)
+                size, kind, head = int.from_bytes(header[:4], "big"), header[4:8], 8
+                if size == 1:  # a 64-bit size follows the type
+                    if pos + 16 > end:
+                        return False
+                    size, head = int.from_bytes(f.read(8), "big"), 16
+                elif size == 0:  # the last box, to the end of the file
+                    size = end - pos
+                if size < head or pos + size > end:
+                    return False
                 if kind == b"moov":
                     return True
-                if size == 1:  # a 64-bit size follows the type
-                    size, skip = int.from_bytes(f.read(8), "big"), 16
-                else:
-                    skip = 8
-                if size < skip:  # 0 (to end of file) or corrupt: no moov after it
-                    return False
-                f.seek(size - skip, 1)
+                pos += size
     except OSError:
         return False
     return False
