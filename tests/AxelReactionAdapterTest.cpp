@@ -523,7 +523,8 @@ int main() {
         Setup(1u<<R::kOvertakerGroup);g_seats[1].living=false;Frame();
         const bool ran=SmAxelComplete(Claim(),nullptr);
         HoldAxel(kHostHandle);++g_frameCounter;Frame();
-        check(ran && g_axel.executor.slot==0 && Holds().empty(),"the host's own RC sends no hold");
+        reads=0;SmAxelSyncHeld();
+        check(ran && g_axel.executor.slot==0 && Holds().empty() && !reads,"the host's own RC sends no hold, and reads none");
     }
 
     // Ione's 75233daf: the friend's hold of the Axel clone (client op 13/14) is this role's only with its receipt.
@@ -707,10 +708,17 @@ int main() {
               "a sequence that stayed the host's adopts nothing, so D303 plays on the host");
         label=304;(void)friendClearLight();label=303;
         check(!g_axel.fade.thread,"no other thread is adopted");
+        Setup(1u<<R::kOvertakerGroup);Frame();
+        handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});handles[kNode]=kNodeHandle;Put(kNode,kThread);
+        running(kOther,kHostActor);duringCallback=queue;(void)SmAxelComplete(Claim(),nullptr);duringCallback=nullptr;
+        check(g_axel.cameraCustody==R::AxelCameraCustody::Owner && !g_axel.fade.thread,
+              "nor a 2/20 whose VM source is not Axel's");
         Setup(1u<<R::kOvertakerGroup);g_seats[1].living=false;Frame();
-        handles[kNode]=kNodeHandle;Put(kNode,kThread);running(kOther,kAxel);duringCallback=queue;
+        handles[kNode]=kNodeHandle;Put(kNode,kThread);running(kOther,kAxel);
+        bool watched=true;
+        duringCallback=[&] { watched=SmAxelThreadWatched();queue(); };
         (void)SmAxelComplete(Claim(),nullptr);duringCallback=nullptr;
-        check(!g_axel.fade.thread,"nor any from the host's own RC");
+        check(!g_axel.fade.thread && !watched,"nor any from the host's own RC, whose 2/20 the hook never looks at");
         Setup(1u<<R::kOvertakerGroup);Frame();reads=0;
         check(!SmAxelThreadWatched() && !SmAxelFadePending() && !SmAxelFade(Kind::WhiteOut,nullptr) && !reads,
               "with nothing adopted and no friend callback running, the 2/20, fade and reset hooks read nothing");
@@ -723,6 +731,14 @@ int main() {
             SmEmit(SmAxelCameraOpRecord(role,R::AxelCameraKind::Reset,0)) &&
             SmEmit(SmAxelCameraOpRecord(role,R::AxelCameraKind::WhiteOut,70.0f)) &&
             SmEmit(SmAxelCameraOpRecord(role,R::AxelCameraKind::WhiteIn,30.0f));
+        const auto codec=[&](std::uint32_t kind,std::uint64_t argument) {
+            auto c=SmAxelCameraOpRecord(role,R::AxelCameraKind::Watch,0);c.values[0]=R::Tagged(R::kTagInt,kind);c.values[1]=argument;
+            kh2coop::ScriptCallEntry e{};e.netId=c.netId;e.objectId=c.objectId;e.table=255;e.index=17;e.effect=c.effect;
+            for(unsigned i=0;i<4;++i)e.args[i]=c.values[i];
+            return kh2coop::validScriptCallEntry(e);
+        };
+        check(codec(1,R::Tagged(R::kTagInt,0)) && !codec(0,R::Tagged(R::kTagInt,0)) && !codec(5,emitted.empty()?0:R::Tagged(R::kTagFloat,0x428C0000)) &&
+              !codec(3,R::Tagged(R::kTagInt,70)),"the codec itself refuses another kind, or a fade without its float");
         check(all && wireRefused==before && emitted.size()==4 && R::TagOf(emitted[2].values[1])==R::kTagFloat &&
               R::FloatOf(emitted[2].values[1])==70.0f && R::TagOf(emitted[1].values[1])==R::kTagInt,
               "watch, reset, white-out and white-in records pass the client's and the codec's rules");
@@ -755,9 +771,10 @@ int main() {
               "its white-in replays 0/32 and clears it");
         natives={};
         check(!op(R::AxelCameraKind::Watch,0,kHostActor) && natives.calls.empty(),"never with another source");
-        auto spectator=role;spectator.actor=0;
+        auto spectator=role;spectator.actor=0;auto other=role;other.actor=kHostActor;
         check(!SmAxelApplyCameraOp(spectator,SmAxelCameraOpRecord(role,R::AxelCameraKind::WhiteOut,70.0f),kAxel) &&
-              natives.calls.empty(),"never on a spectator's role: only the owner's own game");
+              !SmAxelApplyCameraOp(other,SmAxelCameraOpRecord(role,R::AxelCameraKind::WhiteOut,70.0f),kAxel) &&
+              natives.calls.empty(),"never on a spectator's role or another player's: only the owner's own game");
         auto bad=SmAxelCameraOpRecord(role,R::AxelCameraKind::Watch,0);bad.values[1]=R::Tagged(R::kTagInt,9);
         auto unknown=SmAxelCameraOpRecord(role,R::AxelCameraKind::Watch,0);unknown.values[0]=R::Tagged(R::kTagInt,5);
         check(!SmAxelApplyCameraOp(role,bad,kAxel) && !SmAxelApplyCameraOp(role,unknown,kAxel) && natives.calls.empty(),

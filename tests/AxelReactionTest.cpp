@@ -1,6 +1,7 @@
 // VUH-2913: Axel II's collision-offered reaction commands. Pure rules only (AxelReaction.hpp).
 #include "AxelReaction.hpp"
 #include <cstdio>
+#include <cstring>
 #include <map>
 #include <utility>
 
@@ -497,6 +498,12 @@ int main() {
               !R::AxelFadeOurs(fade,0x720,0x200,5,700) && !R::AxelFadeOurs(fade,0x720,0x100,6,700) &&
               !R::AxelFadeOurs(fade,0x720,0x100,5,701) && !R::AxelFadeOurs({},0,0,5,700),
               "a fade or reset is D303's only on its thread, with Axel as the source, in its epoch and lease");
+        const auto bits=[](float f) { std::uint32_t b=0;std::memcpy(&b,&f,sizeof(b));return b; };
+        check(R::AxelCameraOpValid(1,false,0,0) && R::AxelCameraOpValid(2,false,0,0) && R::AxelCameraOpValid(3,true,bits(70),70) &&
+              R::AxelCameraOpValid(4,true,bits(30),30),"watch, reset, white-out and white-in are the camera op's kinds");
+        check(!R::AxelCameraOpValid(0,false,0,0) && !R::AxelCameraOpValid(5,true,bits(70),70) && !R::AxelCameraOpValid(1,false,7,0) &&
+              !R::AxelCameraOpValid(3,false,70,0) && !R::AxelCameraOpValid(4,true,bits(-30),-30),
+              "no other kind, a watch or reset carries int 0, and a fade its positive float");
     }
 
     // Routing identity.
