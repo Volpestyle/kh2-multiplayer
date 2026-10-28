@@ -136,6 +136,19 @@ class BossTargetLedgerTest(unittest.TestCase):
         self.assertEqual([(d["seat"], d["excluded"], d["chosenWhileDown"]) for d in v["downs"]], [(0, 1, []), (1, 1, [])])
 
     # The choice belongs to the round, and precedes the hit.
+    def test_witness_lines_with_the_reaction_fields_judge_the_same(self):
+        # VUH-2912: the 0x3D6FC0 reaction trace appends fields after same=; the ledger reads the line as before.
+        global witness
+        plain, original = run(), witness
+        witness = lambda *a, **k: original(*a, **k) + (" reactions=1 refused=0 reaction=2 reactRequest=40 "
+                                                        "reactFrame=901 reactHooked=1")
+        try:
+            extended = run()
+        finally:
+            witness = original
+        self.assertTrue(plain["pass"], plain["problems"])
+        self.assertEqual(plain, extended)
+
     def test_a_round_without_the_choice_fails(self):
         self.fails("the boss never chose seat 1", friend_choice=False)
 
