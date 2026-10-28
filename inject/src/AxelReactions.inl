@@ -1,8 +1,10 @@
 // Included inside ScriptMirror after ScriptActorOwner. VUH-2913: Axel II's collision-offered reaction commands
 // (AxelReaction.hpp, docs/AXEL_REACTIONS.md). The host mints one owner per offer while host Axel II is live; each
 // seat's press, the host's own included, acts only on a live window of its own seat; sysobj_player inside Axel's
-// script resolves to the seat that ran the RC. Slice 1 parks friend execution (R::AxelExecutionAdmitted): only the
-// host seat wins an offer, and a friend claim is refused. Native state is only read here, except the original callback.
+// script resolves to the seat that ran the RC. A friend's RC runs on the host with that seat's actor, streams to the
+// friend through a ScriptActorOwner role (SmOwnerBeginAxelRole), and the safe abort (R::AxelActAdmitted) refuses Axel's
+// attach or capture onto anyone but the bound executor's resolving actor. Native state is only read here, except the
+// original callback and the native traps the hooks own.
 struct SmAxelState {
     // host
     uintptr_t actor{};
@@ -14,6 +16,7 @@ struct SmAxelState {
     std::uint32_t executorHandle{};
     bool unresolvedLogged{}; // once per executor
     bool chainUnread{};      // logged on the change
+    int heldSent{-1};        // the friend role's last attachment record: -1 none, 0 detach, 1 attach
     // client
     R::AxelOffers offers{};
     struct Identity { std::uint8_t slot{0xFF};std::uint64_t connection{};std::uint32_t epoch{}; };
@@ -37,6 +40,7 @@ static void SmAxelEndExecutor(const char* why) {
         Log("[axel-rc] executor end command=%u owner=%u frames=%u engaged=%u reason=%s",g_axel.executor.command,
             g_axel.executor.slot,g_frameCounter-g_axel.executor.admittedFrame,g_axel.executor.engaged?1u:0u,why);
     g_axel.executor={};g_axel.executorActor=0;g_axel.executorHandle=0;g_axel.unresolvedLogged=false;g_axel.chainUnread=false;
+    g_axel.heldSent=-1;
 }
 // Client: the host's offers and identities belong to the room and session they came in; ScriptMirror's room, load,
 // transition and session resets end them.
@@ -72,6 +76,59 @@ static R::AxelPlayerRoute SmAxelPlayerRoute(uintptr_t source,const enemysync::Do
             g_axel.executor.command,g_axel.executor.slot,state==R::AxelActorState::Unknown?"unread":"gone");
     }
     return route;
+}
+// The Axel part of 1/3 (SmOwnerPlayer), with the native result already in args[0]: true once it has decided.
+static bool SmAxelPlayer(std::uint64_t* args,uintptr_t source,const enemysync::DownedScope& scope) {
+    std::uint32_t handle=0;
+    const auto route=SmAxelPlayerRoute(source,scope,handle);
+    if(route==R::AxelPlayerRoute::Executor)args[0]=R::Tagged(R::kTagAddress,handle);
+    return route!=R::AxelPlayerRoute::Choice;
+}
+// The safe abort at host Axel's 1/18 attach and 1/29 capture (R::AxelActAdmitted), on the trap's copied arguments.
+// Both take Axel first (the attach's child, the capture's source) and the player second (the parent, the captured
+// actor). Refused: the hook skips the native call. A player argument that does not decode counts as a player: the
+// native trap would fault on it (42C576, 42D187).
+static R::AxelAct SmAxelAct(const std::uint64_t* args,const char* trap) {
+    if(!g_sm.hostActive || !args || !SmAxelHostCurrent())return R::AxelAct::Native;
+    std::uint32_t ignored=0;
+    if(SmActorOf(args[0],ignored)!=g_axel.actor)return R::AxelAct::Native;
+    const auto target=SmActorOf(args[1],ignored);
+    enemysync::DownedScope scope;
+    const bool bound=SmOwnerScope(scope) && SmAxelExecutorBound(scope);
+    const auto state=bound?SmAxelExecutorActor():R::AxelActorState::Gone;
+    const bool executor=target && target==g_axel.executorActor;
+    const auto act=R::AxelActAdmitted(true,!target || executor || SmOwnerActorSeat(target)>=0,bound,state,executor);
+    if(act==R::AxelAct::Refused && SmAxelLogBudget())
+        Log("[axel-rc] %s refused command=%u owner=%u target=%s executor=%s",trap,g_axel.executor.command,
+            g_axel.executor.slot,!target?"undecoded":executor?"executor":"other-seat",
+            !bound?"unbound":state==R::AxelActorState::Unknown?"unread":state==R::AxelActorState::Gone?"gone":"resolves");
+    return act;
+}
+// Host: whether Axel is attached to this actor with his own pair (R::AxelAttachPair): 1 held, 0 not, -1 unread.
+static int SmAxelHeldBy(uintptr_t actor) {
+    if(!SmAxelHostCurrent() || !actor)return -1;
+    std::uint32_t parent=0;std::uint16_t flags=0,bone=0;
+    if(!ReadHitTrace(g_axel.actor+R::kAxelParent,parent))return -1;
+    if(!parent || SmDecode(parent)!=actor)return 0;
+    if(!ReadHitTrace(g_axel.actor+0x6A4,flags) || !ReadHitTrace(g_axel.actor+0x6A6,bone))return -1;
+    return R::AxelAttachPair(flags,bone)?1:0;
+}
+// Host: a friend executor's hold travels to its owner as its role's attachment record, on each change. An unread
+// parent sends nothing.
+static void SmAxelSyncHeld() {
+    if(!g_axel.executor.command || !g_axel.executor.slot || g_axel.executor.slot>=3 || !g_axel.executorActor)return;
+    const int held=SmAxelHeldBy(g_axel.executorActor);
+    if(held<0 || held==g_axel.heldSent)return;
+    if(SmOwnerEmitAxelHold(g_axel.executor.slot,g_axel.executorActor,held==1))g_axel.heldSent=held;
+}
+// R::AxelRoleHeld for a ScriptActorOwner role on the host: an Axel II role with no thread, still the bound
+// executor's seat and actor, whose actor no coroutine holds.
+static bool SmAxelRoleHeld(std::uint32_t objectId,std::uint8_t slot,uintptr_t actor,uintptr_t roleThread) {
+    if(!g_sm.hostActive || objectId!=R::kAxelIIObjectId || roleThread || !actor)return false;
+    enemysync::DownedScope scope;uintptr_t thread=0;
+    const bool read=ReadHitTrace(actor+0xD48,thread);
+    return SmOwnerScope(scope) && R::AxelRoleHeld(SmAxelExecutorBound(scope),g_axel.executor.slot,g_axel.executorActor,
+        slot,actor,read,thread);
 }
 static void SmAxelExecutorTick(const enemysync::DownedScope& scope) {
     if(!g_axel.executor.command)return;
@@ -110,12 +167,13 @@ static void SmAxelFrame(const enemysync::DownedScope& scope) {
         g_axel.actor=actor;g_axel.handle=handle;g_axel.netId=netId;g_axel.epoch=scope.epoch;
     }
     SmAxelExecutorTick(scope);
+    SmAxelSyncHeld();
     R::AxelGroupMasks masks{};float xyz[3]{},yaw=0;
     const auto entity=actor+offsets::actor::ENTITY_TRANSFORM;
     R::AxelFrameFacts facts{};
     facts.observed=R::AxelReadMasks(SmAxelReader{},actor,masks) &&
         ReadHitTraceMemory(entity+offsets::entity::POS_X,xyz,sizeof(xyz)) && ReadHitTrace(entity+offsets::entity::ROT_Y,yaw);
-    const auto seats=R::AxelOfferSeats(SmOwnerLivingSeats(scope)); // friend execution is parked
+    const auto seats=SmOwnerLivingSeats(scope);
     if(facts.observed) {
         const R::ReactionPoint origin{xyz[0],xyz[1],xyz[2]};
         R::AxelExecutorFacts chain{};
@@ -230,10 +288,10 @@ static bool SmAxelComplete(const enemysync::ScriptReactionCompletionRecord& clai
        !D::Check(SmOwnerScope(scope),"owner-scope",why) || !D::Check(scope.localSlot==0,"local-host-seat",why) ||
        !D::Check(R::AxelResourceFor(claim.resource,claim.objectId,command) && command==claim.command,"axel-resource",why) ||
        !D::Check(claim.netId==g_axel.netId,"axel-source",why) ||
-       !D::Check(R::AxelExecutionAdmitted(claim.ownerSlot),"friend-execution-parked",why))return refused();
+       !D::Check(R::AxelExecutionAdmitted(claim.ownerSlot),"owner-seat",why))return refused();
     auto* window=g_axel.windows.Find(command);
     if(!window){why="window-missing";return refused();}
-    const auto seats=R::AxelOfferSeats(SmOwnerLivingSeats(scope));
+    const auto seats=SmOwnerLivingSeats(scope);
     const auto before=*window;
     const R::ReactionCompletion completion{claim.occurrence,claim.requesterConnectionId,claim.epoch,claim.netId,
         claim.command,claim.ownerSlot};
@@ -246,6 +304,12 @@ static bool SmAxelComplete(const enemysync::ScriptReactionCompletionRecord& clai
     SmAxelEndExecutor("superseded");
     g_axel.executor={command,claim.netId,claim.ownerSlot,claim.requesterConnectionId,scope.epoch,g_frameCounter,false};
     g_axel.executorActor=player;g_axel.executorHandle=playerHandle;
+    // A friend's RC is replayed on its own player through an owner role, begun before the callback so the callback's
+    // own capture reaches it (R::AxelRoleAtCompletion). The host's own RC plays on the host's game and needs none.
+    if(claim.ownerSlot!=0 && R::AxelRoleAtCompletion(command) &&
+       !D::Check(SmOwnerBeginAxelRole(claim.ownerSlot,player,g_axel.actor,g_axel.netId,scope),"owner-role",why)) {
+        SmAxelEndExecutor("owner-role");return refused(); // remains consumed
+    }
     const std::uint32_t fallback[5]{g_axel.handle,0,0,UINT32_MAX,0};
     const auto receiver=g_axel.actor;
     if(SmAxelLogBudget())

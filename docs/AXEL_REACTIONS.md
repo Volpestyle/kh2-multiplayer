@@ -222,18 +222,15 @@ Trap coverage the build adds:
 - Axel adds 1/164 (`camera_start_global`, which tail-jumps to the same `3DB2F0` as `obj_camera_start`), 1/207
   (`camera_watch`), 1/295 (`camera_reset`) and the screen white-out thread (2/20, then 0/31 and 0/32).
 
-## Owner routing (slice 1)
+## Owner routing
 
-Rules: `inject/src/AxelReaction.hpp`. Runtime: `inject/src/AxelReactions.inl`. Tests: `tests/AxelReactionTest.cpp`.
+Rules: `inject/src/AxelReaction.hpp`. Runtime: `inject/src/AxelReactions.inl`, with the role and hook glue in
+`inject/src/ScriptActorOwner.inl`. Tests: `tests/AxelReactionTest.cpp` (rules) and `tests/AxelReactionAdapterTest.cpp`
+(the adapter against simulated memory).
 
-**Friend execution is parked in slice 1.** A friend's RC needs a safe abort for when its executor's actor is
-lost mid-RC (see sysobj_player below), and that abort comes with slice D. Until then:
-- only the host seat can win an offer (`AxelOfferSeats`), as with the native picker;
-- the host refuses any friend claim before consuming anything (`AxelExecutionAdmitted`; `complete refused
-  reason=friend-execution-parked`);
-- the only executor is therefore the host seat.
-
-The owner rules below are kept as written, and slice D turns friend execution on together with the abort.
+Slice 1 routed every offer to one owner but let only the host execute. Slice D lets any seat own and execute an RC:
+the friend's own window, the host's consumption of its claim, a role that replays it on the friend's player, and a
+safe abort for an executor lost mid-RC (below).
 
 **How an offer gets its owner:**
 - **Host mint.** While host Axel II is live in 02/14 btl137 (and only then), the host reads his collision masks
@@ -266,9 +263,10 @@ The owner rules below are kept as written, and slice D turns friend execution on
   command, on the Axel actor the native target names (`{Axel, 0, collision object, -1}`, built by `3BEE00`).
 - **Host press.** `SmReactionCallback` gives every Axel II callback to the Axel path. It executes only on a seat-0
   window, so a host press against a seat-1 window is refused and logged, and never runs with the host's Roxas.
-- **Friend press (slice D).** On its own window it consumes locally and sends the completion claim. The host then
-  consumes that occurrence once and runs the callback with the friend's actor on the host. While friend execution
-  is parked, no window names the friend, so it sees no Axel II prompt, and the host refuses any claim it sends.
+- **Friend press.** On its own window it consumes locally and sends the completion claim, and runs nothing on its
+  own game. The host consumes that occurrence once (`AxelConsume`: the owner's seat, connection, epoch and current
+  occurrence; a duplicate, stale, replaced or wrong-owner claim consumes nothing) and runs the callback with the
+  friend's actor on the host.
 
 **sysobj_player (1/3):** inside Axel's script, while an RC is bound, 1/3 names the executor's own actor on the
 host, instead of the nearest seat. So `rc_run_up`, `rc_clear_light` and `idle_after_rc` attach to and wait on the
@@ -287,28 +285,83 @@ seat that pressed.
 - **If the executor's actor no longer resolves** (its seat's actor on the host is gone mid-RC), no other seat is
   chosen in its place: 1/3 keeps the native result and logs `[axel-rc] player unresolved`. 1/3 must still name a
   live actor. Trap 1/18 resolves the parent handle at `42C571` and reads `[rax+4]` at `42C576` without a null
-  check, so naming no actor would fault at Axel's attach.
-  - With friend execution parked, the executor is always the host seat, and the native result is the host's own
-    canonical player.
-  - For a friend executor, that native result would be the wrong actor (Ione's probe, VUH-2913 comment
-    `694ad7cd`). This is why friend execution waits for slice D's RC abort.
+  check, so naming no actor would fault at Axel's attach. That native result is the host's own player, the wrong
+  actor for a friend's RC (Ione's probe, VUH-2913 comment `694ad7cd`), so the safe abort below refuses every act on
+  it.
+
+**Safe abort (`AxelActAdmitted`).** On the host, Axel's own acts on a player go only to the bound executor's
+resolving actor:
+- 1/18 attach with Axel as the child (`rc_run_up`, `rc_clear_light`): the parent must be that actor;
+- 1/29 capture with Axel as the source (the callback's `AP10`/`AP12`/`AP13`): the captured actor must be that actor.
+
+Anything else is refused before the native call (`[axel-rc] attach refused` / `capture refused`): the attach is
+skipped, and the capture returns int 0, as `42D1C0` writes its result. That covers the host's actor named by 1/3's
+native result, another seat's actor, an argument that does not decode (it would fault at `42C576` or `42D187`), and
+any act while no RC is bound. An unread executor identity refuses the act without ending the binding; the next
+resolving read admits again. So an RC whose executor is lost plays on with Axel unparented and nobody else captured
+or held, and ends on its lease or a confirmed release. The gates sit in `SmAxelAct`, which `SmOwnerAttach` and
+`SmOwnerCapture` call before the native trap; other encounters return before any read.
+
+Static facts this depends on, requested from the PC (VUH-2913, "Static reads for slice D"): that `REACTION_CALLBACK`
+runs `L409`, `L140` and `L531` synchronously inside the native callback call, up to their first wait (their 1/29,
+1/13, 1/79 and 1/148 then act on the executor resolved just before the call); and that 1/18 and 1/101 are the only
+traps that consume the 1/3 result in `rc_run_up`, `rc_clear_light` and `idle_after_rc`. 1/101 only reads. If either
+fails, those traps need pins and the same gate.
+
+**The friend's view (owner role).** A friend's Overtaker or Clear Light replays on its own player through an
+ordinary ScriptActorOwner role (`SmOwnerBeginAxelRole`), begun at completion before the callback, so the callback's
+capture reaches it:
+- The role has no thread: these RCs hook no coroutine into the player. It is current while the executor stays bound
+  to that seat and actor and the actor's `+0xD48` reads zero (`AxelRoleHeld`); then the host releases it
+  (`axel-executor-ended`) and the friend retires it. Its puppet is the role's (`OwnsPuppet`) for that time.
+- The existing stream carries it: begin, capture (op 3, the borrowed `AP12`/`AP13` motion from the Axel clone's own
+  set), position and motion (ops 4/8), end (op 6). Clear Light after Overtaker on the same seat keeps one role.
+- Burst Frontier begins no role at completion (`AxelRoleAtCompletion`): its 1/112 hook mints the coroutine role and
+  adopts the capture issued just before it (VUH-2611).
+- Axel's attachment is the reverse of Thorn's, so the role's attachment record is Axel held by its actor
+  (`AxelAttachPair`: flags 16386, bone 1), sent on each change and with the heartbeat; an unread parent sends nothing.
+  On the friend, op 13 attaches the Axel clone (the role's source) to its own player, and op 14 or the role's
+  release detaches it, only if this role's receipt (`axelHeld`) and the clone's parent both say it is ours. A
+  spectator's visual never takes Axel's pair.
+- A down or a load retires through the existing release paths. The friend's logical down, lease or scope loss
+  releases the role, and its cleanup detaches the Axel clone before the player's own detach and idle (`42C5F0`,
+  `42D0E0`) unwind the borrowed capture. On the host, a seat leaving the candidate table releases the role while the
+  executor keeps its actor. A room change or load drops the roles with the room.
 
 **Logs:** `[axel-rc] offer`, `offer end`, `observation failed`, `chain unread`/`chain read`, `client offer`,
 `local completion`, `complete`, `complete refused`, `press refused`, `executor engaged`, `executor end` and
 `player unresolved`, 256 lines per session.
 
 **Tests:** `kh2coop_axel_reaction_test` covers:
-- the pure rules, including the encounter gate (`AxelHostFrameAdmitted`), the parked friend execution
-  (`AxelExecutionAdmitted`, `AxelOfferSeats`, `AxelConsume`) and the per-frame step (`AxelWindows::Frame`) the
+- the pure rules, including the encounter gate (`AxelHostFrameAdmitted`), friend execution and consumption
+  (`AxelExecutionAdmitted`, `AxelConsume`), the safe abort (`AxelActAdmitted`), the role's lifetime
+  (`AxelRoleHeld`, `AxelRoleAtCompletion`, `AxelAttachPair`) and the per-frame step (`AxelWindows::Frame`) the
   adapter calls;
 - the adapter's reads, against simulated memory with a failure at each field: masks (`AxelReadMasks`), executor
   identity and contact (`AxelReadActor`, `AxelReadContact`), and the chain (`AxelReadChain`).
 
-The rest of the adapter's wiring is not exercised.
+`kh2coop_axel_reaction_adapter_test` compiles `AxelReactions.inl` itself against simulated memory: a friend's
+completion end to end (consume once, role before callback, 1/3 naming the friend), duplicate, stale, replaced and
+wrong-owner completions, the abort's final effect through `SmAxelPlayer` and `SmAxelAct` (lost, unread and recovered
+executor identities, no RC bound), the role's lifetime and the hold record, and the friend's offer, proof and press.
+ScriptActorOwner is a recorder there: the role stream, its client replay and the hook bodies' one-line calls are
+not exercised on the Mac.
 
-**Known limits after slice 1:**
-- **The friend has no Axel II RC.** Friend execution is parked until slice D's abort (above). Only the host can
-  run Overtaker, Clear Light or Burst Frontier, and only from inside the family's spheres.
+**Known limits:**
+- **Not run live.** Native release timing, whether a host puppet runs `AP12`'s trigger 26 (Clear Light for a friend
+  needs it on the host's copy of its actor, and its own copy needs it for the friend's native picker), and whether
+  the friend's borrowed capture and Axel clone attachment look right are all unverified.
+- **Strike ownership is not claimed.** The friend's own player plays the borrowed capture, so its own hits would go
+  through its ordinary claims, and the host's copy's hits are zeroed (VUH-2910). Whether the RC's damage comes from
+  the player's capture motion or from Axel's script is a static read still pending.
+- **Cameras still play on the host.** A friend's Overtaker or Clear Light runs `camera_start_global`, Clear Light's
+  white-out and `camera_reset`, and Burst's `camera_watch` on the host's screen, and the friend sees none of them.
+  Forwarding them needs the host to skip them and send op 5. That follows in its own change, once the trap bodies
+  are read.
+- **Axel's own pose on the friend while held.** The host stops publishing Axel's motion while he is parented, so the
+  friend's held clone keeps its last mirrored motion.
+- **Host-owned RCs show nothing on the friend's copy of the host.** No role is minted for the host's own executor,
+  so the spectator clone does not play its capture.
 - **Prompt gating is by proof, not by native suppression code.**
   - A seat without a live host window has its Axel prompt hidden by the existing cache gate. This holds for the
     friend, and for the host while the friend owns the offer.
@@ -316,10 +369,5 @@ The rest of the adapter's wiring is not exercised.
     command, so the prompt shows. Its press is then refused at native acceptance, so it does nothing.
   - The owner rule is geometric. The yaw transform (local −z forward) and the 100-unit seat tolerance are
     unverified live. A seat the native picker would offer, but the host's geometry does not, sees no prompt.
-  - Prompt suppression stays tracked for the C or D slice, together with that live check. VUH-2913 is not done
-    while either seat can see a prompt that does nothing.
-- **Clear Light for a friend owner needs D.** The friend's own player is not yet captured into `AP12` locally, so
-  its native picker cannot meet `Require 490`. The host's chain also reads the friend's actor's trigger bits on
-  the host. Whether that actor runs AP12's motion triggers there is unverified.
-- **The friend's view of a friend-owned RC is D's.** The clone's capture, attachment, cameras and fades, and
-  Axel's pose while parented (EnemySync skips parented actors), are not replayed yet.
+  - Prompt suppression stays open, together with that live check. VUH-2913 is not done while either seat can see
+    a prompt that does nothing.

@@ -169,7 +169,7 @@ int main() {
         check(R::AxelReadMasks(mem,kAxelActor,m) && !m.collision,"only a collision pointer read as zero is no collision data");
         mem.words[kAxelActor+R::kAxelCollision]=kAxelHeader;
 
-        R::AxelWindows w;const auto s=R::AxelOfferSeats(Seats({100,0,600},{100,0,1100}));
+        R::AxelWindows w;const auto s=Seats({100,0,600},{100,0,1100});
         const R::ReactionPoint origin{100,0,100};
         const auto frame=[&](std::uint32_t at) {
             R::AxelFrameFacts f{};R::AxelGroupMasks masks{};
@@ -201,7 +201,7 @@ int main() {
         Memory mem;
         mem.words={{kSeatActor+R::kAxelHandleWord,kSeatHandle},{kSeatActor+R::kAxelFollowup,R::kOvertaker},
                    {kSeatActor+R::kAxelFlags,1u<<21}};
-        R::AxelWindows w;const auto s=R::AxelOfferSeats(Seats({100,0,600},{100,0,1100}));
+        R::AxelWindows w;const auto s=Seats({100,0,600},{100,0,1100});
         std::uint32_t at=100;
         const auto frame=[&]() {
             R::AxelExecutorFacts chain{true,R::kOvertaker,0,0,0};
@@ -388,7 +388,7 @@ int main() {
         mem.words={{kSeatActor+R::kAxelHandleWord,kSeatHandle},{kSeatActor+R::kAxelCapture,kAxelActor},
                    {kAxelActor+R::kAxelParent,0},{kSeatActor+R::kAxelFollowup,R::kOvertaker},{kSeatActor+R::kAxelFlags,1u<<21}};
         R::AxelExecutor e{R::kOvertaker,kSource,0,kHost,kEpoch,300,false};
-        R::AxelWindows w;const auto s=R::AxelOfferSeats(Seats({100,0,600},{100,0,1100}));
+        R::AxelWindows w;const auto s=Seats({100,0,600},{100,0,1100});
         std::uint32_t at=301;
         const auto frame=[&]() {
             const auto state=R::AxelReadActor(mem,Decode,kSeatActor,kSeatHandle);
@@ -413,29 +413,55 @@ int main() {
               "an unread handle word under a capture-only Overtaker keeps the executor and Clear Light's tombstone");
     }
     {
-        // Ione's probe (694ad7cd): seat 1's Overtaker consumed, then its actor lost before contact, made 1/3 name the
-        // host. Slice 1 parks friend execution, so no friend RC is ever consumed or run.
-        check(R::AxelExecutionAdmitted(0) && !R::AxelExecutionAdmitted(1) && !R::AxelExecutionAdmitted(2),
-              "only the host seat may execute an Axel RC in slice 1");
-        auto s=R::AxelOfferSeats(Seats({100,0,4100},{100,0,600}));
-        check(R::AxelFamilyWinner(R::kOvertakerSpheres,overtakerOn,axel,0,s)==-1,
-              "a friend inside Overtaker's sphere is offered nothing");
-        s=R::AxelOfferSeats(Seats({100,0,1100},{100,0,600}));
-        check(R::AxelFamilyWinner(R::kOvertakerSpheres,overtakerOn,axel,0,s)==0,
-              "the host inside it still wins, with the friend nearer");
-        const auto raw=Seats({100,0,600},{100,0,1100});
+        // A friend owns and executes its own RC; the host consumes its claim once.
+        check(R::AxelExecutionAdmitted(0) && R::AxelExecutionAdmitted(1) && R::AxelExecutionAdmitted(2) &&
+              !R::AxelExecutionAdmitted(3),"every seat may execute an Axel RC");
+        const auto s=Seats({100,0,1100},{100,0,600});
+        check(R::AxelFamilyWinner(R::kOvertakerSpheres,overtakerOn,axel,0,s)==1,"the nearer friend wins Overtaker");
         R::AxelWindows w;
-        (void)w.Tick(0,true,1,kSource,kEpoch,80,raw);
+        (void)w.Tick(0,true,1,kSource,kEpoch,80,s);
         auto* friendWindow=w.Find(R::kOvertaker);
-        check(friendWindow && !R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kFriend),kEpoch,81,raw) &&
-              !friendWindow->consumed,"a friend's claim, even on a window naming it, is refused before anything is consumed");
-        (void)w.Tick(2,true,0,kSource,kEpoch,82,raw);
-        auto* hostWindow=w.Find(R::kBurstFrontier);
-        check(hostWindow && R::AxelConsume(*hostWindow,Claim(*hostWindow,0,kHost),kEpoch,83,raw) &&
-              !R::AxelConsume(*hostWindow,Claim(*hostWindow,0,kHost),kEpoch,84,raw),"the host's own claim consumes once");
+        check(friendWindow && !R::AxelConsume(*friendWindow,Claim(*friendWindow,0,kHost),kEpoch,81,s) && !friendWindow->consumed,
+              "the host's claim on the friend's window consumes nothing");
+        check(!R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kHost),kEpoch,81,s) && !friendWindow->consumed,
+              "nor does the friend's seat under another connection");
+        auto stale=Claim(*friendWindow,1,kFriend);stale.epoch=kEpoch-1;
+        check(!R::AxelConsume(*friendWindow,stale,kEpoch,81,s) && !friendWindow->consumed,"nor a claim from another epoch");
+        check(R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kFriend),kEpoch,81,s) &&
+              !R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kFriend),kEpoch,82,s),"the friend's own claim consumes once");
+        const auto old=Claim(*friendWindow,1,kFriend);
+        (void)w.Tick(0,false,-1,kSource,kEpoch,83,s);(void)w.Tick(0,true,1,kSource,kEpoch,84,s);
+        auto* next=w.Find(R::kOvertaker);
+        check(next && next->occurrence>old.occurrence && !R::AxelConsume(*next,old,kEpoch,85,s) && !next->consumed,
+              "a claim for a replaced occurrence consumes nothing in the new one");
         R::AxelWindows chained;R::AxelFrameFacts f{};f.observed=true;f.active={false,true,false};f.winners={-1,1,-1};
-        check(chained.Frame(f,kSource,kEpoch,85,R::AxelOfferSeats(raw))==0u && !chained.Find(R::kClearLight),
-              "no friend window opens through Clear Light's chain either");
+        check(chained.Frame(f,kSource,kEpoch,85,s)==2u && chained.Find(R::kClearLight)->slot==1,
+              "the friend's Overtaker chains its own Clear Light");
+    }
+    {
+        // The safe abort (Ione's probe 694ad7cd: a friend's actor lost before contact made 1/3 name the host). 1/3 keeps
+        // a live native result, and Axel's attach and capture land only on the bound executor's resolving actor.
+        using S=R::AxelActorState;
+        check(R::AxelActAdmitted(true,true,true,S::Resolves,true)==R::AxelAct::Admitted,
+              "Axel acting on the bound executor's resolving actor proceeds");
+        check(R::AxelActAdmitted(true,true,true,S::Resolves,false)==R::AxelAct::Refused,
+              "on any other seat's actor, the host's own included, it is refused");
+        check(R::AxelActAdmitted(true,true,true,S::Gone,true)==R::AxelAct::Refused &&
+              R::AxelActAdmitted(true,true,true,S::Unknown,true)==R::AxelAct::Refused,
+              "a gone or unread executor actor refuses it too");
+        check(R::AxelActAdmitted(true,true,false,S::Resolves,true)==R::AxelAct::Refused,"with no RC bound, Axel acts on no player");
+        check(R::AxelActAdmitted(false,true,false,S::Gone,false)==R::AxelAct::Native &&
+              R::AxelActAdmitted(true,false,false,S::Gone,false)==R::AxelAct::Native,
+              "another source's act, or Axel's act on a non-player, stays native");
+        check(R::AxelAttachPair(16386,1) && !R::AxelAttachPair(16386,5) && !R::AxelAttachPair(16384,1),
+              "Axel's attach pair is flags 16386 at bone 1, not Thorn's bone 5");
+        check(R::AxelRoleAtCompletion(R::kOvertaker) && R::AxelRoleAtCompletion(R::kClearLight) &&
+              !R::AxelRoleAtCompletion(R::kBurstFrontier),"Overtaker and Clear Light begin the friend's role at completion");
+        check(R::AxelRoleHeld(true,1,0x300,1,0x300,true,0),"the friend's role holds while its executor is bound to its actor");
+        check(!R::AxelRoleHeld(false,1,0x300,1,0x300,true,0) && !R::AxelRoleHeld(true,1,0x300,2,0x300,true,0) &&
+              !R::AxelRoleHeld(true,1,0x300,1,0x400,true,0),"not once the executor ends, or for another seat or actor");
+        check(!R::AxelRoleHeld(true,1,0x300,1,0x300,false,0) && !R::AxelRoleHeld(true,1,0x300,1,0x300,true,0x777),
+              "nor with the actor's coroutine word unread or held");
     }
 
     // Routing identity.
