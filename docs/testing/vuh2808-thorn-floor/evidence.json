@@ -60,6 +60,54 @@
       "size": 17734,
       "sha256": "71be11c2037cec415276e62281694dc02fc3f585fa5afaa4db3c418f56131864",
       "url": "clankie://evidence/sha256/71be11c2037cec415276e62281694dc02fc3f585fa5afaa4db3c418f56131864"
+    },
+    {
+      "path": "trace02/friend.mp4",
+      "size": 2710886,
+      "sha256": "cdb95d84186f8e864b21c787f3fadfe343c8d6860002d902ca47fd268ea96591",
+      "url": "clankie://evidence/sha256/cdb95d84186f8e864b21c787f3fadfe343c8d6860002d902ca47fd268ea96591"
+    },
+    {
+      "path": "trace02/friend_inject.log",
+      "size": 19842036,
+      "sha256": "a17a78b18e64ec0a140a0d95cc20f7eed1b17e4432f6d0f7faee6be53882ede0",
+      "url": "clankie://evidence/sha256/a17a78b18e64ec0a140a0d95cc20f7eed1b17e4432f6d0f7faee6be53882ede0"
+    },
+    {
+      "path": "trace02/friend_pilot.jsonl",
+      "size": 1305557,
+      "sha256": "76e14ffae00ea501657f4aa16ff7c7f7073fff716587ec1a9a2e53211ffcef59",
+      "url": "clankie://evidence/sha256/76e14ffae00ea501657f4aa16ff7c7f7073fff716587ec1a9a2e53211ffcef59"
+    },
+    {
+      "path": "trace02/host.mp4",
+      "size": 2891873,
+      "sha256": "d85d347f30eb4e53308d6c5809d1a1652ec98d07a9de5545dafc909daf6ed078",
+      "url": "clankie://evidence/sha256/d85d347f30eb4e53308d6c5809d1a1652ec98d07a9de5545dafc909daf6ed078"
+    },
+    {
+      "path": "trace02/host_inject.log",
+      "size": 20677543,
+      "sha256": "29980a599bffdf305bea2b21fb32d62208ee9108f877875308e59f35d4daf335",
+      "url": "clankie://evidence/sha256/29980a599bffdf305bea2b21fb32d62208ee9108f877875308e59f35d4daf335"
+    },
+    {
+      "path": "trace02/host_pilot.jsonl",
+      "size": 1623463,
+      "sha256": "e7c3a016dcc49cb8c65c2d7e05673dd9b6381c7d0f13d7995980e80883337c20",
+      "url": "clankie://evidence/sha256/e7c3a016dcc49cb8c65c2d7e05673dd9b6381c7d0f13d7995980e80883337c20"
+    },
+    {
+      "path": "trace02/metadata.tar",
+      "size": 486912,
+      "sha256": "2a99db4510ab594e247052cc749ababcc43e34ada0c87db3715b224206554d6f",
+      "url": "clankie://evidence/sha256/2a99db4510ab594e247052cc749ababcc43e34ada0c87db3715b224206554d6f"
+    },
+    {
+      "path": "trace02/report.json",
+      "size": 21217,
+      "sha256": "132c1730eae5f7782fd50db200658cb1d9cb09152d27f44adc10bef2e42f1542",
+      "url": "clankie://evidence/sha256/132c1730eae5f7782fd50db200658cb1d9cb09152d27f44adc10bef2e42f1542"
     }
   ]
 }
