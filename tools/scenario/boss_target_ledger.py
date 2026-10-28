@@ -1,0 +1,197 @@
+"""Which seat a host boss targeted, and what that seat took natively (VUH-2912, Axel II).
+
+Reads the host and friend inject logs of a run with KH2COOP_TRACE_HITS=1 and KH2COOP_ENEMY_MIRROR_TRACE=1 on both
+seats, the boss lifetime the boss HP ledger pinned (`boss`: epoch, hostActor, friendActor), and line marks saved as
+`[log_count('', host), log_count('', friend)]`.
+
+The host logs `[enemy-target] boss-target ... target=<k> owner=<slot> valid=<mask> changed=<0|1>` whenever the boss
+changes its chosen candidate or its candidate set (candidate 0 is the host's player, k > 0 a remote clone; valid bit
+k: candidate k was eligible at that search). Each seat logs `[hitwitness] seq=<hittrace seq> ...` a few frames after
+a boss hit lowered its own canonical player's HP: the motion and ignore-hit timer (+0xD70) before the hit and then.
+
+Rounds (`rounds`: name, from, to, seat). Within the round's host lines the boss must choose that seat, and within the
+seat's own lines the seat's canonical player must take a qualifying native hit from its copy of the pinned boss:
+- a complete hittrace scope (the HP ledger's rules) with victim class LocalAvatar, action Native and HP lost;
+- its witness: the same victim still canonical, a changed motion (the reaction) and a running ignore-hit timer;
+  or, for a hit that downed the seat (on PC1's 5-HP seats every Axel hit does), a changed motion and that seat's
+  own `[downed] gate intercept` for the same actor within two frames: the logical down is the reaction, and the
+  verdict says `downing`, since the ignore-hit timer is not asserted for it;
+- on the friend, its `[enemy-mirror] hit` line on the same frame, victim and atkp from the bound boss copy with
+  driven=1 and an attack motion the mirror entered mid-run (runStart < setFrame <= frame, setMotion == motion): the
+  host's motion, not a carried local one;
+- ordered after the choice: the last boss-target change at or before the hit (by the next statehash tick on each
+  seat, at most about 1 s late on one PC) chooses that seat. A choice made only after the round's end mark is
+  outside the round and does not count.
+
+Downs (`downs`: from, to). Each seat's own `[downed] gate intercept` ... `[downed] revive returned` in the window is
+one down interval (ticks). Each seat must have at least one. During each interval a boss-target line must show that
+seat's candidate bit clear, and once `deliveryMs` (default 1000) has passed no boss-target line may choose it.
+
+Anywhere in the host log, a boss-target line that chooses a candidate whose valid bit is clear is a failure.
+
+    python -B tools/scenario/boss_target_ledger.py --host H.log --friend F.log --object 81 --marks marks.json
+
+marks.json: {"marks": {...}, "boss": {"epoch": 3, "hostActor": "...", "friendActor": "..."}, "rounds": [{"name":
+"friend_target", "from": "m0", "to": "m1", "seat": 1}], "downs": {"from": "d0", "to": "d1"}}. Exit 0 on pass.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import re
+import sys
+from pathlib import Path
+
+_spec = importlib.util.spec_from_file_location("kh2coop_boss_hp_ledger_for_targets",
+                                               Path(__file__).with_name("boss_hp_ledger.py"))
+L = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(L)
+
+TARGET = re.compile(r"\[enemy-target\] boss-target frame=(?P<frame>\d+) enemy=(?P<enemy>[0-9A-F]+) objectId=(?P<objectId>\d+) "
+                    r"target=(?P<target>-?\d+) owner=(?P<owner>\d+) mode=(?P<mode>\d+) valid=(?P<valid>\d+) changed=(?P<changed>\d)")
+WITNESS = re.compile(r"\[hitwitness\] seq=(?P<seq>\d+) hitFrame=(?P<hitFrame>\d+) frame=(?P<frame>\d+) attacker=(?P<attacker>[0-9A-F]+) "
+                     r"victim=(?P<victim>[0-9A-F]+) atkp=(?P<atkp>\d+) hp=(?P<hp0>-?\d+)->(?P<hp1>-?\d+) "
+                     r"motion=(?P<m0>\d+)->(?P<m1>\d+) ignoreHit=(?P<i0>-?[\d.]+)->(?P<i1>-?[\d.]+) same=(?P<same>\d)")
+MIRROR_HIT = re.compile(r"\[enemy-mirror\] hit frame=(?P<frame>\d+) netId=(?P<netId>\d+) actor=(?P<actor>[0-9A-F]+) "
+                        r"driven=(?P<driven>-?\d+) runStart=(?P<runStart>\d+) runFrames=\d+ motion=(?P<motion>\d+) time=\S+ "
+                        r"setMotion=(?P<setMotion>-?\d+) setFrame=(?P<setFrame>\d+) cursor=\S+ atkp=(?P<atkp>\d+) "
+                        r"victim=\S*?@(?P<victim>[0-9A-F]+) damage=(?P<damage>-?\d+)")
+DOWNING = re.compile(r"\[downed\] gate intercept mode=\d+ (?:logical=1 )?episode=[0-9A-F]+ actor=(?P<actor>[0-9A-F]+) .*?frame=(?P<frame>\d+)")
+DOWN, REVIVED = "[downed] gate intercept", "[downed] revive returned"
+
+
+def same_actor(a, b) -> bool:
+    return a is not None and b is not None and int(str(a), 16) == int(str(b), 16)
+
+
+def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict:
+    lines = {0: host_text.splitlines(), 1: friend_text.splitlines()}
+    m, boss = marks["marks"], marks["boss"]
+    problems: list[str] = []
+    tick = lambda seat, n: L.tick_after(lines[seat], n)
+
+    choices = [{**r.groupdict(), "line": n} for n, text in enumerate(lines[0]) for r in [TARGET.search(text)]
+               if r and int(r["objectId"]) == objectId]
+    for c in choices:
+        for k in ("target", "owner", "valid", "changed", "frame"):
+            c[k] = int(c[k])
+        c["tick"] = tick(0, c["line"])
+    # Candidate index of each owner slot, from the choices that name it (the host's player is candidate 0).
+    index = {0: {0}, 1: {c["target"] for c in choices if c["owner"] == 1 and c["target"] > 0}}
+    if len(index[1]) > 1:
+        problems.append(f"the friend's seat appears as several candidates {sorted(index[1])}")
+    names = lambda c, seat: c["target"] >= 0 and c["owner"] == seat and (c["target"] == 0) == (seat == 0)
+    for c in choices:
+        if c["target"] >= 0 and not c["valid"] >> c["target"] & 1:
+            problems.append(f"host line {c['line']}: boss chose candidate {c['target']} whose valid bit is clear (valid={c['valid']})")
+
+    witnesses = {seat: {int(w["seq"]): {**w.groupdict(), "line": n} for n, text in enumerate(lines[seat])
+                        for w in [WITNESS.search(text)] if w} for seat in (0, 1)}
+    downings = {seat: [d.groupdict() for text in lines[seat] for d in [DOWNING.search(text)] if d] for seat in (0, 1)}
+    mirror_hits = [{**h.groupdict(), "line": n} for n, text in enumerate(lines[1]) for h in [MIRROR_HIT.search(text)] if h]
+    copy = {0: boss.get("hostActor"), 1: boss.get("friendActor")}
+
+    def qualify(seat: int, e: dict, round_choices: list[dict]) -> str | None:
+        """Why this native hit on the seat does not qualify, or None."""
+        w = witnesses[seat].get(e["seq"])
+        if not w:
+            return "no witness"
+        if not same_actor(w["victim"], e["victimActor"]) or w["same"] != "1":
+            return "witness is for another victim or the player changed"
+        downing = any(same_actor(d["actor"], w["victim"]) and 0 <= int(d["frame"]) - int(w["hitFrame"]) <= 2
+                      for d in downings[seat])
+        if w["m1"] == w["m0"] or (float(w["i1"]) <= 0 and not downing):
+            return f"no reaction/i-frames (motion {w['m0']}->{w['m1']}, ignoreHit {w['i0']}->{w['i1']})"
+        e["kind"] = "reaction" if float(w["i1"]) > 0 else "downing"
+        if seat == 1:
+            hit = [h for h in mirror_hits if h["frame"] == w["hitFrame"] and same_actor(h["victim"], w["victim"]) and
+                   same_actor(h["actor"], copy[1]) and h["atkp"] == w["atkp"]]
+            if not hit:
+                return "no mirror hit line from the bound boss copy on that frame"
+            h = hit[-1]
+            if not (h["driven"] == "1" and h["setMotion"] == h["motion"] and
+                    int(h["runStart"]) < int(h["setFrame"]) <= int(h["frame"])):
+                return f"mirror hit not on a driven host motion ({h})"
+        t = tick(seat, e["line"])
+        prior = [c for c in round_choices if c["changed"] and c["tick"] is not None and t is not None and c["tick"] <= t]
+        if not prior or not names(prior[-1], seat):
+            return "not after the boss chose this seat"
+        return None
+
+    rounds = []
+    for r in marks.get("rounds", []):
+        seat = r["seat"]
+        (h0, f0), (h1, f1) = m[r["from"]], m[r["to"]]
+        lo, hi = (h0, h1) if seat == 0 else (f0, f1)
+        in_round = [c for c in choices if h0 <= c["line"] < h1]
+        chose = [c for c in in_round if names(c, seat)]
+        hits = [e for e in L.hit_events(lines[seat], lo, hi) if not e["invalid"] and e["sourceObject"] == objectId and
+                same_actor(e["sourceActor"], copy[seat]) and e["epoch"] == boss.get("epoch") and
+                e["victimClass"] == L.LOCAL_AVATAR and e["action"] == L.NATIVE and e["hpBefore"] > e["hpAfter"]]
+        verdicts = [{"seq": e["seq"], "line": e["line"], "hp": [e["hpBefore"], e["hpAfter"]],
+                     "why": qualify(seat, e, in_round), "kind": e.get("kind")} for e in hits]
+        row = {"name": r["name"], "seat": seat, "choices": len(chose), "nativeHits": len(hits),
+               "qualified": [v for v in verdicts if v["why"] is None], "rejected": [v for v in verdicts if v["why"]]}
+        if not chose:
+            problems.append(f"round {r['name']}: the boss never chose seat {seat} inside the round")
+        if not row["qualified"]:
+            problems.append(f"round {r['name']}: no qualifying native hit on seat {seat} "
+                            f"({len(hits)} native hits: {[v['why'] for v in verdicts][:3]})")
+        rounds.append(row)
+
+    downs = []
+    if "downs" in marks:
+        (h0, f0), (h1, f1) = m[marks["downs"]["from"]], m[marks["downs"]["to"]]
+        delivery = marks.get("deliveryMs", 1000)
+        for seat, (lo, hi) in ((0, (h0, h1)), (1, (f0, f1))):
+            intervals, start = [], None
+            for n in range(lo, hi):
+                if DOWN in lines[seat][n] and start is None:
+                    start = n
+                elif REVIVED in lines[seat][n] and start is not None:
+                    intervals.append((start, n))
+                    start = None
+            if start is not None:
+                intervals.append((start, hi))
+            if not intervals:
+                problems.append(f"seat {seat} was never downed in the downs window")
+            bits = index[seat]
+            for a, b in intervals:
+                t0, t1 = tick(seat, a), tick(seat, b)
+                if t0 is None or t1 is None:
+                    problems.append(f"seat {seat} down at line {a}: no tick to place it")
+                    continue
+                during = [c for c in choices if c["tick"] is not None and t0 <= c["tick"] <= t1]
+                excluded = [c for c in during if bits and all(not c["valid"] >> k & 1 for k in bits)]
+                chosen = [c for c in during if c["tick"] >= t0 + delivery and c["tick"] < t1 and names(c, seat)]
+                downs.append({"seat": seat, "lines": [a, b], "ticks": [t0, t1], "observed": len(during),
+                              "excluded": len(excluded), "chosenWhileDown": [c["line"] for c in chosen]})
+                if not excluded:
+                    problems.append(f"seat {seat} down {t0}-{t1} ms: no boss search showed it out of the candidates")
+                if chosen:
+                    problems.append(f"seat {seat} down {t0}-{t1} ms: the boss chose it (host lines {[c['line'] for c in chosen]})")
+
+    return {"pass": not problems, "problems": problems, "objectId": objectId, "boss": boss,
+            "candidates": {str(k): sorted(v) for k, v in index.items()}, "rounds": rounds, "downs": downs,
+            "choices": [{k: c[k] for k in ("line", "tick", "frame", "target", "owner", "valid", "changed")} for c in choices]}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--host", required=True, type=Path)
+    ap.add_argument("--friend", required=True, type=Path)
+    ap.add_argument("--object", required=True, type=int)
+    ap.add_argument("--marks", required=True, type=Path)
+    ap.add_argument("--out", type=Path)
+    a = ap.parse_args()
+    read = lambda p: p.read_text(encoding="utf-8-sig", errors="replace")
+    result = ledger(read(a.host), read(a.friend), a.object, json.loads(read(a.marks)))
+    if a.out:
+        a.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(json.dumps({k: result[k] for k in ("pass", "problems", "rounds", "downs")}, indent=2))
+    return 0 if result["pass"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

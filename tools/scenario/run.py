@@ -1004,6 +1004,29 @@ def step_hp_ledger(ctx: Context, step: dict) -> dict:
     return {k: result[k] for k in ("pass", "problems", "hp", "counts", "phases")}
 
 
+def step_target_ledger(ctx: Context, step: dict) -> dict:
+    """VUH-2912: which seat the host boss chose, the witnessed native hit that seat took after the choice, and a
+    downed seat leaving the candidates (tools/scenario/boss_target_ledger.py). `ledger` names a saved hp_ledger
+    result whose pinned boss lifetime it judges against; `rounds` ({name, from, to, seat}) and `downs` ({from, to})
+    name saved [hostLines, friendLines] marks. Writes `<as>.json`; fails the step unless `require` is false."""
+    host, friend = step.get("host", 0), step.get("friend", 1)
+    text = lambda i: (LOGS / f"kh2coop_inject_{ctx.inst(i).pid}.log").read_text(encoding="utf-8", errors="replace")
+    names = {r[k] for r in step.get("rounds", []) for k in ("from", "to")} | set(step.get("downs", {}).values())
+    marks = {"marks": {name: ctx.saved[name] for name in names}, "boss": ctx.saved[step["ledger"]]["boss"],
+             "rounds": step.get("rounds", []), "deliveryMs": step.get("deliveryMs", 1000)}
+    if step.get("downs"):
+        marks["downs"] = step["downs"]
+    result = _boss_target_ledger.ledger(text(host), text(friend), int(step["objectId"]), marks)
+    name = step.get("as", "target_ledger")
+    path = ctx.run_dir / f"{name}.json"
+    path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    ctx.artifacts.append(path.name)
+    ctx.saved[name] = result
+    if step.get("require", True) and not result["pass"]:
+        raise StepFailed(f"target ledger: {result['problems'][:6]}")
+    return {k: result[k] for k in ("pass", "problems", "rounds", "downs")}
+
+
 def step_hang_check(ctx: Context, step: dict) -> dict:
     """Turns an instance's stalled-frame hang check off or on, for screens that may
     stop the field frame counter, such as the World Map (VUH-2341)."""
@@ -5533,7 +5556,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "press": step_press, "wait": step_wait, "wait_until": step_wait_until, "checkpoint": step_checkpoint,
          "fight": step_fight,
          "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check, "coop_verdict": step_coop_verdict,
-         "hp_ledger": step_hp_ledger,
+         "hp_ledger": step_hp_ledger, "target_ledger": step_target_ledger,
          "revive_guard": step_revive_guard, "downed_kill": step_downed_kill, "press_continue": step_press_continue,
          "owner_downs": step_owner_downs,
          "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "pilot_wait": step_pilot_wait, "pilot_until": step_pilot_until, "avatar_stall": step_avatar_stall,
@@ -5566,6 +5589,11 @@ _boss_hp_ledger_spec = _importlib_util.spec_from_file_location(
     "kh2coop_boss_hp_ledger", Path(__file__).with_name("boss_hp_ledger.py"))
 _boss_hp_ledger = _importlib_util.module_from_spec(_boss_hp_ledger_spec)
 _boss_hp_ledger_spec.loader.exec_module(_boss_hp_ledger)
+# VUH-2912: the boss target ledger (pure, over the seats' logs).
+_boss_target_ledger_spec = _importlib_util.spec_from_file_location(
+    "kh2coop_boss_target_ledger", Path(__file__).with_name("boss_target_ledger.py"))
+_boss_target_ledger = _importlib_util.module_from_spec(_boss_target_ledger_spec)
+_boss_target_ledger_spec.loader.exec_module(_boss_target_ledger)
 
 # VUH-2869: the forced-downing/wave ordering checker (pure, over the seats' logs).
 _downed_order_spec = _importlib_util.spec_from_file_location(
@@ -5929,7 +5957,8 @@ def validate_scenario(scenario: dict) -> None:
                 "runtime": ("role",), "record": ("as",), "record_stop": ("as",),
                 "reconnect_mark": ("as",), "runtime_pause": ("instance", "after"),
                 "reconnect_check": ("after",),
-                "align_courtyard_exit": ("blockedExpr",), "checkpoint": ("name",), "hp_ledger": ("objectId", "marks")}
+                "align_courtyard_exit": ("blockedExpr",), "checkpoint": ("name",), "hp_ledger": ("objectId", "marks"),
+                "target_ledger": ("objectId", "ledger", "rounds")}
     for number, step in enumerate(scenario["steps"]):
         prefix = f"step {number}"
         if not isinstance(step, dict) or step.get("do") not in STEPS:
