@@ -302,7 +302,8 @@
    ],
    "as": "owner_downs",
    "clipSeconds": 12,
-   "timeoutMs": 240000
+   "timeoutMs": 240000,
+   "killWhen": "(lambda a, ps: len(ps) == 2 and all(((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5 >= 600 for p in ps))(pos('B_EX110', 0), [(x['position']['x'], x['position']['z']) for x in actors(0) if int(x['address'],16) in (int(peek('0x2A105D0','u64',0),16), int(saved['probe_before'][0]['clone'],16))])"
   },
   {
    "do": "clip_wait"

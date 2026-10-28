@@ -1882,7 +1882,7 @@ DOWNED_DOWN, DOWNED_REVIVED, DOWNED_FULL = "[downed] gate intercept", "[downed] 
 
 
 def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guard=None, _clip=None,
-                     _now=None, _sleep=None) -> dict:
+                     _now=None, _sleep=None, _when=None) -> dict:
     """VUH-2911: one logical down and partner revive per owner, tolerant of natural downs (lead decision on
     run vuh2911-axel-01, where Axel downed the host before the fixed forced down and both seats went down).
     Two ReviveGuards run, one per direction: each keeps its seat away from enemies and revives the other seat
@@ -1890,8 +1890,12 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     enemy downed it (natural) or this step's DownedSpike Kill did (forced, only while neither seat is down and
     no forced down is still open, `gapMs` after the last revive). Both seats down at once, or a host full-party
     down, is a named harness failure, never a pass; so is `timeoutMs`. Each downing starts a paired background
-    clip (`clipSeconds`, 12) when none is running. Both seats must be standing when the step starts. Saved
-    `as` (`owner_downs`): per owner {kind, seat}, the downing events and both guards' events."""
+    clip (`clipSeconds`, 12) when none is running. Both seats must be standing when the step starts.
+    `killWhen` (VUH-2931, run vuh2931-sora-01: the Kill landed while Axel was combo-hitting the reviver, which fell
+    before reviving) is an expression that must also be true before each forced Kill; an expression that cannot be
+    evaluated yet (a load between samples) is false. It only defers a Kill: natural downs count as before, and
+    `timeoutMs` still bounds the step. Saved `as` (`owner_downs`): per owner {kind, seat}, the downing events, both
+    guards' events and how many polls `killWhen` deferred a due Kill."""
     owners = [int(o) for o in step.get("owners", [1, 0])]
     name = step.get("as", "owner_downs")
 
@@ -1912,6 +1916,16 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     guard = _guard or (lambda downed, reviver: ReviveGuard(ctx, downed, reviver, step.get("holdMs")))
     clip = _clip or film
     now, sleep = _now or time.monotonic, _sleep or ctx.sleep
+    when_expr = step.get("killWhen")
+
+    def evaluate_when() -> bool:
+        try:
+            return bool(ctx.eval(when_expr))
+        except Exception:  # a load or menu between samples
+            return False
+
+    ready = _when or (evaluate_when if when_expr else (lambda: True))
+    deferred = 0
     base = {i: (count(i, DOWNED_DOWN), count(i, DOWNED_REVIVED)) for i in (0, 1)}
     full = count(0, DOWNED_FULL)
     start, deadline = now(), now() + step.get("timeoutMs", 240000) / 1000
@@ -1943,7 +1957,10 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
                 raise StepFailed(f"owner_downs: HARNESS FAILURE, both seats down (events {events}); not a form result")
             open_forced = [s for s in forced if owed.get(s) is None]
             pending = [o for o in owners if owed[o] is None and o not in forced]
-            if not down_now and not open_forced and pending and now() - last_revive >= step.get("gapMs", 1500) / 1000:
+            due = not down_now and not open_forced and pending and now() - last_revive >= step.get("gapMs", 1500) / 1000
+            if due and not ready():
+                deferred += 1
+            elif due:
                 o = pending[0]
                 result = kill(o)
                 events.append({"seat": o, "kill": result, "atS": round(now() - start, 1)})
@@ -1961,7 +1978,7 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
         for g in guards:
             g.thread.join(timeout=10)
         ctx.saved[name] = {"owners": {str(o): v for o, v in owed.items()}, "events": events,
-                           "guards": [g.events for g in guards]}
+                           "guards": [g.events for g in guards], "killDeferred": deferred}
     return ctx.saved[name]
 
 
@@ -5999,6 +6016,8 @@ def validate_scenario(scenario: dict) -> None:
             compile(step["blockedExpr"], f"<{prefix} blockedExpr>", "eval")
         if kind == "fight" and "until" in step:
             compile(step["until"], f"<{prefix} fight until>", "eval")
+        if kind == "owner_downs" and "killWhen" in step:
+            compile(step["killWhen"], f"<{prefix} owner_downs killWhen>", "eval")
         if kind == "protect" and type(step.get("afterPilot", False)) is not bool:
             raise ValueError(f"{prefix}: protect afterPilot must be a boolean")
         if kind == "test_enemy_hp":

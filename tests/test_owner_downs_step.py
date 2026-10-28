@@ -58,8 +58,8 @@ class Rig:
         self.guards.append(g)
         return g
 
-    def run(self, **step):
-        ctx = SimpleNamespace(check_all=lambda: None, saved={}, sleep=self.sleep)
+    def run(self, evaluate=None, **step):
+        ctx = SimpleNamespace(check_all=lambda: None, saved={}, sleep=self.sleep, eval=evaluate or (lambda text: True))
         try:
             return RUN.step_owner_downs(ctx, {"owners": [1, 0], **step}, _count=lambda i, n: self.counts[(i, n)],
                                         _kill=self.kill, _guard=self.guard, _clip=self.clips.append,
@@ -116,6 +116,41 @@ class OwnerDownsTest(unittest.TestCase):
         result, _, error = rig.run()
         self.assertIsNone(error)
         self.assertEqual(result["owners"], {"1": {"kind": "natural", "seat": 1}, "0": {"kind": "natural", "seat": 0}})
+
+    # VUH-2931 (run vuh2931-sora-01): the Kill waits for killWhen, e.g. Axel clear of both seats.
+    def test_kill_when_defers_each_forced_kill(self):
+        rig = Rig()
+        # Due at 1.5 s (the gap) and clear then; the second is due at 6.0 s (revive at 4.5 + gap), clear only at 12.
+        clear = lambda text: text == "axel clear" and (1.5 <= rig.t < 2.0 or 5.0 <= rig.t < 5.5 or rig.t >= 12.0)
+        result, _, error = rig.run(evaluate=clear, killWhen="axel clear")
+        self.assertIsNone(error)
+        self.assertEqual([seat for _, seat in rig.kills], [1, 0])
+        self.assertLess(rig.kills[0][0], 2.0)            # due and clear at once
+        self.assertGreaterEqual(rig.kills[1][0], 12.0)   # held from 6.0 until Axel was clear again
+        self.assertGreater(result["killDeferred"], 0)
+
+    def test_kill_when_never_defers_a_natural_down(self):
+        rig = Rig(script={1.0: lambda r: r.down(1), 6.0: lambda r: r.down(0)})
+        result, _, error = rig.run(evaluate=lambda text: False, killWhen="never")
+        self.assertIsNone(error)
+        self.assertEqual(rig.kills, [])
+        self.assertEqual(result["owners"], {"1": {"kind": "natural", "seat": 1}, "0": {"kind": "natural", "seat": 0}})
+
+    def test_kill_when_that_cannot_be_evaluated_is_false_and_the_timeout_still_bounds(self):
+        rig = Rig()
+        def loading(text):
+            raise KeyError("B_EX110")
+        _, ctx, error = rig.run(evaluate=loading, killWhen="pos('B_EX110', 0)", timeoutMs=20000)
+        self.assertIn("no revive within 20000 ms", str(error))
+        self.assertEqual(rig.kills, [])
+        self.assertGreater(ctx.saved["owner_downs"]["killDeferred"], 0)
+
+    def test_without_kill_when_nothing_is_deferred(self):
+        rig = Rig()
+        result, _, error = rig.run(evaluate=lambda text: False)
+        self.assertIsNone(error)
+        self.assertEqual(len(rig.kills), 2)
+        self.assertEqual(result["killDeferred"], 0)
 
     def test_other_kill_results_fail(self):
         rig = Rig(kill_result="InEvent")

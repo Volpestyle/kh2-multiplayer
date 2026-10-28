@@ -68,6 +68,17 @@ def form_roots(i):
             f"'root': peek_at(int(a['status'],16) + 0x254, 'u64', {i})}} for a in actors({i}) if a['name'] == 'P_EX110_BTLF']")
 
 
+KILL_CLEARANCE = 600  # units between Axel and each seat before a forced owner_downs Kill
+
+
+def axel_clear(distance):
+    """On the host's screen: Axel at least `distance` (horizontal) from the host and from its clone of the friend
+    (the address probe_before saved)."""
+    return (f"(lambda a, ps: len(ps) == 2 and all(((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5 >= {distance} "
+            f"for p in ps))(pos('B_EX110', 0), [(x['position']['x'], x['position']['z']) for x in actors(0) "
+            f"if int(x['address'],16) in ({canon(0)}, int(saved['probe_before'][0]['clone'],16))])")
+
+
 def clip_pair(name, seconds):
     return [{"do": "clip", "instance": i, "seconds": seconds, "fps": 30, "background": True, "name": f"{name}_{i}"} for i in (0, 1)]
 
@@ -188,7 +199,10 @@ def steps_for(selection):
         {"do": "wait_until", "expr": "log_count('[combat-admission] released admitted ', 0) > 0", "timeoutMs": 30000, "pollMs": 100},
         # One logical down and partner revive per owner, right after the release (run vuh2911-axel-01: on the
         # 22-HP FM-02 save Axel downed the host before a fixed forced down). A natural down counts once revived.
-        {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000},
+        # A forced Kill waits for Axel to stand clear of both seats (run vuh2931-sora-01: it landed while Axel was
+        # combo-hitting the 10-HP reviver, which fell before reviving).
+        {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000,
+         "killWhen": axel_clear(KILL_CLEARANCE)},
         {"do": "clip_wait"},
         {"do": "save", "as": "downs_after", "expr": f"[{census(0)}, {census(1)}]"},
         {"do": "assert", "expr": f"all(saved['owner_downs']['owners'][k] for k in ('0', '1')) and "

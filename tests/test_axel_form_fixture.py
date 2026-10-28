@@ -80,6 +80,27 @@ class AxelFormFixtureTest(unittest.TestCase):
             self.assertTrue(held(ok)(expr), name)
             self.assertFalse(held({**ok, "owner_downs": {"owners": {"0": None, "1": {"kind": "forced"}}}})(expr), name)
 
+    # VUH-2931 (run vuh2931-sora-01): each forced Kill waits for Axel to stand clear of both seats on the host's screen.
+    def test_owner_downs_kill_waits_for_axel_clear_of_both_seats(self):
+        host, clone = "0x7FF600001000", "0x7FF600003000"
+        for name in ("net_prologue_mansion_axel_form", "net_prologue_mansion_axel_form_sora_host",
+                     "net_prologue_mansion_axel_form_sora_friend"):
+            when = next(s for s in load(name) if s["do"] == "owner_downs")["killWhen"]
+            def clear(axel, host_x, clone_x, others=()):
+                seats = [{"address": host, "position": {"x": host_x, "z": 0}},
+                         {"address": clone, "position": {"x": clone_x, "z": 0}}, *others]
+                return eval(when, {"saved": {"probe_before": [{"clone": clone}, {"clone": "0x1"}]},
+                                   "pos": lambda n, i: axel, "actors": lambda i: seats if i == 0 else [],
+                                   "peek": lambda rva, kind, i: host, "int": int, "len": len, "all": all})
+            self.assertTrue(clear((0, 0, 0), 600, -700), name)
+            self.assertFalse(clear((0, 0, 0), 599, -700), name)   # Axel on the host
+            self.assertFalse(clear((0, 0, 0), 700, -100), name)   # Axel on the friend's clone
+            self.assertTrue(clear((0, 0, 0), 700, -700, [{"address": "0x9", "position": {"x": 1, "z": 0}}]), name)
+            self.assertFalse(eval(when.replace("int(saved['probe_before'][0]['clone'],16)", "0"),
+                                  {"saved": {}, "pos": lambda n, i: (0, 0, 0), "int": int, "len": len, "all": all,
+                                   "actors": lambda i: [{"address": host, "position": {"x": 900, "z": 0}}],
+                                   "peek": lambda rva, kind, i: host}), name)  # one seat unseen: never clear
+
     def census(self, member0, roxas=0, sora=0, btlf=0, w=None):
         # One W_EX010_10 and one W_EX010_20 per dual-wield body, and Sora's own W_EX010_20 (runs axel-02, sora-01).
         w10 = btlf if w is None else w
