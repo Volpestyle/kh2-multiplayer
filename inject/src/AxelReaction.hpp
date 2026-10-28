@@ -262,23 +262,13 @@ inline AxelPress AxelPressDecision(const ReactionWindow* w,std::uint16_t command
     return localSlot==0?AxelPress::Execute:AxelPress::Claim;
 }
 
-// Slice 1 parks friend execution. A friend's RC needs a safe abort for an executor actor lost mid-RC: 1/3 must then
-// name nobody, and trap 1/18 faults on a null parent at 42C576. That abort comes with slice D. Until then the host
-// offers Axel's RCs to its own seat only, as the native picker did, and refuses any friend claim before consuming
-// anything, so the only executor is the host seat.
-inline constexpr bool kAxelFriendExecution=false;
-inline bool AxelExecutionAdmitted(std::uint8_t ownerSlot) noexcept {
-    return ownerSlot==0 || (kAxelFriendExecution && ownerSlot<3);
-}
-// The seats that may win an Axel offer: those that may execute it.
-inline std::array<ReactionSeat,3> AxelOfferSeats(std::array<ReactionSeat,3> seats) noexcept {
-    for(unsigned i=0;i<seats.size();++i)if(!AxelExecutionAdmitted(static_cast<std::uint8_t>(i)))seats[i]={};
-    return seats;
-}
+// Any seat may own and execute an Axel RC. The host runs a friend's with that seat's actor on the host, and the safe
+// abort below keeps a lost executor's RC from acting on anyone else.
+inline bool AxelExecutionAdmitted(std::uint8_t ownerSlot) noexcept { return ownerSlot<3; }
 // The host's consumption of an Axel window: ConsumeReaction, for an owner admitted to execute.
 inline bool AxelConsume(ReactionWindow& w,const ReactionCompletion& c,std::uint32_t epoch,std::uint32_t frame,
                         const std::array<ReactionSeat,3>& seats) noexcept {
-    return AxelExecutionAdmitted(c.slot) && ConsumeReaction(w,c,epoch,frame,AxelOfferSeats(seats));
+    return AxelExecutionAdmitted(c.slot) && ConsumeReaction(w,c,epoch,frame,seats);
 }
 
 // The RC's executor: the seat, and the actor on the host, that ran it. It is bound to that actor, not to the seat's
@@ -328,13 +318,47 @@ AxelContact AxelReadContact(const Read& read,const Decode& decode,std::uintptr_t
 // sysobj_player (1/3) inside Axel's script. With no RC bound, the caller's own choice. With one bound, the
 // executor's own actor, whatever its seat's state. If that actor no longer resolves, there is no owner to name:
 // Unresolved, never another seat chosen in its place. 1/3 must still name a live actor (trap 1/18 at 42C576 reads
-// the parent it resolves without a null check), so the adapter keeps the native result and says so. That result is
-// the host's own canonical player, which is the executor's seat only because friend execution is parked
-// (AxelExecutionAdmitted); slice D replaces this with the abort.
+// the parent it resolves without a null check), so the adapter keeps the native result and says so. That result
+// can be another seat's actor (the host's own), so the safe abort refuses every act on it (AxelActAdmitted).
 enum class AxelPlayerRoute : std::uint8_t { Choice, Executor, Unresolved };
 inline AxelPlayerRoute AxelPlayerRouteFor(bool executorBound,bool executorActorResolves) noexcept {
     if(!executorBound)return AxelPlayerRoute::Choice;
     return executorActorResolves?AxelPlayerRoute::Executor:AxelPlayerRoute::Unresolved;
+}
+
+// The safe abort: Axel's own acts on a seat's actor go only to the bound executor's resolving actor.
+// - 1/18 attach with Axel as the child (rc_run_up, rc_clear_light): the parent must be that actor.
+// - 1/29 capture with Axel as the source (the callback's AP10/AP12/AP13): the captured actor must be that actor.
+// Anything else is refused before the native call: the attach is skipped and the capture returns int 0. So when the
+// executor's actor is lost mid-RC, or its identity is unread, the RC's flow plays on with Axel unparented and nobody
+// else captured or held, instead of acting on 1/3's native result. An unread identity refuses the act without ending
+// the binding: unknown is never gone, and the next resolving read admits again.
+enum class AxelAct : std::uint8_t { Native, Admitted, Refused };
+inline AxelAct AxelActAdmitted(bool axelSource,bool seatTarget,bool executorBound,AxelActorState executor,
+                               bool targetIsExecutor) noexcept {
+    if(!axelSource || !seatTarget)return AxelAct::Native; // not Axel acting on a player: not ours
+    return executorBound && executor==AxelActorState::Resolves && targetIsExecutor?AxelAct::Admitted:AxelAct::Refused;
+}
+// Axel II's attach pair (docs/AXEL_REACTIONS.md): Axel the child of the executor's actor, flags 16386, bone 1. The
+// reverse of Thorn's qualified pair (the player the child of the boss at bone 5).
+inline constexpr std::uint32_t kAxelAttachFlags=16386,kAxelAttachBone=1;
+inline bool AxelAttachPair(std::uint32_t flags,std::uint32_t bone) noexcept {
+    return flags==kAxelAttachFlags && bone==kAxelAttachBone;
+}
+
+// The friend executor's owner role on the host: ScriptActorOwner's role stream (begin, capture, position, motion,
+// attachment, end) that replays the RC on the friend's own player. Axel's Overtaker and Clear Light hook no coroutine
+// into that actor (Burst Frontier's 1/112 hook mints its own role), so the role has no thread. It is current while
+// the executor stays bound to the same seat and actor and no coroutine holds the actor; the thread read must succeed.
+// Which RCs begin that role at completion: Overtaker and Clear Light. Burst Frontier hooks the player into its steering
+// coroutine (1/112), and ScriptActorOwner's hook mints the role, adopting the capture issued just before it.
+inline bool AxelRoleAtCompletion(std::uint16_t command) noexcept {
+    return command==kOvertaker || command==kClearLight;
+}
+inline bool AxelRoleHeld(bool executorBound,std::uint8_t executorSlot,std::uintptr_t executorActor,std::uint8_t roleSlot,
+                         std::uintptr_t roleActor,bool threadRead,std::uintptr_t thread) noexcept {
+    return executorBound && executorSlot<3 && executorSlot==roleSlot && executorActor && executorActor==roleActor &&
+        threadRead && !thread;
 }
 
 } // namespace kh2coop::inject::scriptmirror::rules
