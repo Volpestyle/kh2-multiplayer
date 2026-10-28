@@ -182,7 +182,7 @@ Used by all components. Defines the wire protocol, domain types, serialization, 
 |------|------|
 | `include/kh2coop/Types.hpp` | Vec3, ActorState, AvatarState, InputFrame, SlotType, etc. |
 | `include/kh2coop/Protocol.hpp` | Session messages, clock sync, world sync (RoomTransition, EventHold, EnemyManifest/Hp/Death, HitClaim, TransitionAck, ProgressUpdate) |
-| `include/kh2coop/EnemyClass.hpp` | Shared combat/boss classifier; admits exact Thorn307/type12 without globally admitting other type12 or script-created actors. |
+| `include/kh2coop/EnemyClass.hpp` | Shared combat/boss classifier; admits exact Thorn307/type12 without globally admitting other type12 or script-created actors. `SearchTargetBoss`: the exact bosses (Thorn, Axel II 81) the common target_search adapter may retarget (VUH-2912). |
 | `include/kh2coop/PrologueSeats.hpp` | Qualified profile/readiness, solo-wait and seat-color rules; checked native site identities live in `RouteSpawnPolicy.hpp` |
 | `include/kh2coop/EventScenes.hpp` | Checked host-led story scene and in-field event mappings |
 | `include/kh2coop/Codec.hpp` | PacketType enum, encode/decode declarations, `isWorldPacket` |

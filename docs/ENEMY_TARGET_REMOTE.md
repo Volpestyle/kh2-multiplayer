@@ -29,6 +29,37 @@ bosses are parked: the common search override does not change their separate
 targeting paths. Family-specific targeting qualification remains a live check.
 No party/status room expansion or package/profile change is included.
 
+### Axel II (VUH-2912)
+
+The searching-actor check admits type-4 mobs and exact boss identities only
+(`enemyclass::SearchTargetBoss`): Thorn (307, type 12) and, since VUH-2912,
+Axel II (`B_EX110`, 81, type 3). Before that, Axel II was refused as a type-3
+boss, so the host's Axel only ever chose the host's Roxas. Nothing else changed:
+the same nearest/hold/hysteresis/cap policy and candidate rules (a downed, stale
+or held seat is no candidate), Mirror mode only, native team and collision on
+the clone only while Axel holds our write, and zeroed hits on the clone
+(`RemoteVictim`). The friend takes the attack natively from its own mirrored
+Axel. `B_EX110_SKIRMISH` (2229, Axel I) runs the byte-identical script but stays
+out until a live run qualifies it (lead decision, VUH-2912; VUH-2916).
+
+The inventory comes from the installed `obj/B_EX110.mdlx` (`b_ex` BDX, decoded
+read-only with the OpenKH `7a3b945c` decoder; no game asset is committed). PCs are
+halfword addresses after the 16-byte header.
+
+| Use | Where | Effect on targeting |
+|---|---|---|
+| `target_search` (1/121), through one helper at PC 5869: `target_search(btlobj_target(self), self, mode)` | mode 0 from `mode_battle`; mode 2 from `battle_start`, `mode_battle_boss`, `mode_revenge_boss` | The common seam. Now chooses among the living players. |
+| `btlobj_target` (2/23), reading `+0xBF8` | `atk_slice`, `atk_assault(_revenge)`, `atk_disorder`, `move_target`, `move_various`, `idle`, `footwork`, `btl_normal/hard/super_hard`, and the animation-effect/init triggers (`target_dup`) | Follows the chosen seat. |
+| `sysobj_player` (1/3), the canonical player, through the helper at PC 5322 | `appear` facing; `mode_battle`'s leave/culling distance (PC 5792); the `atk_burst`/`_fast`/`_revenge` aim (`obj_step_pos` of the player, PC 6497); `idle_after_rc` | Bypasses `+0xBF8`. Left native. The burst aim is measured live (the host's boss hits while Axel targets the friend) before any seam is added. |
+| `sysobj_player` + `obj_attach` (1/18) | `rc_run_up`, `rc_clear_light` | Reaction-command attachment: VUH-2913. |
+| `attack_new` (2/10, five sites) | script-created attacks | Hazards and fire: VUH-2914. |
+
+The host logs `[enemy-target] boss-target frame=... objectId=81 target=<k> owner=<slot> mode=<m> valid=<mask>
+changed=<0|1> at=<x>,<z>` (own budget, 256) whenever a search-target boss changes its chosen candidate, back to
+the host's player included, or the set of candidates changes (`valid` bit k: candidate k, 0 the host). The
+rewrite log above prints only clone wins, within a 64-line budget shared with every mob.
+`net_prologue_mansion_axel_hp.json` is the live check (docs/SCENARIOS.md).
+
 ### Dusks hit the friend natively (VUH-2466)
 
 In the prologue's Basement Hall (both Roxases bound at site `tt19-134`), host targeting sends Dusks

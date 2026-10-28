@@ -2,6 +2,7 @@
 // No game process, no native reads. The adapter (EnemyTargetRemote.inl) is covered by the
 // lane's fake-image harness; live behaviour by the fixture in docs/ENEMY_TARGET_REMOTE.md.
 #include "EnemyTargetRemote.hpp"
+#include "kh2coop/EnemyClass.hpp"
 
 #include <cstdio>
 
@@ -152,6 +153,13 @@ int main() {
     CHECK("legacy families remain Shadow-only", !R::AllowedObject(301) && R::AllowedObject(302));
     CHECK("D14: every family but the denylist is selectable", R::AllowedObject(306, true) && R::AllowedObject(2408, true) &&
           !R::AllowedObject(2409, true) && !R::AllowedObject(317, true) && !R::AllowedObject(76, true) && !R::AllowedObject(0, true));
+    // VUH-2912: the searching-actor admission takes exact boss identities, never a whole boss type.
+    namespace EC = kh2coop::enemyclass;
+    CHECK("Axel II (B_EX110 81, type 3) is a search-target boss", EC::SearchTargetBoss(3, EC::AxelII) && R::AllowedObject(81, true));
+    CHECK("Thorn (type 12) stays a search-target boss", EC::SearchTargetBoss(12, EC::TwilightThorn));
+    CHECK("other type-3 bosses, Axel I 2229 and a type mismatch keep native targeting",
+          !EC::SearchTargetBoss(3, 2229) && !EC::SearchTargetBoss(3, 82) && !EC::SearchTargetBoss(3, EC::TwilightThorn) &&
+          !EC::SearchTargetBoss(12, EC::AxelII) && !EC::SearchTargetBoss(4, EC::AxelII) && !EC::SearchTargetBoss(3, 0));
     R::Candidate wave[3] = {{true, 1000, 0}, {true, 0, 0}, {true, 2000, 0}};
     std::uint32_t waveLoad[3] {};
     CHECK("ordinary wave chooses friend1 near enemy", R::Choose(wave, 0, 0, nullptr, waveLoad, 1000) == 1);

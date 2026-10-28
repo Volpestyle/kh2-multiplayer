@@ -55,6 +55,7 @@ constexpr std::uint32_t POSE_FRESH_FRAMES = 30;
 constexpr unsigned LOG_BUDGET = 64;
 
 constexpr unsigned FORWARD_LOG_BUDGET = 256, AUTHORITY_LOG_BUDGET = 64, VETO_LOG_BUDGET = 64, OWNER_LOG_BUDGET = 256;
+constexpr unsigned BOSS_LOG_BUDGET = 256;  // search-target bosses' target or candidate changes only
 constexpr std::uint32_t STATS_INTERVAL = 300;
 
 struct Stats {
@@ -78,6 +79,7 @@ struct State {
     std::uint32_t written[R::Policy::TableCapacity] {};  // clone handle we wrote, 0 = none
     std::uint32_t native[R::Policy::TableCapacity] {};   // the native player handle we replaced
     std::uint32_t nativePart[R::Policy::TableCapacity] {}; // ... and its part (S4)
+    std::uint8_t bossValid[R::Policy::TableCapacity] {};  // VUH-2912: candidate mask last logged for a boss row
     std::uint8_t mode = 0;                               // R::Mode, fixed at Configure (host's mirror flag)
     // Host advertisement.
     std::uint8_t sentMask = 0, sentMode = 0;
@@ -92,7 +94,7 @@ struct State {
     std::uint32_t reviveCount = 0;                       // S10: DownedSpike's revive counter last seen
     std::uint32_t statsFrame = 0;
     Stats stats {};
-    unsigned logs = 0, forwardLogs = 0, authorityLogs = 0, vetoLogs = 0, ownerLogs = 0;
+    unsigned logs = 0, forwardLogs = 0, authorityLogs = 0, vetoLogs = 0, ownerLogs = 0, bossLogs = 0;
 };
 static State g;
 static SearchFn g_nativeSearch = nullptr;
@@ -144,7 +146,7 @@ static bool Canonical(uintptr_t& player) noexcept {
 }
 static bool ReadSlot(uintptr_t enemy, R::Slot& s) noexcept { return ReadHitTraceMemory(enemy + OFF_TARGET, &s, sizeof(s)); }
 
-// A live, allowlisted enemy (type mob, team 2, HP > 0) that owns this +0xBF8.
+// A live, allowlisted enemy (type mob or an exact search-target boss, team 2, HP > 0) that owns this +0xBF8.
 static bool EligibleEnemy(uintptr_t enemy, uintptr_t& objentry) noexcept {
     std::uint8_t type = 0;
     std::uint32_t id = 0, team = 0;
@@ -153,7 +155,7 @@ static bool EligibleEnemy(uintptr_t enemy, uintptr_t& objentry) noexcept {
     return ReadHitTrace(enemy + offsets::actor::OBJENTRY_PTR, objentry) && objentry > g_exeBase &&
            objentry < g_exeBase + 0x3000000 && ReadHitTrace(objentry + offsets::objentry::TYPE_FLAGS, type) &&
            ReadHitTrace(objentry + offsets::objentry::OBJECT_ID, id) &&
-           (type == offsets::objentry::TYPE_MOB || enemyclass::LargeBoss(type, id)) &&
+           (type == offsets::objentry::TYPE_MOB || enemyclass::SearchTargetBoss(type, id)) &&
            R::AllowedObject(id, g.allMirrored) && ReadHitTrace(enemy + OFF_TEAM, team) && team == ENEMY_TEAM && ReadLive(enemy, status);
 }
 
@@ -196,9 +198,28 @@ static int NewAssignment(uintptr_t enemy, uintptr_t objentry) noexcept {
         g.table[i].used = true; g.table[i].enemy = enemy; g.table[i].objentry = objentry;
         g.table[i].target = 0; g.table[i].since = g_frameCounter;
         g.written[i] = 0;
+        g.bossValid[i] = 0xFF;
         return static_cast<int>(i);
     }
     return -1;
+}
+
+// VUH-2912 receipt for a search-target boss: each change of its chosen seat, including back to the local player
+// (target 0, which the rewrite log above never prints), and each change in which seats were candidates at its
+// search (valid bit k: candidate k, 0 local, 1-2 clones; a downed or stale seat drops out). Diagnostic only.
+static void LogBossTarget(int index, uintptr_t enemy, uintptr_t objentry, int k, std::uint32_t mode, bool changed) noexcept {
+    std::uint8_t type = 0, valid = 0;
+    for (unsigned i = 0; i < R::kCandidates; ++i) valid |= g.candidates[i].valid ? std::uint8_t(1u << i) : std::uint8_t(0);
+    if (!changed && valid == g.bossValid[index]) return;
+    std::uint32_t objectId = 0;
+    if (!ReadHitTrace(objentry + offsets::objentry::TYPE_FLAGS, type) || type == offsets::objentry::TYPE_MOB ||
+        !ReadHitTrace(objentry + offsets::objentry::OBJECT_ID, objectId) || !Budget(g.bossLogs, BOSS_LOG_BUDGET)) return;
+    g.bossValid[index] = valid;
+    float x = 0, z = 0;
+    ReadXZ(enemy, x, z);
+    Log("[enemy-target] boss-target frame=%u enemy=%llX objectId=%u target=%d owner=%u mode=%u valid=%u changed=%u at=%.0f,%.0f",
+        g_frameCounter, U(enemy), objectId, k, unsigned(g.ownerSlot[k]), mode, unsigned(valid), changed ? 1u : 0u,
+        double(x), double(z));
 }
 
 static void __fastcall SearchDetour(std::uint32_t* stack) {
@@ -226,7 +247,9 @@ static void __fastcall SearchDetour(std::uint32_t* stack) {
     if (!ReadXZ(enemy, ex, ez)) return;
     const int k = R::Choose(g.candidates, ex, ez, fresh ? nullptr : &a, load, g_frameCounter);
     if (k < 0) { if (fresh) a = {}; return; }
-    if (fresh || static_cast<std::uint8_t>(k) != a.target) { a.target = static_cast<std::uint8_t>(k); a.since = g_frameCounter; }
+    const bool changed = fresh || static_cast<std::uint8_t>(k) != a.target;
+    if (changed) { a.target = static_cast<std::uint8_t>(k); a.since = g_frameCounter; }
+    LogBossTarget(index, enemy, objentry, k, now.mode, changed);
     if (k == 0) { g.written[index] = 0; ++g.stats.keptLocal; return; }
     const std::uint32_t handle = g.candidateHandle[k];
     if (!handle) return;
