@@ -190,6 +190,30 @@ constexpr const char* GateReasonName(GateReason r) noexcept {
     return "?";
 }
 
+// VUH-2931: how a downed host takes the full party's game over once everyone is down. A logically downed
+// Roxas host (mode 4) has not died, so it runs its native death. A Sora host's held death (mode 0 or 3)
+// already ran and its one game-over request was skipped, so the host issues that request itself, while
+// still natively dead and before any game-over task. Anything else is not this host's to take.
+enum class FullPartyPath : std::uint8_t { None, NativeDeath, GameOverRequest };
+struct FullPartyFacts {
+    bool host = false, downed = false, logical = false, deadFlag = false, taskIdle = false;
+    std::uint32_t gateMode = 0;
+};
+constexpr FullPartyPath FullPartyPathFor(const FullPartyFacts& f) noexcept {
+    if (!f.host || !f.downed) return FullPartyPath::None;
+    if (f.logical) return FullPartyPath::NativeDeath;
+    return (f.gateMode == 0 || f.gateMode == 3) && f.deadFlag && f.taskIdle ? FullPartyPath::GameOverRequest
+                                                                             : FullPartyPath::None;
+}
+constexpr const char* FullPartyPathName(FullPartyPath p) noexcept {
+    switch (p) {
+    case FullPartyPath::None: return "none";
+    case FullPartyPath::NativeDeath: return "native-death";
+    case FullPartyPath::GameOverRequest: return "game-over-request";
+    }
+    return "?";
+}
+
 // Product default (lead, 2026-10-06): revive restores 25% of max HP, at least 1.
 constexpr int kRevivePercent = 25;
 constexpr int ReviveTarget(int maxHp) noexcept {

@@ -1423,14 +1423,25 @@ static void Tick(uintptr_t head) {
                 // The game's own ignore-hit timer (0x3D65A0 skips non-heal hits while +0xD70 > 0), kept up.
                 __try { g_down.setInvuln(s.actor, 30.0f); } __except (EXCEPTION_EXECUTE_HANDLER) {}
             }
-            if (g_down.logical && enemysync::ActivationRole() == 1) {
+            FullPartyFacts party {};
+            party.host = enemysync::ActivationRole() == 1;
+            party.downed = true;
+            party.logical = g_down.logical;
+            party.deadFlag = (s.flags & 4U) != 0;
+            party.taskIdle = s.task == 0;
+            party.gateMode = g_down.lastGateMode;
+            const FullPartyPath path = FullPartyPathFor(party);
+            const PFN_Request request = g_down.lastGateMode == 3 ? g_down.origReq3 : g_down.origReq0;
+            if (path != FullPartyPath::None) {
                 // VUH-2465 (VUH-2266): the host is down and so is every teammate whose fresh pose is in this
-                // room. One second of that and the host lets its own native death run: the game's game
-                // over and Continue retry the room from its checkpoint (no save load or write), and the
-                // friends follow that host-led reload, which resolves their downing. VUH-2632 (D17): a host
-                // that has never seen a teammate in this session is everyone down by itself. VUH-2640: so is
-                // a host every other seat of which is absent on real evidence (no roster connection, or a
-                // returning seat quarantined until its recovery); pose silence alone never counts.
+                // room. One second of that and the host takes the game's own game over: Continue retries the
+                // room from its checkpoint (no save load or write), and the friends follow that host-led
+                // reload, which resolves their downing. A logical host lets its native death run; VUH-2931: a
+                // Sora host, already held natively dead, issues the game-over request its death asked for.
+                // VUH-2632 (D17): a host that has never seen a teammate in this session is everyone down by
+                // itself. VUH-2640: so is a host every other seat of which is absent on real evidence (no
+                // roster connection, or a returning seat quarantined until its recovery); pose silence alone
+                // never counts.
                 bool any = false, all = true;
                 for (const auto& d : g_puppets) {
                     const auto& a = d.pose.pose;
@@ -1444,9 +1455,10 @@ static void Tick(uintptr_t head) {
                     bound.authority.connectionIds, bound.returning);
                 g_down.allDownFrames = downedreturn::EveryoneDown(any, all, g_sessionTeammates.Seen(),
                     downedreturn::EveryOtherSeatAbsent(seats)) ? g_down.allDownFrames + 1 : 0;
-                if (g_down.allDownFrames >= 60 && g_origApplyStatDelta) {
-                    Log("[downed] full party down episode=%llX: the host takes the native game over (Continue retries the room)",
-                        static_cast<unsigned long long>(g_down.episode));
+                if (g_down.allDownFrames >= 60 &&
+                    (path == FullPartyPath::NativeDeath ? g_origApplyStatDelta != nullptr : request != nullptr)) {
+                    Log("[downed] full party down episode=%llX: the host takes the native game over (Continue retries the room) path=%s mode=%u",
+                        static_cast<unsigned long long>(g_down.episode), FullPartyPathName(path), g_down.lastGateMode);
                     g_down.fullPartyDown = true;
                     g_down.fullPartyLoad = warp::LoadSerial();
                     g_owedReturn.Clear();
@@ -1456,8 +1468,13 @@ static void Tick(uintptr_t head) {
                     g_down.allDownFrames = 0;
                     g_logicalActor.store(0, std::memory_order_release);
                     g_logicalHeld.store(false, std::memory_order_release);
-                    __try { (void)g_origApplyStatDelta(reinterpret_cast<void*>(s.actor), -s.hp, 0, 0); }
-                    __except (EXCEPTION_EXECUTE_HANDLER) { Log("[downed] full party down: native death FAULT"); }
+                    if (path == FullPartyPath::NativeDeath) {
+                        __try { (void)g_origApplyStatDelta(reinterpret_cast<void*>(s.actor), -s.hp, 0, 0); }
+                        __except (EXCEPTION_EXECUTE_HANDLER) { Log("[downed] full party down: native death FAULT"); }
+                    } else {
+                        __try { (void)request(s.actor); }
+                        __except (EXCEPTION_EXECUTE_HANDLER) { Log("[downed] full party down: game-over request FAULT"); }
+                    }
                 }
             }
             // An HP orb heals outside the 3D2EB0 funnel (run 20261019-131234: 1 -> 3 with no stat call).

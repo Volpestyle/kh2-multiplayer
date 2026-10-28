@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <initializer_list>
+#include <string>
 
 using namespace kh2coop::inject::downedspike;
 
@@ -36,6 +37,30 @@ int main() {
                           &f.actorIsHead, &f.deadFlag, &f.taskIdle, &f.stateReady};
         *fields[bit] = false;
         CHECK(Decide(f) != GateReason::Intercept);
+    }
+
+    // VUH-2931: every downed host has a way to the full party's game over. Sora's held death (mode 0/3,
+    // run vuh2912-sora-01) asks for the skipped request; Roxas's logical downing (mode 4) runs its death.
+    {
+        FullPartyFacts held {};
+        held.host = held.downed = held.deadFlag = held.taskIdle = true;
+        for (std::uint32_t mode : {0u, 3u}) {
+            held.gateMode = mode;
+            CHECK(FullPartyPathFor(held) == FullPartyPath::GameOverRequest);
+        }
+        auto logical = held;
+        logical.logical = true;
+        logical.gateMode = 4;
+        logical.deadFlag = false; // a logical downing keeps the dead bit clear
+        CHECK(FullPartyPathFor(logical) == FullPartyPath::NativeDeath);
+        { auto f = held; f.host = false; CHECK(FullPartyPathFor(f) == FullPartyPath::None); }     // a friend follows the host
+        { auto f = logical; f.host = false; CHECK(FullPartyPathFor(f) == FullPartyPath::None); }
+        { auto f = held; f.downed = false; CHECK(FullPartyPathFor(f) == FullPartyPath::None); }
+        { auto f = held; f.deadFlag = false; CHECK(FullPartyPathFor(f) == FullPartyPath::None); } // revived meanwhile
+        { auto f = held; f.taskIdle = false; CHECK(FullPartyPathFor(f) == FullPartyPath::None); } // a game over is running
+        { auto f = held; f.gateMode = 4; CHECK(FullPartyPathFor(f) == FullPartyPath::None); }     // not a held death
+        { auto f = held; f.gateMode = 1; CHECK(FullPartyPathFor(f) == FullPartyPath::None); }
+        CHECK(std::string(FullPartyPathName(FullPartyPath::GameOverRequest)) == "game-over-request");
     }
 
     CHECK(ReviveTarget(0) == 0);

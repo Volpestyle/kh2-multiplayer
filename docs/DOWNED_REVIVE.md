@@ -193,7 +193,7 @@ round, whose paths it does not exercise.
 - A room change, actor change or fault while downed marks the feature Refused
   for the rest of the process (no retry, no auto-revive on transition); the
   player may stay natively dead with no game over.
-- All-party down, mission deaths (mode 3 with an actor is gated; arg 0 stays
+- All-party down (since handled: "Full-party down" below, VUH-2465 and VUH-2931), mission deaths (mode 3 with an actor is gated; arg 0 stays
   native), drive forms, summons, the `g_sys400` bit-17 branch and non-Sora
   player classes are out of scope. The debug Kill refuses those branches.
 - No range or liveness cross-check on the owner side (the requester's prompt
@@ -241,6 +241,15 @@ How it works (all in `DownedSpike.inl`, behind `KH2COOP_DOWNED_SPIKE=1`):
   second, the host lets its own native death run (the game-over gate passes it). The game's game over
   and **Continue** retry the room from the checkpoint, with no save loaded or written. Friends follow
   that host-led reload, which resolves their downing.
+  - **A Sora host (VUH-2931).** Sora is never downed logically, so a Sora host is already natively dead,
+    and the gate skipped its one game-over request (mode 0 or 3). The same check runs for it. Once the
+    whole party is down, it calls that request itself through the original function, while still
+    natively dead and with no game-over task. The log reads
+    `[downed] full party down ... path=game-over-request mode=0`; a logical host logs
+    `path=native-death mode=4`. Before this, a Sora host never ran the check: run `vuh2912-sora-01`
+    (Sora host, Roxas friend, Axel II) left both seats down with no game over. The rule is
+    `FullPartyPathFor` in `DownedSpikeState.hpp`. The live proof is a rerun of
+    `net_prologue_mansion_axel_form_sora_host`.
 
 PC1 loopback evidence: run `20261019-151151` passes as a whole (FM-02, Day 6 Computer Room, Basement
 Hall and Axel's room; real lethal hits through `kh2ctl hit damage` and enemy hits; native kills stand
