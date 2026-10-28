@@ -368,10 +368,14 @@ not exercised on the Mac.
 - **Clear Light for a friend.** The host's copy of the friend's actor ticks native range triggers once Axel's 1/29
   binds `AP12` on it, so trigger 26 sets its `+0x18C` bit 21 and `+0x638` (Kit, `b034e8cf`). Bit 21 is a level
   flag cleared every tick, and the order of that tick against the host's chain read is unproven.
-- **Cameras still play on the host.** A friend's Overtaker or Clear Light runs `camera_start_global`, Clear Light's
-  white-out and `camera_reset`, and Burst's `camera_watch` on the host's screen, and the friend sees none of them.
-  Forwarding them needs the host to skip them and send op 5. That follows in its own change, once the trap bodies
-  are read.
+- **Only the camera starts are forwarded.** Axel starts his RC cameras with `camera_start_global` (1/164, `42E0D0`),
+  which tail-jumps to `3DB2F0(Axel, name, 0)`: anchored on Axel, with no target, and no result pushed (flags `0x2`).
+  ScriptActorOwner hooks its slot (`SmOwnerCameraGlobal`, pinned, optional: refused, the host plays it as before).
+  During a friend's Overtaker or Clear Light (its held role) the host skips the start and sends it as the role's
+  op 5 (`AxelCameraForwarded`), with the no-target code `kAxelCameraNone`; the friend replays it on its Axel clone
+  through the existing op-5 path, so its camera retirement receipt is Thorn's. Still on the host and not sent:
+  Burst's `camera_watch` (1/207, `430B80`), Clear Light's white-out thread (2/20 queues D303: 0/31, 0/32) and
+  `camera_reset` (1/295). All of these are global per game, not per actor; their bodies are in Kit's `b034e8cf`.
 - **Axel's own pose on the friend while held.** The host stops publishing Axel's motion while he is parented, so the
   friend's held clone keeps its last mirrored motion.
 - **Host-owned RCs show nothing on the friend's copy of the host.** No role is minted for the host's own executor,
