@@ -22,7 +22,7 @@ struct Scene {
     std::uint16_t world, room, door, map, battle, event;
     std::string_view name;
 };
-inline constexpr std::array<Scene, 15> Scenes {{
+inline constexpr std::array<Scene, 17> Scenes {{
     {2, 7, 0, 0, 0, 3, "tt07-armor-shop"},           // event 104: Tram Common evt95 -> evt97
     {2, 7, 0, 0, 0, 4, "tt07-accessory-shop"},       // event 106: evt97 -> evt99
     {2, 4, 0, 81, 81, 81, "tt04-cat-lock-on"},       // event 108: Tram Common evt99 -> Sandlot evt76
@@ -39,10 +39,10 @@ inline constexpr std::array<Scene, 15> Scenes {{
     // VUH-2918, run 20261027-114125 (VUH-2763 qualification): after 02/15 142 the host loads 02/01 54,
     // where it plays the me4 movie, then 02/01 59, each event-only (the gameplay gate stays closed and
     // field play lasts only the frame of the next native start). With neither 02/01 load announced, the
-    // friend waited at its own blocked exit to 02/01 54 for the rest of the run. After them the host
-    // plays two more event loads, 02/03 door 50 map 2 evt 2 and 02/05 evt 1, left unqualified here, and
-    // reaches field play at 02/05 door 50 evt 2; the friend skips the two, its blocked exit to 02/03
-    // taking that field announcement (run 20261027-125601).
+    // friend waited at its own blocked exit to 02/01 54 for the rest of the run.
+    // VUH-2921 also qualifies the next two observed event loads (run 20261027-125601): the Back Alley
+    // reminder to hurry to the Sandlot (native event402), then the Day4 Struggle opening. Both seats
+    // should play this story setup. The final 02/05 door50 evt2 is field play, not a qualified scene.
     {2, 0, 0, 51, 51, 51, "tt00-after-thorn"},
     {2, 4, 0, 83, 83, 83, "tt04-after-thorn"},
     {2, 2, 0, 67, 67, 67, "tt02-after-thorn-67"},
@@ -51,6 +51,8 @@ inline constexpr std::array<Scene, 15> Scenes {{
     {2, 21, 0, 142, 142, 142, "tt15-after-thorn"},
     {2, 1, 0, 54, 54, 54, "tt01-after-thorn-54"},
     {2, 1, 0, 59, 59, 59, "tt01-after-thorn-59"},
+    {2, 3, 50, 2, 0, 2, "tt03-after-thorn-402"},
+    {2, 5, 0, 0, 0, 1, "tt05-struggle-opening"},
 }};
 
 inline const Scene* Qualified(std::uint16_t world, std::uint16_t room, std::uint16_t door, std::uint16_t map,

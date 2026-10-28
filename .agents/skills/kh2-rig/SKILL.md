@@ -7,6 +7,10 @@ description: Capability index for driving the KH2 co-op rig and producing eviden
 
 Most rig capabilities already exist. Before writing a new helper, look here, then in `docs/KH2_CONTROL_CLI.md` and `docs/SCENARIOS.md`. When you build something reusable, put it in `tools/` and add a line here. Helpers left only under `build/rig/<lane>/` get forgotten: that's how video capture was "lost" for a day.
 
+Every Thorn-arena run sets `KH2COOP_THORN_FLOOR_TRACE=1` on **both boots** and
+retains the automatic floor verdict (VUH-2808). Coverage gaps remain UNAVAILABLE;
+collect traces opportunistically, without dedicated floor-reproduction runs.
+
 ## Capabilities
 
 | Need | Use | Notes |

@@ -1,6 +1,6 @@
 {
   "name": "net_twilight_thorn_after_chain",
-  "description": "VUH-2918: the movie qualification route through an assisted Thorn kill, then both seats through the post-Thorn chain (02/15 142, me4 in 02/01 54, 02/01 59) to the same 02/05 field (door 50 evt 2), with Cross pressed for the host's 02/03 opening dialog.",
+  "description": "VUH-2921: assisted Thorn kill, both seats play the post-Thorn scenes including the Back Alley reminder and Struggle opening, then share 02/05 door50 evt2 field. Both boots retain VUH-2808 floor tracing; Cross is scoped to each seat's active Back Alley scene.",
   "testOnly": [
     "enemy_hp_write"
   ],
@@ -16,7 +16,8 @@
         "KH2COOP_ENEMY_MIRROR_TRACE": "1",
         "KH2COOP_THORN_HIT_TRACE": "1",
         "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
-        "KH2COOP_DOWNED_SPIKE_CONTROL": "0"
+        "KH2COOP_DOWNED_SPIKE_CONTROL": "0",
+        "KH2COOP_THORN_FLOOR_TRACE": "1"
       }
     },
     {
@@ -28,7 +29,8 @@
         "KH2COOP_ENEMY_MIRROR_TRACE": "1",
         "KH2COOP_THORN_HIT_TRACE": "1",
         "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
-        "KH2COOP_DOWNED_SPIKE_CONTROL": "0"
+        "KH2COOP_DOWNED_SPIKE_CONTROL": "0",
+        "KH2COOP_THORN_FLOOR_TRACE": "1"
       }
     },
     {
@@ -279,76 +281,240 @@
       "name": "friend_while_host_tt03"
     },
     {
-      "do": "press",
-      "instance": 0,
-      "button": "cross",
-      "ms": 120,
-      "times": 4,
-      "gapMs": 1000
+      "do": "wait_until",
+      "expr": "all(location(i)==[2,3,50,2,0,2] and peek('0xB65210','u32',i)!=0 and peek('0x2A11478','u32',i)!=0 and peek('0x7435D0','u8',i)==255 for i in (0,1))",
+      "timeoutMs": 180000
     },
     {
-      "do": "wait",
-      "ms": 2000
-    },
-    {
-      "do": "press",
-      "instance": 0,
-      "button": "cross",
-      "ms": 120,
-      "times": 4,
-      "gapMs": 1000
-    },
-    {
-      "do": "wait",
-      "ms": 2000
+      "do": "capture",
+      "instance": 1,
+      "name": "friend_tt03_opening"
     },
     {
       "do": "press",
       "instance": 0,
       "button": "cross",
       "ms": 120,
-      "times": 4,
-      "gapMs": 1000
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
     },
     {
       "do": "wait",
-      "ms": 2000
+      "ms": 1000
     },
     {
       "do": "press",
       "instance": 0,
       "button": "cross",
       "ms": 120,
-      "times": 4,
-      "gapMs": 1000
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
     },
     {
       "do": "wait",
-      "ms": 2000
+      "ms": 1000
     },
     {
       "do": "press",
       "instance": 0,
       "button": "cross",
       "ms": 120,
-      "times": 4,
-      "gapMs": 1000
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
     },
     {
       "do": "wait",
-      "ms": 2000
+      "ms": 1000
     },
     {
       "do": "press",
       "instance": 0,
       "button": "cross",
       "ms": 120,
-      "times": 4,
-      "gapMs": 1000
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
     },
     {
       "do": "wait",
-      "ms": 2000
+      "ms": 1000
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
+    },
+    {
+      "do": "wait",
+      "ms": 1000
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
+    },
+    {
+      "do": "wait",
+      "ms": 1000
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
+    },
+    {
+      "do": "wait",
+      "ms": 1000
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
+    },
+    {
+      "do": "wait",
+      "ms": 1000
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
+    },
+    {
+      "do": "wait",
+      "ms": 1000
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
+    },
+    {
+      "do": "wait",
+      "ms": 1000
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
+    },
+    {
+      "do": "wait",
+      "ms": 1000
+    },
+    {
+      "do": "press",
+      "instance": 0,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(0)!=[2,3,50,2,0,2] or peek('0xB65210','u32',0)==0 or peek('0x2A11478','u32',0)==0 or peek('0x7435D0','u8',0)!=255"
+    },
+    {
+      "do": "press",
+      "instance": 1,
+      "button": "cross",
+      "ms": 120,
+      "skipIf": "location(1)!=[2,3,50,2,0,2] or peek('0xB65210','u32',1)==0 or peek('0x2A11478','u32',1)==0 or peek('0x7435D0','u8',1)!=255"
+    },
+    {
+      "do": "wait",
+      "ms": 1000
+    },
+    {
+      "do": "wait_until",
+      "expr": "location(1)==[2,5,0,0,0,1] and peek('0xB65210','u32',1)!=0 and peek('0x2A11478','u32',1)!=0",
+      "timeoutMs": 180000
+    },
+    {
+      "do": "capture",
+      "instance": 1,
+      "name": "friend_tt05_opening"
     },
     {
       "do": "wait_until",
@@ -363,12 +529,17 @@
     {
       "do": "save",
       "as": "after_chain",
-      "expr": "{'location':[location(i) for i in (0,1)],'host_scenes':[log_count('[event-scene] host published scene='+n,0) for n in ('tt15-after-thorn','tt01-after-thorn-54','tt01-after-thorn-59')],'friend_issued':log_count('[warp] client issued epoch',1),'me4':[len(log_matches(r'\\[saveguard\\] redirected [^\\n]*me4\\.mp4 -> ',i)) for i in (0,1)]}"
+      "expr": "{'location':[location(i) for i in (0,1)],'host_scenes':[log_count('[event-scene] host published scene='+n,0) for n in ('tt15-after-thorn','tt01-after-thorn-54','tt01-after-thorn-59','tt03-after-thorn-402','tt05-struggle-opening')],'friend_issued':log_count('[warp] client issued epoch',1),'me4':[len(log_matches(r'\\[saveguard\\] redirected [^\\n]*me4\\.mp4 -> ',i)) for i in (0,1)],'friend_scene_loads':[len(log_matches(p,1)) for p in (r'\\[warp\\] load complete [^\\n]*room=02/03 door=50 map=2 btl=0 evt=2(?:\\s|$)',r'\\[warp\\] load complete [^\\n]*room=02/05 door=0 map=0 btl=0 evt=1(?:\\s|$)')]}"
+    },
+    {
+      "do": "assert",
+      "expr": "all(n>=1 for n in saved['after_chain']['friend_scene_loads'])",
+      "message": "The friend must load both exact story scenes, not skip to the final 02/05 field"
     },
     {
       "do": "assert",
       "expr": "all(n>=1 for n in saved['after_chain']['host_scenes'])",
-      "message": "The host must announce 02/15 142, 02/01 54 and 02/01 59 as scenes"
+      "message": "The host must announce all five post-Thorn scenes through the Struggle opening"
     },
     {
       "do": "assert",

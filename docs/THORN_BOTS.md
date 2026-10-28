@@ -6,6 +6,11 @@ pilot. `net_twilight_thorn_bots05.json` includes the Calling combat and door
 routes. There is one input driver per seat, and no OS focus/input is required.
 Use matched DLL/runtime/relay products built and pinned from current main.
 
+Every Thorn-arena run must boot **both instances** with
+`KH2COOP_THORN_FLOOR_TRACE=1` (VUH-2808). Retain the native boundary traces and
+automatic floor verdict; coverage gaps stay UNAVAILABLE. VUH-2808 has no further
+dedicated reproduction attempts: collect this evidence alongside product runs.
+
 The pilots approach a downed partner in 3D, yield to actionable boss reactions,
 hold Triangle while native revive progress advances, and release when the native
 bar completes. They remain neutral while logically downed. The strict Calling10
