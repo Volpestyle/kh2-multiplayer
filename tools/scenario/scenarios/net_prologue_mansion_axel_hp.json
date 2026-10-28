@@ -274,8 +274,8 @@
   },
   {
    "do": "assert",
-   "expr": "saved['friend_target_quiet']['aligned'] and {'hits': len(log_matches(r'(?P<x>victim=B_EX110@|\\[enemysync\\] host hit claim [^\\n]*objectId=81 )', 0)), 'claims': len(log_matches(r'\\[enemysync\\] client hit claim [^\\n]*objectId=81 ', 1)), 'targets': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 ', 0))} == {k: saved['friend_target_quiet'][k] for k in ('hits', 'claims', 'targets')} and (log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '1'",
-   "message": "SETUP FAILURE (window), not a targeting result: friend_target's window opened without Axel's selection of the friend and settled boss HP"
+   "expr": "saved['friend_target_quiet']['aligned'] and {'hits': len(log_matches(r'(?P<x>victim=B_EX110@|\\[enemysync\\] host hit claim [^\\n]*objectId=81 )', 0)), 'claims': len(log_matches(r'\\[enemysync\\] client hit claim [^\\n]*objectId=81 ', 1)), 'targets': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 ', 0))} == {k: saved['friend_target_quiet'][k] for k in ('hits', 'claims', 'targets')} and (log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '1' and all(log_count('[downed] gate intercept', i) <= log_count('[downed] revive returned', i) for i in (0, 1))",
+   "message": "SETUP FAILURE (window), not a targeting result: friend_target's window opened without Axel's selection of the friend, settled boss HP and both seats standing"
   },
   {
    "do": "fight",
@@ -434,8 +434,8 @@
   },
   {
    "do": "assert",
-   "expr": "saved['host_target_quiet']['aligned'] and {'hits': len(log_matches(r'(?P<x>victim=B_EX110@|\\[enemysync\\] host hit claim [^\\n]*objectId=81 )', 0)), 'claims': len(log_matches(r'\\[enemysync\\] client hit claim [^\\n]*objectId=81 ', 1)), 'targets': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 ', 0))} == {k: saved['host_target_quiet'][k] for k in ('hits', 'claims', 'targets')} and (log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '0'",
-   "message": "SETUP FAILURE (window), not a targeting result: host_target's window opened without Axel's selection of the host and settled boss HP"
+   "expr": "saved['host_target_quiet']['aligned'] and {'hits': len(log_matches(r'(?P<x>victim=B_EX110@|\\[enemysync\\] host hit claim [^\\n]*objectId=81 )', 0)), 'claims': len(log_matches(r'\\[enemysync\\] client hit claim [^\\n]*objectId=81 ', 1)), 'targets': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 ', 0))} == {k: saved['host_target_quiet'][k] for k in ('hits', 'claims', 'targets')} and (log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '0' and all(log_count('[downed] gate intercept', i) <= log_count('[downed] revive returned', i) for i in (0, 1))",
+   "message": "SETUP FAILURE (window), not a targeting result: host_target's window opened without Axel's selection of the host, settled boss HP and both seats standing"
   },
   {
    "do": "fight",

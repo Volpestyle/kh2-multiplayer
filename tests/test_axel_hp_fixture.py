@@ -160,6 +160,17 @@ class AxelHpFixtureTest(unittest.TestCase):
             turned = host + [target(1 - fighter)]
             late = evaluate(quiet["expr"], {0: turned, 1: friend}, actors=self.boss(445))
             self.assertFalse(opens(turned, s=late), name)
+            # The selection fight may down a seat: both must stand when the window opens (Ione fc9e195f).
+            for downed in (0, 1):
+                logs = {0: list(host), 1: list(friend)}
+                logs[downed].append("[downed] gate intercept mode=4 logical=1")
+                snap_d = evaluate(quiet["expr"], logs, actors=self.boss(445))
+                self.assertFalse(evaluate(check["expr"], logs, {f"{name}_quiet": snap_d}), (name, downed))
+            # A setup claim sent before the snapshot and applied only after the mark is not aligned.
+            sent = friend + [self.CLIENT_CLAIM.format(2)]
+            crossing = evaluate(quiet["expr"], {0: host, 1: sent}, actors=self.boss(445))
+            self.assertFalse(crossing["aligned"], name)
+            self.assertFalse(opens(host + [self.HOST_CLAIM.format(2)], sent, crossing), name)
 
     def test_each_round_must_reach_its_milestone(self):
         for name, fighter, reviver in ROUNDS:

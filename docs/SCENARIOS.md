@@ -3532,8 +3532,9 @@ Kills take `require: false`, so a seat Axel already downed refuses with `WrongSt
   `[statehash] native` Axel sample newer than that fight must equal Axel's live HP, and every friend claim on Axel
   must have its host application or reject. That makes the `hp_ledger`'s start sample (the last one before the
   mark) exact. After the baseline, a snapshot of the Axel hit, claim and boss-target line counts is taken with
-  that alignment rechecked, then the mark. The window opens only if nothing moved since the snapshot and the
-  selection still names the fighter, else SETUP FAILURE (window). In the open window the walker only revives
+  that alignment rechecked, then the mark. The window opens only if nothing moved since the snapshot, the
+  selection still names the fighter and both seats stand (the selection fight may have downed one), else SETUP
+  FAILURE (window). In the open window the walker only revives
   (`revive_guard`) while the fighter runs the
   `fight` bot, filmed on both seats for the round's full 20 s, with positions and Axel's motion sampled every
   500 ms. The fight's `until` (Axel chose the fighter, the fighter was hit or downed, it landed damage) must be
