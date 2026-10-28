@@ -352,8 +352,10 @@ capture reaches it:
   executor keeps its actor. A room change or load drops the roles with the room.
 
 **Logs:** `[axel-rc] offer`, `offer end`, `observation failed`, `chain unread`/`chain read`, `client offer`,
-`local completion`, `complete`, `complete refused`, `press refused`, `executor engaged`, `executor end` and
-`player unresolved`, 256 lines per session.
+`local completion`, `complete`, `complete refused`, `press refused`, `executor engaged`, `executor end`,
+`player unresolved`, and for the owner-only camera `camera forwarded|dropped|native <op>`, `camera adopted D303`,
+`camera forwarded|dropped D303 kind=…`, `camera D303 expired`, `camera applied kind=…` and `camera retired whitein`,
+256 lines per session.
 
 **Tests:** `kh2coop_axel_reaction_test` covers:
 - the pure rules, including the encounter gate (`AxelHostFrameAdmitted`), friend execution and consumption
@@ -392,7 +394,7 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
 - **Clear Light for a friend.** The host's copy of the friend's actor ticks native range triggers once Axel's 1/29
   binds `AP12` on it, so trigger 26 sets its `+0x18C` bit 21 and `+0x638` (Kit, `b034e8cf`). Bit 21 is a level
   flag cleared every tick, and the order of that tick against the host's chain read is unproven.
-- **Owner-only camera (in progress).** Axel's RC camera ops act on the game's one camera and fade state, not on an
+- **Owner-only camera.** Axel's RC camera ops act on the game's one camera and fade state, not on an
   actor (Kit's `b034e8cf`, `e4a7861e`), so a friend RC's camera sequence goes wholly to its owner or wholly to the
   host (`AxelCameraStepFor`, custody per executor):
   - **Who holds it.** The RC's first camera op decides. If it is withheld from the host and sent, the sequence is the
@@ -421,7 +423,21 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
       `kAxelFadeLeaseFrames` (600).
     - **Hooks.** All four slots are pinned and optional. The fades and the reset install first and 2/20 only if they
       are in; if any is refused, nothing is adopted and D303 plays on the host as before.
-  - **Not yet:** the friend's replay of op 17, which is the next commit.
+  - **The friend's replay** (`SmAxelApplyCameraOp`). Op 17 replays only on the owner's own Axel role, never a
+    spectator's, from its Axel clone, against natives resolved at install:
+    - a watch runs 1/207's body on the clone: `3BDA50`, `3BEE60(target, clone, 0)`, `176310`, with a zeroed
+      32-byte target (1/207's is 16 bytes, but `176310` copies 20);
+    - a reset calls 1/295's function;
+    - the fades call 0/31's and 0/32's with D303's own argument.
+  - **Retirement.**
+    - A white-out leaves a receipt on the role (`axelWhitedOut`), reserved before the call, and a role continuation
+      carries it. A role retired with it owes a white-in (30), paid on the next owner frame on the game thread
+      outside a load or transition. Nothing native resets the fade on a load (Kit, `e4a7861e`).
+    - A watch is not undone. Natively, Burst's watch ends on its own: when Axel's target goes invalid, when the
+      subject's `+0x18C & 0x1C`, or on any other camera mode or player camera init. The friend's replay ends the
+      same way.
+    - A reset needs no undo.
+  - **Unproven.** All of this is unproven live, including how the load path's own fades meet an owed white-in.
 - **Axel's own pose on the friend while held.** The host stops publishing Axel's motion while he is parented, so the
   friend's held clone keeps its last mirrored motion.
 - **Host-owned RCs show nothing on the friend's copy of the host.** No role is minted for the host's own executor,

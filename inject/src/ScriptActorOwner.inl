@@ -30,6 +30,7 @@ struct ScriptActorRole {
     bool commandAnnounced{};
     bool captured{},attached{};
     bool axelHeld{};  // VUH-2913 (client): this role attached the Axel clone (its source) to its actor (SmAxelApplyHold)
+    bool axelWhitedOut{};  // VUH-2913 (client): its op 17 whited this game out, and no white-in has come (SmAxelApplyCameraOp)
     // A spectator's clone is a visual target, never the role's command actor.
     ScriptOwnerVisual visual{};
     std::uint64_t captureValues[2]{};
@@ -1007,6 +1008,7 @@ static void SmOwnerPollCleanup() {
 struct ScriptOwnerContinuation {
     R::EntityCameraIdentity camera{};bool attached{},captured{},haveCapture{};
     bool axelHeld{}; // VUH-2913 (client): the Axel clone hold continues with its receipt
+    bool axelWhitedOut{}; // and so does a white-out's
     std::uint64_t captureValues[2]{};
 };
 static ScriptOwnerContinuation SmOwnerContinueCamera(const ScriptActorRole& role,
@@ -1021,7 +1023,7 @@ static ScriptOwnerContinuation SmOwnerContinueCamera(const ScriptActorRole& role
     uintptr_t capture=0;
     ScriptOwnerContinuation next{role.camera,SmOwnerHasAttachment(role,!g_sm.hostActive),
         role.captured && ReadHitTrace(actor+0x2B0,capture) && capture==source};
-    next.axelHeld=SmAxelCloneHeld(role);
+    next.axelHeld=SmAxelCloneHeld(role);next.axelWhitedOut=role.axelWhitedOut;
     if(next.captured && role.haveCapture) {
         next.haveCapture=true;next.captureValues[0]=role.captureValues[0];next.captureValues[1]=role.captureValues[1];
     }
@@ -1032,6 +1034,7 @@ static void SmOwnerRelease(ScriptActorRole& role,bool native,bool announce,bool 
     if(!g_sm.hostActive && role.slot<3 && SmOwnerSameAdmissionSession(role.admittedScope) &&
        role.resource>g_smRoleAdmissionFloor[role.slot])g_smRoleAdmissionFloor[role.slot]=role.resource;
     SmOwnerRetireVisual(role,native);
+    SmAxelRetireCamera(role); // VUH-2913: a white-out it leaves is undone on a safe frame
     const auto released=role;
     role={}; // native cleanup can reenter commands/callbacks; role is already retired
     if(announce) {
@@ -1437,6 +1440,7 @@ static void SmOwnerRetirementLog(const char* caller,const char* reason,const D::
 static void SmOwnerFrame() {
     SmOwnerPollVisualCleanup();
     SmOwnerPollCleanup();
+    SmAxelClientCameraTick();
     enemysync::DownedScope scope;const char* scopeFailure="scope-current";
     if(!SmOwnerScope(scope,&scopeFailure)) {
         // Snapshot each currently nonzero role before the original group reset.
@@ -1782,10 +1786,11 @@ static int SmOwnerApply(const R::Call& call,uintptr_t source) {
         if(role.resource==call.effect)return SmOwnerCurrent(role,scope)?1:0;
         if(role.resource>call.effect)return 0;
         const auto camera=SmOwnerContinueCamera(role,scope,source,slot==scope.localSlot?g_soraActor:0,static_cast<std::uint8_t>(slot));
+        if(camera.axelWhitedOut)role.axelWhitedOut=false; // the next role carries it
         SmOwnerRelease(role,true,false,camera.camera.context!=0);
         if(g_smOwnerCleanup[slot].role.resource)return 0;
         role={};role.camera=camera.camera;role.attached=camera.attached;role.captured=camera.captured;
-        role.axelHeld=camera.axelHeld;role.haveCapture=camera.haveCapture;role.captureValues[0]=camera.captureValues[0];role.captureValues[1]=camera.captureValues[1];
+        role.axelHeld=camera.axelHeld;role.axelWhitedOut=camera.axelWhitedOut;role.haveCapture=camera.haveCapture;role.captureValues[0]=camera.captureValues[0];role.captureValues[1]=camera.captureValues[1];
         role.resource=call.effect;role.netId=call.netId;role.objectId=call.objectId;role.source=source;
         role.slot=static_cast<std::uint8_t>(slot);role.connection=connection;role.epoch=scope.epoch;
         role.actor=slot==scope.localSlot?g_soraActor:0;role.deadline=GetTickCount64()+1000;role.admittedScope=scope;
@@ -1856,6 +1861,7 @@ static int SmOwnerApply(const R::Call& call,uintptr_t source) {
             return SmAxelApplyHold(role,true)?1:0;
         }
         if(operation==14 && role.objectId==R::kAxelIIObjectId)return SmAxelApplyHold(role,false)?1:0;
+        if(operation==17)return SmAxelApplyCameraOp(role,call,source)?1:0; // VUH-2913: Axel II's roles only
         if(operation==13) {
             if(source!=role.source || R::TagOf(call.values[0])!=R::kTagInt || R::BitsOf(call.values[0])!=16386 ||
                R::TagOf(call.values[1])!=R::kTagInt || R::BitsOf(call.values[1])!=5)return 0;
@@ -2146,6 +2152,7 @@ static bool SmOwnerInstall() {
         if(!slot.swapped){SmOwnerShutdown();return false;}
     }
     g_smOwnerInstalled.store(true,std::memory_order_release);
+    SmAxelCameraNativesInstall(g_exeBase); // VUH-2913: the friend's replay of op 17
     enemysync::SetScriptCameraCurrent(&SmOwnerCameraCurrent);
     // Optional RC qualification must not roll back the existing one-brain
     // dispatch suppression or owner traps on a new pin/hook failure.

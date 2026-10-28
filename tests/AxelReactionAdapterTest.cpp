@@ -12,12 +12,14 @@
 #include <cstring>
 #include <functional>
 #include <map>
+#include <string>
 #include <vector>
 #ifdef _MSC_VER
 #include <excpt.h>
 #else
 #define __try try
 #define __except(filter) catch(...)
+#define __fastcall
 #endif
 
 namespace R = kh2coop::inject::scriptmirror::rules;
@@ -118,6 +120,7 @@ static void Log(const char*,...) {}
 struct ScriptActorRole {
     std::uint32_t objectId{};uintptr_t actor{},source{};bool axelHeld{};
     std::uint32_t resource{},epoch{};std::uint16_t netId{};std::uint8_t slot{0xFF};uintptr_t thread{};
+    bool axelWhitedOut{};
 };
 static std::array<ScriptActorRole,3> g_smRoles{};
 static bool roleCurrent=true;
@@ -208,6 +211,22 @@ static std::uint32_t g_frameCounter=10;
 static struct { bool hostActive=true;unsigned faults=0; } g_sm;
 // The client's native attach (1/18) and detach (1/102) originals, recorded.
 static bool SmOwnerReady() noexcept { return true; }
+static bool SmGameThread() noexcept { return true; }
+namespace warp { static bool loading=false;static bool LoadPending() { return loading; } static bool TransitionPending() { return false; } }
+// The client's native camera calls (SmAxelCameraNatives), recorded.
+struct NativeCamera { std::vector<std::string> calls;uintptr_t subject{};std::uint32_t zero{1};bool zeroed{};float fade{};bool fault{}; };
+static NativeCamera natives;
+static void __fastcall TargetInit(void* t) {
+    natives.calls.push_back("init");const auto* b=static_cast<const unsigned char*>(t);natives.zeroed=true;
+    for(unsigned i=0;i<32;++i)natives.zeroed=natives.zeroed && !b[i];
+}
+static void __fastcall TargetSet(void*,uintptr_t actor,std::uint32_t zero) { natives.calls.push_back("set");natives.subject=actor;natives.zero=zero; }
+static void __fastcall Watch(void*) { natives.calls.push_back("watch"); }
+static void __fastcall Reset(std::uint64_t*) { natives.calls.push_back("reset"); }
+static void __fastcall WhiteOut(std::uint64_t* args) {
+    natives.calls.push_back("whiteout");natives.fade=R::FloatOf(args[0]);if(natives.fault)throw 1;
+}
+static void __fastcall WhiteIn(std::uint64_t* args) { natives.calls.push_back("whitein");natives.fade=R::FloatOf(args[0]); }
 static bool SmOwnerActorCurrent(const ScriptActorRole&) { return true; }
 using TrapFn=void(*)(std::uint64_t*);
 static struct { uintptr_t original{}; } g_smOwnerTraps[6];
@@ -707,6 +726,64 @@ int main() {
         check(all && wireRefused==before && emitted.size()==4 && R::TagOf(emitted[2].values[1])==R::kTagFloat &&
               R::FloatOf(emitted[2].values[1])==70.0f && R::TagOf(emitted[1].values[1])==R::kTagInt,
               "watch, reset, white-out and white-in records pass the client's and the codec's rules");
+    }
+
+    // The friend's replay of op 17 on its own Axel role, and the white-in its retirement owes.
+    {
+        SmAxelCameraNativesInstall(0x140000000);
+        const auto at=[](auto fn) { return reinterpret_cast<uintptr_t>(fn)-0x140000000; };
+        check(SmAxelCameraNativesReady() && at(g_smAxelNatives.targetInit)==0x3BDA50 && at(g_smAxelNatives.targetSet)==0x3BEE60 &&
+              at(g_smAxelNatives.watch)==0x176310 && at(g_smAxelNatives.reset)==0x430B60 &&
+              at(g_smAxelNatives.whiteOut)==0x41DD70 && at(g_smAxelNatives.whiteIn)==0x41DDB0,
+              "the replay resolves 1/207's body, 1/295, 0/31 and 0/32 at their pinned addresses");
+        Setup(0);g_sm.hostActive=false;g_soraActor=kFriendActor;natives={};
+        g_smAxelNatives={&TargetInit,&TargetSet,&Watch,&Reset,&WhiteOut,&WhiteIn};
+        ScriptActorRole role{81,kFriendActor,kAxel,false};role.resource=0x80000011u;role.netId=7;role.slot=1;
+        const auto op=[&](R::AxelCameraKind kind,float value,uintptr_t source=kAxel) {
+            const auto call=SmAxelCameraOpRecord(role,kind,value);return SmAxelApplyCameraOp(role,call,source);
+        };
+        const auto calls=[] { std::string all;for(const auto& c:natives.calls)all+=c+" ";return all; };
+        check(op(R::AxelCameraKind::Watch,0) && calls()=="init set watch " && natives.zeroed && natives.subject==kAxel &&
+              !natives.zero,"a watch replays 1/207's body on a zeroed target, watching the Axel clone");
+        natives={};
+        check(op(R::AxelCameraKind::Reset,0) && calls()=="reset ","a reset replays 1/295");
+        natives={};
+        check(op(R::AxelCameraKind::WhiteOut,70.0f) && calls()=="whiteout " && natives.fade==70.0f && role.axelWhitedOut,
+              "a white-out replays 0/31 with D303's argument and leaves a receipt");
+        natives={};
+        check(op(R::AxelCameraKind::WhiteIn,30.0f) && calls()=="whitein " && natives.fade==30.0f && !role.axelWhitedOut,
+              "its white-in replays 0/32 and clears it");
+        natives={};
+        check(!op(R::AxelCameraKind::Watch,0,kHostActor) && natives.calls.empty(),"never with another source");
+        auto spectator=role;spectator.actor=0;
+        check(!SmAxelApplyCameraOp(spectator,SmAxelCameraOpRecord(role,R::AxelCameraKind::WhiteOut,70.0f),kAxel) &&
+              natives.calls.empty(),"never on a spectator's role: only the owner's own game");
+        auto bad=SmAxelCameraOpRecord(role,R::AxelCameraKind::Watch,0);bad.values[1]=R::Tagged(R::kTagInt,9);
+        auto unknown=SmAxelCameraOpRecord(role,R::AxelCameraKind::Watch,0);unknown.values[0]=R::Tagged(R::kTagInt,5);
+        check(!SmAxelApplyCameraOp(role,bad,kAxel) && !SmAxelApplyCameraOp(role,unknown,kAxel) && natives.calls.empty(),
+              "nor a record the wire rules would refuse");
+        g_sm.hostActive=true;
+        check(!op(R::AxelCameraKind::Reset,0) && natives.calls.empty(),"the host never replays one");
+        g_sm.hostActive=false;const auto ready=g_smAxelNatives;g_smAxelNatives.watch=nullptr;
+        check(!op(R::AxelCameraKind::Watch,0) && natives.calls.empty(),"nor does a friend without its natives resolved");
+        g_smAxelNatives=ready;
+        // Retirement.
+        (void)op(R::AxelCameraKind::WhiteOut,70.0f);natives={};
+        SmAxelRetireCamera(role);warp::loading=true;SmAxelClientCameraTick();
+        check(g_axel.whiteInOwed && natives.calls.empty(),"a role retired whited out owes a white-in, held through a load");
+        warp::loading=false;SmAxelClientCameraTick();
+        check(!g_axel.whiteInOwed && calls()=="whitein " && natives.fade==30.0f,"and pays it on the next safe frame");
+        natives={};SmAxelClientCameraTick();
+        check(natives.calls.empty(),"once");
+        role.axelWhitedOut=false;SmAxelRetireCamera(role);
+        check(!g_axel.whiteInOwed,"a role with no white-out owes nothing");
+        natives={};natives.fault=true;role.axelWhitedOut=false;
+        check(!op(R::AxelCameraKind::WhiteOut,70.0f) && role.axelWhitedOut,
+              "a white-out that faults keeps its receipt, so the screen is still restored");
+        natives.fault=false;SmAxelRetireCamera(role);SmAxelClientCameraTick();
+        check(calls()=="whiteout whitein ","and its retirement whites in");
+        g_sm.hostActive=true;role.axelWhitedOut=true;SmAxelRetireCamera(role);
+        check(!g_axel.whiteInOwed,"the host owes none");
     }
 
     // The friend's side: the host's offer, its prompt proof and its press, which claims and runs nothing locally.

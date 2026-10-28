@@ -24,6 +24,8 @@ struct SmAxelState {
     std::uint64_t watchArgs[1]{};
     R::AxelFadeCustody fade{}; // D303 under a friend's custody; it outlives its executor and Axel himself
     // client
+    bool whiteInOwed{};        // a retired role left this game whited out (SmAxelRetireCamera)
+    // client
     R::AxelOffers offers{};
     struct Identity { std::uint8_t slot{0xFF};std::uint64_t connection{};std::uint32_t epoch{}; };
     std::array<Identity,3> identities{};
@@ -179,6 +181,72 @@ static bool SmAxelEmitCamera(std::uint8_t slot,uintptr_t actor,std::uint32_t fou
 static bool SmAxelEmitCameraOp(std::uint8_t slot,uintptr_t actor,R::AxelCameraKind kind,float argument) {
     const auto* role=SmAxelFriendRole(slot,actor,true);
     return role && SmEmit(SmAxelCameraOpRecord(*role,kind,argument));
+}
+// Client: the native camera calls the friend's replay of op 17 makes, resolved from the module base at install
+// (SmAxelCameraNativesInstall). 1/207's body is 3BDA50(&target), 3BEE60(&target, actor, 0), 176310(&target); the
+// others are the traps' own functions.
+struct SmAxelCameraNatives {
+    void(__fastcall* targetInit)(void*){};
+    void(__fastcall* targetSet)(void*,uintptr_t,std::uint32_t){};
+    void(__fastcall* watch)(void*){};
+    TrapFn reset{},whiteOut{},whiteIn{};
+};
+static SmAxelCameraNatives g_smAxelNatives{};
+static void SmAxelCameraNativesInstall(uintptr_t base) {
+    g_smAxelNatives.targetInit=reinterpret_cast<void(__fastcall*)(void*)>(base+0x3BDA50);
+    g_smAxelNatives.targetSet=reinterpret_cast<void(__fastcall*)(void*,uintptr_t,std::uint32_t)>(base+0x3BEE60);
+    g_smAxelNatives.watch=reinterpret_cast<void(__fastcall*)(void*)>(base+0x176310);
+    g_smAxelNatives.reset=reinterpret_cast<TrapFn>(base+0x430B60);
+    g_smAxelNatives.whiteOut=reinterpret_cast<TrapFn>(base+0x41DD70);
+    g_smAxelNatives.whiteIn=reinterpret_cast<TrapFn>(base+0x41DDB0);
+}
+static bool SmAxelCameraNativesReady() noexcept {
+    const auto& n=g_smAxelNatives;
+    return n.targetInit && n.targetSet && n.watch && n.reset && n.whiteOut && n.whiteIn;
+}
+// Client op 17 on its own Axel II role (never a spectator's): replay a friend RC's global camera op on this game.
+// The watch's subject is the role's Axel clone (its source); 1/207's target is 16 bytes, but 176310 copies 20, so it
+// gets a zeroed 32 (Kit, e4a7861e). The white-out leaves a receipt on the role, so its retirement never leaves this
+// game white.
+static bool SmAxelApplyCameraOp(ScriptActorRole& role,const R::Call& call,uintptr_t source) noexcept {
+    const auto kind=R::BitsOf(call.values[0]);
+    const auto argument=call.values[1];
+    if(g_sm.hostActive || role.objectId!=R::kAxelIIObjectId || !source || source!=role.source || !role.actor ||
+       role.actor!=g_soraActor || !SmOwnerActorCurrent(role) || !SmAxelCameraNativesReady() ||
+       R::TagOf(call.values[0])!=R::kTagInt ||
+       !R::AxelCameraOpValid(kind,R::TagOf(argument)==R::kTagFloat,R::BitsOf(argument),R::FloatOf(argument)))return false;
+    __try {
+        if(kind==static_cast<std::uint32_t>(R::AxelCameraKind::Watch)) {
+            alignas(16) std::uint8_t target[32]{};
+            g_smAxelNatives.targetInit(target);g_smAxelNatives.targetSet(target,source,0);g_smAxelNatives.watch(target);
+        } else if(kind==static_cast<std::uint32_t>(R::AxelCameraKind::Reset)) {
+            std::uint64_t args[1]{};g_smAxelNatives.reset(args);
+        } else {
+            std::uint64_t args[1]{argument};
+            const bool out=kind==static_cast<std::uint32_t>(R::AxelCameraKind::WhiteOut);
+            if(out)role.axelWhitedOut=true; // reserve the white-in before entry: a fault can leave the screen white
+            (out?g_smAxelNatives.whiteOut:g_smAxelNatives.whiteIn)(args);
+            if(!out)role.axelWhitedOut=false;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){++g_sm.faults;return false;}
+    if(SmAxelLogBudget())Log("[axel-rc] camera applied kind=%u role=%u",kind,role.resource);
+    return true;
+}
+// Client: a role retired while this game is whited out owes a white-in (D303's own, 30), paid on the next safe frame.
+static void SmAxelRetireCamera(const ScriptActorRole& released) noexcept {
+    if(!g_sm.hostActive && released.objectId==R::kAxelIIObjectId && released.axelWhitedOut)g_axel.whiteInOwed=true;
+}
+static constexpr float kSmAxelRetireWhiteIn=30.0f;
+// Each owner frame: pay an owed white-in on the game thread, outside a load or transition.
+static void SmAxelClientCameraTick() {
+    if(!g_axel.whiteInOwed)return;
+    if(g_sm.hostActive){g_axel.whiteInOwed=false;return;}
+    if(!SmGameThread() || warp::LoadPending() || warp::TransitionPending() || !SmAxelCameraNativesReady())return;
+    g_axel.whiteInOwed=false;
+    std::uint32_t bits=0;std::memcpy(&bits,&kSmAxelRetireWhiteIn,sizeof(bits));
+    std::uint64_t args[1]{R::Tagged(R::kTagFloat,bits)};
+    __try { g_smAxelNatives.whiteIn(args); } __except(EXCEPTION_EXECUTE_HANDLER){++g_sm.faults;return;}
+    if(SmAxelLogBudget())Log("[axel-rc] camera retired whitein");
 }
 // Host: whether Axel is attached to this actor with his own pair (R::AxelAttachPair): 1 held, 0 not, -1 unread.
 static int SmAxelHeldBy(uintptr_t actor) {
