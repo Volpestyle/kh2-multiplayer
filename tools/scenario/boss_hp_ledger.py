@@ -49,8 +49,10 @@ chain, and the last samples after the window must agree. Native guard/i-frame
 and zero-damage outcomes are listed as refusals, not failures.
 
 The host boss's hits on the host's copy of a remote player (VUH-2912, when the boss targets that seat) must be
-checked zeros with the copy's HP unchanged; its owner takes the attack natively from its own mirrored boss. A
-phase with `hitOnHost`/`hitOnFriend` requires a native boss hit on that seat's canonical player.
+complete checked zeros with the copy's HP unchanged; its owner takes the attack natively from its own mirrored
+boss. An incomplete scope with the boss as source fails. A phase with `cloneZero` requires at least one such
+checked zero, and `hitOnHost`/`hitOnFriend` a native boss hit on that seat's canonical player (which seat the
+boss chose, and the hit's reaction, are boss_target_ledger.py's).
 
 Also reported: the boss's two-player scale and room lines, the friend's binding and
 brain-skip (enemy-mirror updates == skips, noBrain 0, no retire) through the
@@ -466,10 +468,16 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
     friend_taken = boss_hits(hit_events(friend, f0, f1), friend_actor)
     # VUH-2912: the host boss's hits on the host's copy of a remote player (classes 2/3) must leave it alone: each
     # is a checked zero (RemoteVictim). Its owner takes that attack natively from its own mirrored copy instead.
-    # An incomplete scope proves nothing either way; it is counted, not judged.
+    # An incomplete scope whose source is the boss cannot prove that, so it fails (Ione 24860051).
     clone_hits = [e for e in hit_events(host, h0, h1) if e["victimClass"] in REMOTE_CLASSES and
-                  (e["sourceObject"], e["sourceActor"], e["epoch"]) == (objectId, boss_actor, epoch)]
-    clone_zeroed = [e for e in clone_hits if not e["invalid"]]
+                  (e["sourceObject"] == objectId or e["sourceActor"] == boss_actor)]
+    for e in clone_hits:
+        if e["invalid"]:
+            problems.append(f"host boss hit seq {e['seq']} on a remote player's copy has incomplete proof: {e['invalid']}")
+        elif (e["sourceObject"], e["sourceActor"], e["epoch"]) != (objectId, boss_actor, epoch):
+            problems.append(f"host boss hit seq {e['seq']} on a remote player's copy is not from the boss lifetime")
+    clone_zeroed = [e for e in clone_hits if not e["invalid"] and
+                    (e["sourceObject"], e["sourceActor"], e["epoch"]) == (objectId, boss_actor, epoch)]
     for e in clone_zeroed:
         if e["action"] != ZERO_HP or not checked_zero(e) or e["hpBefore"] != e["hpAfter"]:
             problems.append(f"host boss hit seq {e['seq']} on a remote player's copy was not a checked zero: action "
@@ -508,6 +516,9 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
         for seat, key in (("host", "bossHitsOnHost"), ("friend", "bossHitsOnFriend")):
             if p.get(f"hitOn{seat.title()}") and row[key] == 0:
                 problems.append(f"phase {p['name']}: no native boss hit on the {seat}'s canonical player")
+        # While the boss targets the friend, the host's copy of the friend must take (and zero) at least one hit.
+        if p.get("cloneZero") and row["bossHitsOnClone"] == 0:
+            problems.append(f"phase {p['name']}: no complete checked zero of a boss hit on the host's copy of the friend")
         for seat in ("host", "friend"):
             want = p.get(seat)
             if want is True and row[seat] == 0 or want is False and row[seat] != 0:
@@ -552,7 +563,7 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
                    "friendClaimsUnapplied": len(unapplied), "friendLocalClaimZeros": len(friend_claimed),
                    "friendLocalRefusals": len(friend_refusals),
                    "bossHitsOnHost": len(host_taken), "bossHitsOnFriend": len(friend_taken),
-                   "bossHitsOnClone": len(clone_zeroed), "bossHitsOnCloneUnproven": len(clone_hits) - len(clone_zeroed),
+                   "bossHitsOnClone": len(clone_zeroed),
                    "brainSamples": len(in_window)},
         "phases": phases, "timing": timing, "binding": authority,
         "chain": steps, "refusals": refusals + claim_refusals + friend_refusals, "puppet": puppet, "rejects": rejects,

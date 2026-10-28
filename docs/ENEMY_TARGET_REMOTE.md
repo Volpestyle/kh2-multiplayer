@@ -58,7 +58,11 @@ The host logs `[enemy-target] boss-target frame=... objectId=81 target=<k> owner
 changed=<0|1> at=<x>,<z>` (own budget, 256) whenever a search-target boss changes its chosen candidate, back to
 the host's player included, or the set of candidates changes (`valid` bit k: candidate k, 0 the host). The
 rewrite log above prints only clone wins, within a 64-line budget shared with every mob.
-`net_prologue_mansion_axel_hp.json` is the live check (docs/SCENARIOS.md).
+With `KH2COOP_TRACE_HITS=1`, each seat also logs `[hitwitness] seq=<hittrace seq> ... motion=<before>-><after>
+ignoreHit=<before>-><after>` four frames after a boss's applied hit lowered its own canonical player's HP (reads
+only, 64 lines). A native hit leaves the reaction motion and the ignore-hit timer (`+0xD70`) running; an HP-only
+write leaves neither. `tools/scenario/boss_target_ledger.py` joins it to the hit's scope, the friend's driven mirror
+hit and the boss-target choice. `net_prologue_mansion_axel_hp.json` is the live check (docs/SCENARIOS.md).
 
 ### Dusks hit the friend natively (VUH-2466)
 

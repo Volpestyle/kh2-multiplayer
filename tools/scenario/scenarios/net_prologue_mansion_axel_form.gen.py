@@ -237,13 +237,16 @@ HP_DESCRIPTION = (
     "VUH-2912, FM-02 rehearsal route into Axel II (02/14 btl137, B_EX110 81), two default dual-wield Roxases, "
     "shipped defaults, no protect; KH2COOP_TRACE_HITS and KH2COOP_ENEMY_MIRROR_TRACE are diagnostics only. "
     "Lease: no boss damage or boss hit on either seat before the host's admitted release. Then three short rounds, "
-    "each filmed on both seats: friend target (the host walks away from Axel and only revives; the friend fights, "
-    "so the host's Axel must choose the friend's seat and the friend's own Roxas takes the native hit from its "
-    "mirrored Axel), host target (the same, reversed) and interleaved (both fight). The boss HP ledger joins every "
-    "host Axel HP change to one host native hit or one friend claim, and checks that the host Axel's hits on the "
-    "host's copy of the friend are checked zeros. Each seat is then downed once and revived (owner_downs): a "
-    "downed seat drops out of Axel's candidates. The atk_burst aim reads the canonical player directly; the host's "
-    "boss hits during the friend-target round are reported, not judged. PC1's saves are Critical (22-HP Roxas, "
+    "each filmed on both seats for its whole length: friend target (the host walks away from Axel and, once both "
+    "seats stand measured apart, only revives; the friend fights, so the host's Axel must choose the friend's seat "
+    "and the friend's own Roxas takes the native hit from its mirrored Axel), host target (the same, reversed) and "
+    "interleaved (both fight). The boss HP ledger joins every host Axel HP change to one host native hit or one "
+    "friend claim, and requires the host Axel's hits on the host's copy of the friend to be complete checked zeros "
+    "(at least one in the friend round). The boss target ledger requires each round's choice of that seat before a "
+    "native hit witnessed by its reaction motion and ignore-hit timer (and, on the friend, the driven host motion), "
+    "never a choice of an ineligible candidate, and, around owner_downs, each downed seat out of Axel's candidates "
+    "and never chosen. The atk_burst aim and leave distance read the canonical player directly; the friend round's "
+    "position/motion samples and the host's boss hits measure that, unjudged. PC1's saves are Critical (22-HP Roxas, "
     "one Axel hit downs a 5-HP seat). Stops before victory. Rehearsal save, no save.")
 HP_ENV = dict(ENV, KH2COOP_TRACE_HITS="1")
 AXEL_OBJECT = 81
@@ -281,34 +284,64 @@ def boss_hp(i):
     return f"([a['hp'] for a in actors({i}) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0]"
 
 
+def clone_xz(i):
+    """Seat i's view of the other seat's dual-wield Roxas (its clone)."""
+    return (f"[(a['position']['x'], a['position']['z']) for a in actors({i}) "
+            f"if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != {canon(i)}][0]")
+
+
+def standing():
+    return "all(log_count('[downed] gate intercept', i) <= log_count('[downed] revive returned', i) for i in (0, 1))"
+
+
+def separation():
+    """On the host's screen: each seat's horizontal distance from Axel, and whether both seats are standing."""
+    d = "((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5"
+    return (f"(lambda a, host, friend: {{'host': (lambda p: {d})(host), 'friend': (lambda p: {d})(friend), "
+            f"'standing': {standing()}}})(pos('B_EX110', 0), {canonical_xz(0)}, {clone_xz(0)})")
+
+
+SEPARATION_MARGIN = 200  # beyond the policy's 150-unit hysteresis
+
+
 def target_round(name, fighter, reviver):
-    """The reviver walks away from Axel and then only revives; the fighter fights. Axel must choose the fighter's
-    seat, and the round ends once the fighter took a hit (or was downed) and landed damage. Bounded; the ledger
-    judges the window."""
+    """The reviver walks away from Axel; with both seats standing and measured apart, the round's baseline and window
+    start. Then the reviver only revives while the fighter fights, filmed on both seats for the whole round. The
+    round must reach its milestone (Axel chose the fighter, the fighter was hit or downed, it landed damage) before
+    its end mark; boss_target_ledger.py judges the choice, its order before the hit and the hit's witnesses."""
     base = f"saved['{name}_base']"
+    seat = ("host", "friend")
     landed = f"{host_claims()} > {base}['claims']" if fighter == 1 else f"{boss_hp(0)} < {base}['bossHp']"
     hit = (f"({canonical_hp(fighter)} < {base}['hp'] or "
            f"log_count('[downed] gate intercept', {fighter}) > {base}['downs'])")
+    observe = (f"{{'axel': [(a['position']['x'], a['position']['z'], a.get('motionId')) for a in actors(0) if a['name'] == 'B_EX110'], "
+               f"'host': {canonical_xz(0)}, 'clone': {clone_xz(0)}}}")
     return [
+        {"do": "walk_to", "instance": reviver, "body": "self", "x": 0, "z": 0, "targetExpr": away_from_axel(reviver),
+         "radius": 60, "timeoutMs": 4000, "as": f"{name}_walk_away"},
+        {"do": "save", "as": f"{name}_separation", "expr": separation()},
+        {"do": "assert", "expr": f"saved['{name}_separation']['standing'] and saved['{name}_separation']['{seat[reviver]}'] - "
+                                 f"saved['{name}_separation']['{seat[fighter]}'] > {SEPARATION_MARGIN}",
+         "message": f"SETUP FAILURE, not a targeting result: {name} needs both seats standing and the {seat[reviver]} more than "
+                    f"{SEPARATION_MARGIN} units farther from Axel than the {seat[fighter]} after its walk"},
         {"do": "save", "as": f"{name}_base", "expr": f"{{'chosen': {targets(fighter)}, 'claims': {host_claims()}, "
                                                     f"'bossHp': {boss_hp(0)}, 'hp': {canonical_hp(fighter)}, "
                                                     f"'downs': log_count('[downed] gate intercept', {fighter})}}"},
         marks(f"m_{name}0"),
-        {"do": "walk_to", "instance": reviver, "body": "self", "x": 0, "z": 0, "targetExpr": away_from_axel(reviver),
-         "radius": 60, "timeoutMs": 4000, "as": f"{name}_walk_away"},
         {"do": "revive_guard", "host": fighter, "friend": reviver},
+        # The clips run as long as the round can (the step waits for them), so the round's hits are on film.
         {"do": "fight", "instances": [fighter], "seconds": 20, "reach": 120, "as": name,
          "until": f"{targets(fighter)} > {base}['chosen'] and {hit} and {landed}",
-         "clips": [{"instance": 0, "seconds": 12, "fps": 30, "name": f"{name}_host"},
-                   {"instance": 1, "seconds": 12, "fps": 30, "name": f"{name}_friend"}]},
+         "sample": {"expr": observe, "everyMs": 500},
+         "clips": [{"instance": 0, "seconds": 20, "fps": 30, "name": f"{name}_host"},
+                   {"instance": 1, "seconds": 20, "fps": 30, "name": f"{name}_friend"}]},
         marks(f"m_{name}1"),
+        {"do": "assert", "expr": f"saved['{name}']['until']['reached']",
+         "message": f"{name}: in 20 s Axel never chose the {seat[fighter]} with the {seat[fighter]} hit and landing damage"},
         # A downed fighter is revived by the reviver before the next round.
         {"do": "wait_until", "expr": f"log_count('[downed] gate intercept', {fighter}) <= log_count('[downed] revive returned', {fighter})",
          "timeoutMs": 60000, "pollMs": 250},
         {"do": "revive_guard", "on": False, "as": f"{name}_guard"},
-        {"do": "save", "as": f"{name}_end", "expr": f"{{'chosen': {targets(fighter)}}}"},
-        {"do": "assert", "expr": f"saved['{name}_end']['chosen'] > {base}['chosen']",
-         "message": f"{name}: the host's Axel never chose seat {fighter} while it alone fought near Axel"},
     ]
 
 
@@ -320,9 +353,6 @@ def hp_steps():
                   f"[\\s\\S]*?\\[combat-admission\\] released admitted ', 0)) == 0")
     lease_friend = (f"len(log_matches(r'(?P<x>{boss_touch}|\\[enemysync\\] client hit claim [^\\n]*objectId={AXEL_OBJECT} )"
                     f"[\\s\\S]*?{RELEASED_AXEL}', 1)) == 0")
-    downed_out = " and ".join(
-        f"len([m for m in log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId={AXEL_OBJECT} [^\\n]*valid=(?P<v>\\d+) ', 0) "
-        f"if int(m['v']) & {1 << seat} == 0]) > 0" for seat in (0, 1))
     claim_drop = (f"sum(int(r['b']) - int(r['a']) for r in log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId={AXEL_OBJECT} "
                   f"[^\\n]*beforeHp=(?P<b>\\d+) afterHp=(?P<a>\\d+) nativeOk=1', 0)[saved['il_base']['claims']:])")
     living = "[[(a['hp'], a.get('maxHp')) for a in actors(i) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] for i in (0, 1)]"
@@ -355,7 +385,7 @@ def hp_steps():
         {"do": "hp_ledger", "objectId": AXEL_OBJECT, "program": 137, "marks": ledger_marks, "as": "ledger", "require": False,
          "window": ["m_friend_target0", "m_interleaved1"], "phases": [
              {"name": "friend_target", "from": "m_friend_target0", "to": "m_friend_target1", "host": False, "friend": True,
-              "hitOnFriend": True},
+              "hitOnFriend": True, "cloneZero": True},
              {"name": "host_target", "from": "m_host_target0", "to": "m_host_target1", "host": True, "friend": False,
               "hitOnHost": True},
              {"name": "interleaved", "from": "m_interleaved0", "to": "m_interleaved1", "host": True, "friend": True}]},
@@ -366,16 +396,22 @@ def hp_steps():
         {"do": "assert", "expr": "log_count('[enemy-target] forward ', 0) == 0 and log_count('[enemy-target] remote-hit ', 1) == 0 "
                                  "and log_count('[enemy-target] veto ', 1) == 0",
          "message": "the boss's hits on the friend must stay native on the friend: no forwarded RemoteHit or vetoed local hit"},
-        # A downed seat is no candidate: one down and partner revive per owner, after which each seat's candidate
-        # bit must have dropped out of an Axel search.
+        # A downed seat is no candidate: one down and partner revive per owner, bracketed for the target ledger.
+        marks("m_downs0"),
         {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000},
         {"do": "clip_wait"},
+        marks("m_downs1"),
         {"do": "assert", "expr": "all(saved['owner_downs']['owners'][k] for k in ('0', '1'))",
          "message": "each owner must be downed once and revived by the other seat"},
         {"do": "save", "as": "boss_targets",
          "expr": f"[m['l'] for m in log_matches(r'(?P<l>\\[enemy-target\\] boss-target [^\\n]*objectId={AXEL_OBJECT} [^\\n]*)', 0)]"},
-        {"do": "assert", "expr": downed_out,
-         "message": "Axel's search must have seen each downed seat drop out of its candidates (boss-target valid bit clear)"},
+        {"do": "target_ledger", "objectId": AXEL_OBJECT, "ledger": "ledger", "as": "targets", "require": False,
+         "rounds": [{"name": "friend_target", "from": "m_friend_target0", "to": "m_friend_target1", "seat": 1},
+                    {"name": "host_target", "from": "m_host_target0", "to": "m_host_target1", "seat": 0}],
+         "downs": {"from": "m_downs0", "to": "m_downs1"}},
+        {"do": "assert", "expr": "saved['targets']['pass']",
+         "message": "Axel must choose each round's seat before its witnessed native hit, never choose an ineligible "
+                    "candidate, and drop each downed seat from its candidates"},
         {"do": "coop_verdict", "as": "verdict", "require": True, "arrivalTimeoutMs": 20000},
     ]
 

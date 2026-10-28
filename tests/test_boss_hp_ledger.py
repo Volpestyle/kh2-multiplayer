@@ -363,7 +363,7 @@ class BossHpLedgerTest(unittest.TestCase):
     def test_boss_hit_on_the_remote_copy_zeroes(self):
         v = run(clone_hit={})
         self.assertTrue(v["pass"], v["problems"])
-        self.assertEqual((v["counts"]["bossHitsOnClone"], v["counts"]["bossHitsOnCloneUnproven"]), (1, 0))
+        self.assertEqual(v["counts"]["bossHitsOnClone"], 1)
         self.assertEqual([p["bossHitsOnClone"] for p in v["phases"]], [0, 1])
 
     def test_boss_hit_damaging_the_remote_copy_fails(self):
@@ -372,10 +372,17 @@ class BossHpLedgerTest(unittest.TestCase):
     def test_boss_hit_on_the_remote_copy_with_a_failed_zero_fails(self):
         self.fails("was not a checked zero", clone_hit={"zero_result": 1})
 
-    def test_incomplete_remote_copy_scope_is_counted_not_judged(self):
-        v = run(clone_hit={"after": 16, "action": 0, "victim_mask": 7})
-        self.assertTrue(v["pass"], v["problems"])
-        self.assertEqual((v["counts"]["bossHitsOnClone"], v["counts"]["bossHitsOnCloneUnproven"]), (0, 1))
+    def test_incomplete_remote_copy_scope_fails(self):
+        # Ione's probe (24860051): a logged 22->16 loss behind an incomplete victim read passed as "unproven".
+        self.fails("has incomplete proof", clone_hit={"after": 16, "action": 0, "zero_attempted": 0, "victim_mask": 7})
+        self.fails("has incomplete proof", clone_hit={"victim_mask": 7})
+
+    def test_clone_zero_phase_requires_a_complete_checked_zero(self):
+        zero = [{"name": "host_only", "from": "start", "to": "m1", "host": True, "friend": False},
+                {"name": "friend_only", "from": "m1", "to": "end", "host": False, "friend": True, "cloneZero": True}]
+        self.assertTrue(run(phases=zero, clone_hit={})["pass"])
+        self.fails("phase friend_only: no complete checked zero", phases=zero)
+        self.fails("has incomplete proof", phases=zero, clone_hit={"victim_mask": 7})
 
     def test_targeting_phase_requires_the_chosen_seat_to_be_hit(self):
         target = [{"name": "host_only", "from": "start", "to": "m1", "host": True, "friend": False, "hitOnHost": True},

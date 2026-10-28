@@ -1,38 +1,49 @@
-"""VUH-2912: the generated Axel II HP and targeting fixture's own expressions, evaluated against synthetic logs and
-actors, with negative controls: an Axel hit or claim before the admitted release, a downed seat that never left
-Axel's candidates, and the walk-away target. No game.
+"""VUH-2912: the generated Axel II HP and targeting fixture's own expressions and step order, evaluated against
+synthetic logs and actors, with negative controls (Ione 24860051): an Axel hit or claim before the admitted release,
+a round whose walk left the seats unseparated or whose milestone never came, a baseline taken before the walk, a
+round longer than its film, and the ledgers' judged windows. No game.
 
     python -B -m unittest discover -s tests -p test_axel_hp_fixture.py -v
+
+AXEL_HP_FIXTURE names another generated JSON (for example the f31e14b one) to run these checks against.
 """
 import json
+import os
 import re
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-STEPS = json.loads((ROOT / "tools/scenario/scenarios/net_prologue_mansion_axel_hp.json").read_text(encoding="utf-8"))["steps"]
+FIXTURE = os.environ.get("AXEL_HP_FIXTURE", ROOT / "tools/scenario/scenarios/net_prologue_mansion_axel_hp.json")
+STEPS = json.loads(Path(FIXTURE).read_text(encoding="utf-8"))["steps"]
 RELEASED_HOST = "[combat-admission] released admitted epoch=3 incarnation=1"
 RELEASED_FRIEND = "[prologue] control released at=02/14 evt=137 site=tt20-137 localBound=1"
 AXEL_HIT = "[hit] frame 900 attacker=B_EX110 (handle 0000A001) atkp=12 -> victim=P_EX110_BTLF@7FF600001000 damage=6 stat=0 hpBefore=22"
 ROXAS_HIT = "[hit] frame 900 attacker=P_EX110_BTLF (handle 0000A002) atkp=3 -> victim=B_EX110@7FF600002000 damage=4 stat=0 hpBefore=449"
 DUSK_HIT = "[hit] frame 800 attacker=M_EX010 (handle 0000A003) atkp=5 -> victim=P_EX110_BTLF@7FF600001000 damage=2 stat=0 hpBefore=22"
 CLAIM = "[enemysync] {} hit claim connection=11 seq=1 epoch=3 netId=1 objectId=81 attackId=1 damage=4"
+ROUNDS = (("friend_target", 1, 0), ("host_target", 0, 1))  # (name, fighter, reviver)
+HOST, CLONE, AXEL = "0x7FF600001000", "0x7FF600003000", "0x7FF600002000"
 
 
-def target(t, valid, owner=None):
-    return (f"[enemy-target] boss-target frame=1 enemy=7FF600002000 objectId=81 target={t} owner={t if owner is None else owner} "
-            f"mode=2 valid={valid} changed=1 at=0,0")
+def target(t, valid=3):
+    return f"[enemy-target] boss-target frame=1 enemy=7FF600002000 objectId=81 target={t} owner={t} mode=2 valid={valid} changed=1 at=0,0"
 
 
-def expr(fragment, key="message"):
-    """The one step whose message contains `fragment`, or whose `as` is exactly it."""
-    found = [s for s in STEPS if (fragment in s.get(key, "") if key == "message" else s.get(key) == fragment)]
+def step(fragment, key=None):
+    """The one step whose `as` is exactly `fragment`, else whose message contains it (`key` forces either)."""
+    by_as = [s for s in STEPS if s.get("as") == fragment]
+    found = by_as if key == "as" or (key is None and by_as) else [s for s in STEPS if fragment in s.get("message", "")]
     assert len(found) == 1, (fragment, len(found))
     return found[0]
 
 
-def evaluate(text, logs, saved=None, actors=None, positions=None, peeks=None):
-    logs = {i: "\n".join(lines) for i, lines in logs.items()}
+def index(fragment, key="as"):
+    return STEPS.index(step(fragment, key))
+
+
+def evaluate(text, logs=None, saved=None, actors=None, positions=None, peeks=None):
+    logs = {i: "\n".join(lines) for i, lines in (logs or {}).items()}
     return eval(text, {"__builtins__": {}, "len": len, "int": int, "max": max, "sum": sum, "all": all, "saved": saved or {},
                        "log_matches": lambda p, i: [m.groupdict() for m in re.finditer(p, logs.get(i, ""))],
                        "log_count": lambda t, i: sum(t in line for line in logs.get(i, "").splitlines()),
@@ -40,9 +51,13 @@ def evaluate(text, logs, saved=None, actors=None, positions=None, peeks=None):
                        "peek": lambda rva, kind, i: (peeks or {})[i]})
 
 
+def roxas(address, x, hp=22):
+    return {"address": address, "name": "P_EX110_BTLF", "hp": hp, "position": {"x": x, "z": 0}}
+
+
 class AxelHpFixtureTest(unittest.TestCase):
     def test_lease_holds_when_axel_is_untouched_before_release(self):
-        lease = expr("the VUH-2897/2906 lease")["expr"]
+        lease = step("the VUH-2897/2906 lease")["expr"]
         before = {0: [DUSK_HIT, RELEASED_HOST, AXEL_HIT, ROXAS_HIT, CLAIM.format("host")],
                   1: [DUSK_HIT, RELEASED_FRIEND, AXEL_HIT, CLAIM.format("client")]}
         self.assertTrue(evaluate(lease, before))
@@ -51,46 +66,84 @@ class AxelHpFixtureTest(unittest.TestCase):
             early[seat].insert(1, line)
             self.assertFalse(evaluate(lease, early), (seat, line))
 
-    def test_each_downed_seat_must_leave_axels_candidates(self):
-        downed = expr("drop out of its candidates")["expr"]
-        self.assertTrue(evaluate(downed, {0: [target(0, 7), target(0, 5), target(1, 6)]}))
-        self.assertFalse(evaluate(downed, {0: [target(0, 7), target(0, 5)]}))  # the host never dropped out
-        self.assertFalse(evaluate(downed, {0: [target(1, 6)]}))  # the friend never dropped out
-        self.assertFalse(evaluate(downed, {0: [target(0, 5).replace("objectId=81", "objectId=2229"), target(1, 6)]}))
+    # REQUIRED 3: measured separation, baseline after it, milestone reached, window closed at the fight's end.
+    def test_each_round_starts_from_measured_separation_with_both_seats_standing(self):
+        world = lambda host_x, clone_x: {0: [roxas(HOST, host_x), roxas(CLONE, clone_x)]}
+        for name, fighter, reviver in ROUNDS:
+            measure = step(f"{name}_separation")["expr"]
+            check = step(f"SETUP FAILURE, not a targeting result: {name}")["expr"]
+            near, far = (1000, 100) if fighter == 1 else (100, 1000)  # (host_x, clone_x)
+            observed = lambda host_x, clone_x, logs=None: evaluate(
+                check, saved={f"{name}_separation": evaluate(measure, logs or {}, actors=world(host_x, clone_x),
+                                                             positions={("B_EX110", 0): (0, 0, 0)}, peeks={0: HOST})})
+            self.assertTrue(observed(*(near, far)), name)
+            self.assertFalse(observed(*((150, 100) if fighter == 1 else (100, 150))), name)  # the walk was blocked
+            self.assertFalse(observed(near, far, {fighter: ["[downed] gate intercept mode=4 logical=1"]}), name)
 
-    def test_each_round_requires_axel_to_choose_the_fighting_seat(self):
-        for name, seat in (("friend_target", 1), ("host_target", 0)):
-            chosen = expr(f"{name}: the host's Axel never chose seat {seat}")["expr"]
-            base = {f"{name}_base": {"chosen": 1}}
-            self.assertTrue(evaluate(chosen, {}, {**base, f"{name}_end": {"chosen": 2}}))
-            self.assertFalse(evaluate(chosen, {}, {**base, f"{name}_end": {"chosen": 1}}))
-            until = expr(name, key="as")["until"]
-            me = {"address": "0x7FF600001000", "name": "P_EX110_BTLF", "hp": 16, "position": {"x": 0, "z": 0}}
-            boss = {"address": "0x7FF600002000", "name": "B_EX110", "hp": 440, "position": {"x": 0, "z": 0}}
-            logs = {0: [target(seat, 3), CLAIM.format("host") + " beforeHp=449 afterHp=445 nativeOk=1"]}
+    def test_each_round_baseline_and_window_follow_the_separation(self):
+        for name, fighter, reviver in ROUNDS:
+            walk, measured, base, start = (index(f"{name}_walk_away"), index(f"SETUP FAILURE, not a targeting result: {name}", "message"),
+                                           index(f"{name}_base"), index(f"m_{name}0"))
+            fight, end = index(name), index(f"m_{name}1")
+            self.assertEqual((STEPS[walk]["instance"], STEPS[fight]["instances"]), (reviver, [fighter]))
+            self.assertTrue(walk < measured < base < start < fight, name)
+            self.assertEqual(end, fight + 1, name)  # nothing (a revive wait, a later choice) inside the window after the fight
+
+    def test_each_round_must_reach_its_milestone(self):
+        for name, fighter, reviver in ROUNDS:
+            reached = step(f"{name}: in 20 s Axel never chose")["expr"]
+            self.assertTrue(evaluate(reached, saved={name: {"until": {"reached": True}}}))
+            self.assertFalse(evaluate(reached, saved={name: {"until": {"reached": False}}}))
+            self.assertGreater(index(f"{name}: in 20 s Axel never chose", "message"), index(name))
+
+    def test_each_round_milestone_needs_the_choice_the_hit_and_damage(self):
+        for name, fighter, reviver in ROUNDS:
+            until = step(name)["until"]
+            me = {"address": HOST, "name": "P_EX110_BTLF", "hp": 16, "position": {"x": 0, "z": 0}}
+            boss = {"address": AXEL, "name": "B_EX110", "hp": 440, "position": {"x": 0, "z": 0}}
+            logs = {0: [target(fighter), CLAIM.format("host") + " beforeHp=449 afterHp=445 nativeOk=1"]}
             saved = {f"{name}_base": {"chosen": 0, "claims": 0, "bossHp": 449, "hp": 22, "downs": 0}}
-            actors = {seat: [me], 0: [me, boss] if seat == 0 else [boss]}
-            self.assertTrue(evaluate(until, logs, saved, actors, peeks={0: "0x7FF600001000", 1: "0x7FF600001000"}), name)
-            logs[0][0] = target(1 - seat, 3)  # Axel chose the other seat
-            self.assertFalse(evaluate(until, logs, saved, actors, peeks={0: "0x7FF600001000", 1: "0x7FF600001000"}), name)
+            actors = {fighter: [me], 0: [me, boss] if fighter == 0 else [boss]}
+            peeks = {0: HOST, 1: HOST}
+            self.assertTrue(evaluate(until, logs, saved, actors, peeks=peeks), name)
+            logs[0][0] = target(1 - fighter)  # Axel chose the other seat
+            self.assertFalse(evaluate(until, logs, saved, actors, peeks=peeks), name)
+
+    def test_each_round_is_filmed_for_its_whole_length(self):
+        for name, fighter, reviver in ROUNDS:
+            fight = step(name)
+            self.assertEqual(sorted(c["instance"] for c in fight["clips"]), [0, 1])
+            self.assertTrue(all(c["seconds"] >= fight["seconds"] for c in fight["clips"]), name)
+            self.assertIn("sample", fight)  # positions and Axel's motion, for the direct-aim measurement
 
     def test_the_reviver_walks_away_from_axel(self):
-        for name, seat in (("friend_target_walk_away", 0), ("host_target_walk_away", 1)):
-            walk = expr(name, key="as")
-            self.assertEqual((walk["instance"], walk["body"]), (seat, "self"))
-            me = {"address": "0x7FF600001000", "position": {"x": 100, "z": 0}}
-            x, z = evaluate(walk["targetExpr"], {}, actors={seat: [me]}, positions={("B_EX110", seat): (0, 0, 0)},
-                            peeks={seat: "0x7FF600001000"})
+        for name, fighter, reviver in ROUNDS:
+            walk = step(f"{name}_walk_away")
+            self.assertEqual((walk["instance"], walk["body"]), (reviver, "self"))
+            x, z = evaluate(walk["targetExpr"], actors={reviver: [roxas(HOST, 100)]},
+                            positions={("B_EX110", reviver): (0, 0, 0)}, peeks={reviver: HOST})
             self.assertAlmostEqual(x, 900)
             self.assertAlmostEqual(z, 0)
 
-    def test_ledger_phases_and_scope(self):
-        ledger = expr("ledger", key="as")
+    # REQUIRED 1, 2 and 4 live in the ledgers; the fixture must ask them for it.
+    def test_ledgers_judge_the_rounds_and_the_downs(self):
+        ledger = step("ledger")
         self.assertEqual((ledger["objectId"], ledger["program"], ledger["window"]), (81, 137, ["m_friend_target0", "m_interleaved1"]))
-        self.assertEqual([(p["name"], p["host"], p["friend"], p.get("hitOnHost", False), p.get("hitOnFriend", False))
-                          for p in ledger["phases"]],
-                         [("friend_target", False, True, False, True), ("host_target", True, False, True, False),
-                          ("interleaved", True, True, False, False)])
+        self.assertEqual([(p["name"], p["host"], p["friend"], p.get("hitOnHost", False), p.get("hitOnFriend", False),
+                           p.get("cloneZero", False)) for p in ledger["phases"]],
+                         [("friend_target", False, True, False, True, True), ("host_target", True, False, True, False, False),
+                          ("interleaved", True, True, False, False, False)])
+        targets = step("targets")
+        self.assertEqual((targets["do"], targets["objectId"], targets["ledger"]), ("target_ledger", 81, "ledger"))
+        self.assertEqual([(r["name"], r["from"], r["to"], r["seat"]) for r in targets["rounds"]],
+                         [("friend_target", "m_friend_target0", "m_friend_target1", 1),
+                          ("host_target", "m_host_target0", "m_host_target1", 0)])
+        self.assertEqual(targets["downs"], {"from": "m_downs0", "to": "m_downs1"})
+        self.assertTrue(index("m_downs0") < index("owner_downs") < index("m_downs1") < index("targets"))
+        self.assertGreater(index("targets"), index("ledger"))
+        self.assertEqual(evaluate(step("drop each downed seat", "message")["expr"], saved={"targets": {"pass": False}}), False)
+
+    def test_diagnostics_and_no_stand_ins(self):
         boots = [s for s in STEPS if s["do"] == "boot"]
         self.assertTrue(all(b["env"]["KH2COOP_TRACE_HITS"] == "1" and b["env"]["KH2COOP_ENEMY_MIRROR_TRACE"] == "1" for b in boots))
         self.assertFalse(any(s["do"] in ("protect", "warp", "test_enemy_hp") for s in STEPS))

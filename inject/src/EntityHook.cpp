@@ -1016,6 +1016,62 @@ static uintptr_t ApplyHitDamageBody(void* victim, void* hit, nativehittrace::Hit
     return g_origApplyHitDamage(victim, hit);
 }
 
+// VUH-2912 witness (diagnostic, reads only, only while the hit trace captures): a boss's applied hit that lowered
+// the local canonical player's HP, read again a few frames later. A native hit leaves its reaction motion and the
+// ignore-hit timer (+0xD70, which 0x3D65A0 tests) running; an HP-only write leaves neither. Keyed by the hittrace
+// sequence of that ApplyHitDamage scope, so a fixture joins it to the scope and to the mirror's hit line.
+struct BossHitWitness {
+    std::uint64_t seq;
+    uintptr_t attacker, victim;
+    uint32_t frame, atkpId, motion;
+    float ignoreHit;
+    int32_t hpBefore, hpAfter;
+};
+static constexpr uintptr_t OFF_IGNORE_HIT = 0xD70;
+static constexpr uint32_t kWitnessFrames = 4;
+static constexpr unsigned kWitnessSlots = 4, kWitnessLogLimit = 64;
+static BossHitWitness g_witnesses[kWitnessSlots] = {};
+static unsigned g_witnessesLogged = 0;
+
+static void NoteBossHitWitness(std::uint64_t seq, uintptr_t victim, uintptr_t record, uint32_t motion, float ignoreHit,
+                               int32_t hpBefore, int32_t hpAfter) noexcept {
+    uintptr_t player = 0;
+    if (!seq || g_witnessesLogged >= kWitnessLogLimit || hpAfter >= hpBefore || g_lastHit.hit != record ||
+        !ReadHitTrace(g_exeBase + 0x2A105D0, player) || player != victim) return;
+    __try {
+        char name[32];
+        ActorName(g_lastHit.attacker, name);
+        if (name[0] != 'B' || name[1] != '_') return;
+        for (auto& w : g_witnesses) {
+            if (w.seq) continue;
+            w = {seq, g_lastHit.attacker, victim, g_frameCounter, g_lastHit.atkpId, motion, ignoreHit, hpBefore, hpAfter};
+            return;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+static void BossHitWitnessTick() noexcept {
+    for (auto& w : g_witnesses) {
+        if (!w.seq || g_frameCounter - w.frame < kWitnessFrames) continue;
+        uint32_t motion = UINT32_MAX;
+        float ignoreHit = -1.0f;
+        uintptr_t player = 0;
+        const bool same = ReadHitTrace(g_exeBase + 0x2A105D0, player) && player == w.victim;
+        if (same) {
+            (void)ReadHitTrace(w.victim + offsets::actor::ANIM_ID, motion);
+            (void)ReadHitTrace(w.victim + OFF_IGNORE_HIT, ignoreHit);
+        }
+        if (g_witnessesLogged < kWitnessLogLimit) {
+            ++g_witnessesLogged;
+            Log("[hitwitness] seq=%llu hitFrame=%u frame=%u attacker=%llX victim=%llX atkp=%u hp=%d->%d motion=%u->%u "
+                "ignoreHit=%.1f->%.1f same=%u", static_cast<unsigned long long>(w.seq), w.frame, g_frameCounter,
+                static_cast<unsigned long long>(w.attacker), static_cast<unsigned long long>(w.victim), w.atkpId,
+                w.hpBefore, w.hpAfter, w.motion, motion, double(w.ignoreHit), double(ignoreHit), same ? 1u : 0u);
+        }
+        w = {};
+    }
+}
+
 static uintptr_t __fastcall HookedApplyHitDamage(void* victim, void* hit) {
     using namespace nativehittrace;
     if (!CanCaptureApply()) return ApplyHitDamageBody(victim, hit, nullptr, nullptr);
@@ -1026,6 +1082,14 @@ static uintptr_t __fastcall HookedApplyHitDamage(void* victim, void* hit) {
     ApplyToken token {};
     const ApplyFacts before = CaptureHitFacts(actor, record);
     BeginApply(token, callerRva, callerAvailable, before);
+    const bool traced = token.active;
+    const std::uint64_t seq = traced ? token.event.sequence : 0;
+    uint32_t motionBefore = UINT32_MAX;
+    float ignoreBefore = -1.0f;
+    if (traced) {  // VUH-2912 witness inputs
+        (void)ReadHitTrace(actor + offsets::actor::ANIM_ID, motionBefore);
+        (void)ReadHitTrace(actor + OFF_IGNORE_HIT, ignoreBefore);
+    }
     ApplyFacts after {};
     uintptr_t result = 0;
     bool normal = false;
@@ -1043,6 +1107,7 @@ static uintptr_t __fastcall HookedApplyHitDamage(void* victim, void* hit) {
         EndApply(token, normal && !AbnormalTermination(), result,
                  normal && !AbnormalTermination() ? &after : nullptr);
     }
+    if (traced && normal) NoteBossHitWitness(seq, actor, record, motionBefore, ignoreBefore, before.victim.hp, after.victim.hp);
     return result;
 }
 
@@ -3785,6 +3850,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 allyhit::SetFriendlyFire(enemysync::FriendlyFire()); // VUH-2421: host setting, synced
                 allyhit::Tick(g_frameCounter); // stats line (silent when off or unchanged)
                 ThornHitTraceTick();           // VUH-2617: default off
+                BossHitWitnessTick();          // VUH-2912: only with the hit trace on
                 struggleorbs::NoteGameThread();
                 enemysync::OrbTick();          // VUH-2466: the friend shows the host's Struggle orbs
             }

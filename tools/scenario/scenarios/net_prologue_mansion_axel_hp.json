@@ -1,6 +1,6 @@
 {
  "name": "net_prologue_mansion_axel_hp",
- "description": "VUH-2912, FM-02 rehearsal route into Axel II (02/14 btl137, B_EX110 81), two default dual-wield Roxases, shipped defaults, no protect; KH2COOP_TRACE_HITS and KH2COOP_ENEMY_MIRROR_TRACE are diagnostics only. Lease: no boss damage or boss hit on either seat before the host's admitted release. Then three short rounds, each filmed on both seats: friend target (the host walks away from Axel and only revives; the friend fights, so the host's Axel must choose the friend's seat and the friend's own Roxas takes the native hit from its mirrored Axel), host target (the same, reversed) and interleaved (both fight). The boss HP ledger joins every host Axel HP change to one host native hit or one friend claim, and checks that the host Axel's hits on the host's copy of the friend are checked zeros. Each seat is then downed once and revived (owner_downs): a downed seat drops out of Axel's candidates. The atk_burst aim reads the canonical player directly; the host's boss hits during the friend-target round are reported, not judged. PC1's saves are Critical (22-HP Roxas, one Axel hit downs a 5-HP seat). Stops before victory. Rehearsal save, no save.",
+ "description": "VUH-2912, FM-02 rehearsal route into Axel II (02/14 btl137, B_EX110 81), two default dual-wield Roxases, shipped defaults, no protect; KH2COOP_TRACE_HITS and KH2COOP_ENEMY_MIRROR_TRACE are diagnostics only. Lease: no boss damage or boss hit on either seat before the host's admitted release. Then three short rounds, each filmed on both seats for its whole length: friend target (the host walks away from Axel and, once both seats stand measured apart, only revives; the friend fights, so the host's Axel must choose the friend's seat and the friend's own Roxas takes the native hit from its mirrored Axel), host target (the same, reversed) and interleaved (both fight). The boss HP ledger joins every host Axel HP change to one host native hit or one friend claim, and requires the host Axel's hits on the host's copy of the friend to be complete checked zeros (at least one in the friend round). The boss target ledger requires each round's choice of that seat before a native hit witnessed by its reaction motion and ignore-hit timer (and, on the friend, the driven host motion), never a choice of an ineligible candidate, and, around owner_downs, each downed seat out of Axel's candidates and never chosen. The atk_burst aim and leave distance read the canonical player directly; the friend round's position/motion samples and the host's boss hits measure that, unjudged. PC1's saves are Critical (22-HP Roxas, one Axel hit downs a 5-HP seat). Stops before victory. Rehearsal save, no save.",
  "playerDefaults": true,
  "protect": [],
  "steps": [
@@ -167,16 +167,6 @@
    "pollMs": 250
   },
   {
-   "do": "save",
-   "as": "friend_target_base",
-   "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=1 ', 0)), 'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0], 'hp': [a['hp'] for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0], 'downs': log_count('[downed] gate intercept', 1)}"
-  },
-  {
-   "do": "save",
-   "as": "m_friend_target0",
-   "expr": "[log_count('', 0), log_count('', 1)]"
-  },
-  {
    "do": "walk_to",
    "instance": 0,
    "body": "self",
@@ -186,6 +176,26 @@
    "radius": 60,
    "timeoutMs": 4000,
    "as": "friend_target_walk_away"
+  },
+  {
+   "do": "save",
+   "as": "friend_target_separation",
+   "expr": "(lambda a, host, friend: {'host': (lambda p: ((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5)(host), 'friend': (lambda p: ((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5)(friend), 'standing': all(log_count('[downed] gate intercept', i) <= log_count('[downed] revive returned', i) for i in (0, 1))})(pos('B_EX110', 0), [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], [(a['position']['x'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0])"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['friend_target_separation']['standing'] and saved['friend_target_separation']['host'] - saved['friend_target_separation']['friend'] > 200",
+   "message": "SETUP FAILURE, not a targeting result: friend_target needs both seats standing and the host more than 200 units farther from Axel than the friend after its walk"
+  },
+  {
+   "do": "save",
+   "as": "friend_target_base",
+   "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=1 ', 0)), 'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0], 'hp': [a['hp'] for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0], 'downs': log_count('[downed] gate intercept', 1)}"
+  },
+  {
+   "do": "save",
+   "as": "m_friend_target0",
+   "expr": "[log_count('', 0), log_count('', 1)]"
   },
   {
    "do": "revive_guard",
@@ -201,16 +211,20 @@
    "reach": 120,
    "as": "friend_target",
    "until": "len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=1 ', 0)) > saved['friend_target_base']['chosen'] and ([a['hp'] for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0] < saved['friend_target_base']['hp'] or log_count('[downed] gate intercept', 1) > saved['friend_target_base']['downs']) and len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)) > saved['friend_target_base']['claims']",
+   "sample": {
+    "expr": "{'axel': [(a['position']['x'], a['position']['z'], a.get('motionId')) for a in actors(0) if a['name'] == 'B_EX110'], 'host': [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'clone': [(a['position']['x'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0]}",
+    "everyMs": 500
+   },
    "clips": [
     {
      "instance": 0,
-     "seconds": 12,
+     "seconds": 20,
      "fps": 30,
      "name": "friend_target_host"
     },
     {
      "instance": 1,
-     "seconds": 12,
+     "seconds": 20,
      "fps": 30,
      "name": "friend_target_friend"
     }
@@ -220,6 +234,11 @@
    "do": "save",
    "as": "m_friend_target1",
    "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['friend_target']['until']['reached']",
+   "message": "friend_target: in 20 s Axel never chose the friend with the friend hit and landing damage"
   },
   {
    "do": "wait_until",
@@ -233,14 +252,25 @@
    "as": "friend_target_guard"
   },
   {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "x": 0,
+   "z": 0,
+   "targetExpr": "(lambda a, m: (lambda d: (a[0] + 900 * (m[0] - a[0]) / d, a[2] + 900 * (m[1] - a[2]) / d))(max(1.0, ((m[0] - a[0]) ** 2 + (m[1] - a[2]) ** 2) ** 0.5)))(pos('B_EX110', 1), [(a['position']['x'], a['position']['z']) for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0])",
+   "radius": 60,
+   "timeoutMs": 4000,
+   "as": "host_target_walk_away"
+  },
+  {
    "do": "save",
-   "as": "friend_target_end",
-   "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=1 ', 0))}"
+   "as": "host_target_separation",
+   "expr": "(lambda a, host, friend: {'host': (lambda p: ((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5)(host), 'friend': (lambda p: ((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5)(friend), 'standing': all(log_count('[downed] gate intercept', i) <= log_count('[downed] revive returned', i) for i in (0, 1))})(pos('B_EX110', 0), [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], [(a['position']['x'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0])"
   },
   {
    "do": "assert",
-   "expr": "saved['friend_target_end']['chosen'] > saved['friend_target_base']['chosen']",
-   "message": "friend_target: the host's Axel never chose seat 1 while it alone fought near Axel"
+   "expr": "saved['host_target_separation']['standing'] and saved['host_target_separation']['friend'] - saved['host_target_separation']['host'] > 200",
+   "message": "SETUP FAILURE, not a targeting result: host_target needs both seats standing and the friend more than 200 units farther from Axel than the host after its walk"
   },
   {
    "do": "save",
@@ -251,17 +281,6 @@
    "do": "save",
    "as": "m_host_target0",
    "expr": "[log_count('', 0), log_count('', 1)]"
-  },
-  {
-   "do": "walk_to",
-   "instance": 1,
-   "body": "self",
-   "x": 0,
-   "z": 0,
-   "targetExpr": "(lambda a, m: (lambda d: (a[0] + 900 * (m[0] - a[0]) / d, a[2] + 900 * (m[1] - a[2]) / d))(max(1.0, ((m[0] - a[0]) ** 2 + (m[1] - a[2]) ** 2) ** 0.5)))(pos('B_EX110', 1), [(a['position']['x'], a['position']['z']) for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0])",
-   "radius": 60,
-   "timeoutMs": 4000,
-   "as": "host_target_walk_away"
   },
   {
    "do": "revive_guard",
@@ -277,16 +296,20 @@
    "reach": 120,
    "as": "host_target",
    "until": "len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=0 ', 0)) > saved['host_target_base']['chosen'] and ([a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0] < saved['host_target_base']['hp'] or log_count('[downed] gate intercept', 0) > saved['host_target_base']['downs']) and ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0] < saved['host_target_base']['bossHp']",
+   "sample": {
+    "expr": "{'axel': [(a['position']['x'], a['position']['z'], a.get('motionId')) for a in actors(0) if a['name'] == 'B_EX110'], 'host': [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'clone': [(a['position']['x'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0]}",
+    "everyMs": 500
+   },
    "clips": [
     {
      "instance": 0,
-     "seconds": 12,
+     "seconds": 20,
      "fps": 30,
      "name": "host_target_host"
     },
     {
      "instance": 1,
-     "seconds": 12,
+     "seconds": 20,
      "fps": 30,
      "name": "host_target_friend"
     }
@@ -298,6 +321,11 @@
    "expr": "[log_count('', 0), log_count('', 1)]"
   },
   {
+   "do": "assert",
+   "expr": "saved['host_target']['until']['reached']",
+   "message": "host_target: in 20 s Axel never chose the host with the host hit and landing damage"
+  },
+  {
    "do": "wait_until",
    "expr": "log_count('[downed] gate intercept', 0) <= log_count('[downed] revive returned', 0)",
    "timeoutMs": 60000,
@@ -307,16 +335,6 @@
    "do": "revive_guard",
    "on": false,
    "as": "host_target_guard"
-  },
-  {
-   "do": "save",
-   "as": "host_target_end",
-   "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=0 ', 0))}"
-  },
-  {
-   "do": "assert",
-   "expr": "saved['host_target_end']['chosen'] > saved['host_target_base']['chosen']",
-   "message": "host_target: the host's Axel never chose seat 0 while it alone fought near Axel"
   },
   {
    "do": "save",
@@ -402,7 +420,8 @@
      "to": "m_friend_target1",
      "host": false,
      "friend": true,
-     "hitOnFriend": true
+     "hitOnFriend": true,
+     "cloneZero": true
     },
     {
      "name": "host_target",
@@ -437,6 +456,11 @@
    "message": "the boss's hits on the friend must stay native on the friend: no forwarded RemoteHit or vetoed local hit"
   },
   {
+   "do": "save",
+   "as": "m_downs0",
+   "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
    "do": "owner_downs",
    "owners": [
     1,
@@ -450,6 +474,11 @@
    "do": "clip_wait"
   },
   {
+   "do": "save",
+   "as": "m_downs1",
+   "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
    "do": "assert",
    "expr": "all(saved['owner_downs']['owners'][k] for k in ('0', '1'))",
    "message": "each owner must be downed once and revived by the other seat"
@@ -460,9 +489,34 @@
    "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[enemy-target\\] boss-target [^\\n]*objectId=81 [^\\n]*)', 0)]"
   },
   {
+   "do": "target_ledger",
+   "objectId": 81,
+   "ledger": "ledger",
+   "as": "targets",
+   "require": false,
+   "rounds": [
+    {
+     "name": "friend_target",
+     "from": "m_friend_target0",
+     "to": "m_friend_target1",
+     "seat": 1
+    },
+    {
+     "name": "host_target",
+     "from": "m_host_target0",
+     "to": "m_host_target1",
+     "seat": 0
+    }
+   ],
+   "downs": {
+    "from": "m_downs0",
+    "to": "m_downs1"
+   }
+  },
+  {
    "do": "assert",
-   "expr": "len([m for m in log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 [^\\n]*valid=(?P<v>\\d+) ', 0) if int(m['v']) & 1 == 0]) > 0 and len([m for m in log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 [^\\n]*valid=(?P<v>\\d+) ', 0) if int(m['v']) & 2 == 0]) > 0",
-   "message": "Axel's search must have seen each downed seat drop out of its candidates (boss-target valid bit clear)"
+   "expr": "saved['targets']['pass']",
+   "message": "Axel must choose each round's seat before its witnessed native hit, never choose an ineligible candidate, and drop each downed seat from its candidates"
   },
   {
    "do": "coop_verdict",

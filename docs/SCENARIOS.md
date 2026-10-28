@@ -3514,23 +3514,36 @@ Kills take `require: false`, so a seat Axel already downed refuses with `WrongSt
 `net_prologue_mansion_axel_hp.json`, from the same generator (same FM-02 arrival, two default Roxases,
 `KH2COOP_TRACE_HITS=1` added). After the host's `[combat-admission] released admitted`:
 - **Lease:** no `[hit]` line with Axel as attacker or victim, and no Axel claim, before each seat's release line.
-- **Friend target, then host target:** the other seat walks 900 units past itself, away from Axel, and then
-  only revives (`revive_guard`); the fighting seat runs the `fight` bot. The round ends once the host logs an
-  `[enemy-target] boss-target ... objectId=81 target=<seat>`, the fighter took a hit or was downed, and it
-  landed damage (a friend claim, or a host HP drop). Each round must log at least one boss-target choosing that
-  seat. A downed fighter is revived before the next round.
+- **Friend target, then host target:** the other seat walks 900 units past itself, away from Axel. Then, on the
+  host's screen, both seats must be standing and the walker more than 200 units (the policy's 150 hysteresis plus
+  margin) farther from Axel than the fighter, or the run stops as a SETUP FAILURE. Only then is the round's
+  baseline taken and its window opened. The walker then only revives (`revive_guard`) while the fighter runs the
+  `fight` bot, filmed on both seats for the round's full 20 s, with positions and Axel's motion sampled every
+  500 ms. The fight's `until` (Axel chose the fighter, the fighter was hit or downed, it landed damage) must be
+  reached, and the window closes right after the fight. A downed fighter is revived before the next round.
 - **Interleaved:** both seats fight until a friend claim and a host native hit have both landed.
-- `hp_ledger` (objectId 81, program 137) over the three rounds: `friend_target` wants friend hits only and a
-  native boss hit on the friend's canonical player (`hitOnFriend`), `host_target` the reverse (`hitOnHost`), and
-  `interleaved` both. The ledger also requires each host Axel hit on the host's copy of the friend to be a
-  checked zero with that copy's HP unchanged (`bossHitsOnClone`).
+- `hp_ledger` (objectId 81, program 137) over the three rounds: `friend_target` wants friend hits only, a native
+  boss hit on the friend's canonical player (`hitOnFriend`) and at least one complete checked zero of an Axel hit
+  on the host's copy of the friend (`cloneZero`). `host_target` is the reverse (`hitOnHost`), and `interleaved`
+  wants both. Any Axel hit on that copy must be a complete checked zero with the copy's HP unchanged; an incomplete
+  scope fails.
 - Mirror mode only: no `[enemy-target] forward` on the host, and no `remote-hit` or `veto` on the friend.
-- `owner_downs`, after which each seat's candidate bit must have been clear in at least one Axel boss-target line
-  (`valid`: bit 0 the host, bit 1 the friend's clone).
-The `boss-target` lines are saved as `boss_targets`. The host's boss hits during `friend_target` measure
-`atk_burst`'s direct canonical-player aim (`docs/ENEMY_TARGET_REMOTE.md`); they are reported, not judged.
-`tests/test_axel_hp_fixture.py` evaluates the lease, round, walk-away and candidate expressions against
-synthetic logs, with negative controls.
+- `owner_downs`, bracketed by marks, then `target_ledger` (`tools/scenario/boss_target_ledger.py`, the
+  `hp_ledger`'s pinned boss lifetime). It checks each round in turn:
+  - Axel chose that seat inside the round.
+  - Inside the round, that seat took a native hit from its copy of the boss, after the choice by statehash tick.
+  - The hit has its `[hitwitness]`: a changed motion and a running ignore-hit timer, or, for a hit that downed
+    the seat, that seat's own gate intercept on that frame (reported as `downing`).
+  - On the friend, the hit also has its `[enemy-mirror] hit` on a driven host motion.
+
+  Separately, no boss-target line may choose a candidate whose valid bit is clear. During each seat's own down
+  interval, a boss-target line must show it out of the candidates, and none may choose it after 1 s of pose
+  delivery.
+The `boss-target` lines are saved as `boss_targets`. The friend round's samples and the host's boss hits measure
+`atk_burst`'s and the leave distance's direct canonical-player reads (`docs/ENEMY_TARGET_REMOTE.md`); they are
+reported, not judged. `tests/test_axel_hp_fixture.py` checks the fixture's expressions and step order with
+negative controls, and fails on the `f31e14b` fixture (`AXEL_HP_FIXTURE`).
+`tests/test_boss_target_ledger.py` reproduces the review's false passes as controls.
 
 ### Waiting for the friend's arrival before `coop_verdict` (VUH-2898)
 
