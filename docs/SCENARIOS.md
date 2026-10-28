@@ -3528,8 +3528,13 @@ Kills take `require: false`, so a seat Axel already downed refuses with `WrongSt
   script searches (at its mode transitions), and in vuh2912-hp-04 he moved ~400 units after that measurement,
   chose the walker and never searched again while the fighter was nearer. So, with the walker's `revive_guard`
   already on, the fighter then fights (`<round>_select`, up to 15 s) until Axel's selection names it, or the run
-  stops as a SETUP FAILURE (selection). Only then is the round's
-  baseline taken and its window opened. The walker then only revives (`revive_guard`) while the fighter runs the
+  stops as a SETUP FAILURE (selection). Then the setup combat settles (Ione fc9e195f): within 5 s, a host
+  `[statehash] native` Axel sample newer than that fight must equal Axel's live HP, and every friend claim on Axel
+  must have its host application or reject. That makes the `hp_ledger`'s start sample (the last one before the
+  mark) exact. After the baseline, a snapshot of the Axel hit, claim and boss-target line counts is taken with
+  that alignment rechecked, then the mark. The window opens only if nothing moved since the snapshot and the
+  selection still names the fighter, else SETUP FAILURE (window). In the open window the walker only revives
+  (`revive_guard`) while the fighter runs the
   `fight` bot, filmed on both seats for the round's full 20 s, with positions and Axel's motion sampled every
   500 ms. The fight's `until` (Axel chose the fighter, the fighter was hit or downed, it landed damage) must be
   reached, and the window closes right after the fight. A downed fighter is revived before the next round.

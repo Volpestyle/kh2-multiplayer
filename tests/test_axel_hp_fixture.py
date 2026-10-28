@@ -108,6 +108,59 @@ class AxelHpFixtureTest(unittest.TestCase):
             self.assertFalse(evaluate(expr, {0: [target(fighter), target(1 - fighter)]}), name)  # hp-04: it turned away
             self.assertFalse(evaluate(expr, {0: []}), name)                                      # never chose at all
 
+    # Ione fc9e195f: (2) the window's start HP is a fresh host sample equal to Axel's live HP with every friend claim
+    # settled; (1) no hit, claim or selection change between that snapshot and the mark, and the selection names the
+    # fighter at the mark.
+    SAMPLE = "[statehash] native epoch=3 frame={} netId=1 objectId=81 hp={} actor=7FF600002000"
+    HOST_CLAIM = "[enemysync] host hit claim connection=11 seq={} epoch=3 netId=1 objectId=81 attackId=1 damage=4 beforeHp=449 afterHp=445 nativeOk=1"
+    CLIENT_CLAIM = "[enemysync] client hit claim connection=11 seq={} epoch=3 netId=1 objectId=81 attackId=1 damage=4"
+    REJECT = "[hitclaim] reject epoch=3 seq={} slot=1 connection=11 netId=1 objectId=81 damage=4 currentEpoch=3 reason=late"
+
+    def boss(self, hp):
+        return {0: [{"address": AXEL, "name": "B_EX110", "hp": hp, "position": {"x": 0, "z": 0}}]}
+
+    def test_each_window_opens_on_a_settled_hp_sample(self):
+        for name, fighter, reviver in ROUNDS:
+            settle0 = index(f"{name}_settle0")
+            wait = STEPS[settle0 + 1]
+            self.assertEqual(wait["do"], "wait_until")
+            self.assertTrue(index(f"{name}_select") < settle0 < index(f"{name}_base") < index(f"{name}_quiet")
+                            < index(f"m_{name}0"), name)
+            saved = {f"{name}_settle0": evaluate(STEPS[settle0]["expr"], {0: [self.SAMPLE.format(1, 449)]})}
+            self.assertEqual(saved[f"{name}_settle0"], 1)
+            fresh = [self.SAMPLE.format(1, 449), self.HOST_CLAIM.format(1), self.SAMPLE.format(2, 445)]
+            ok = lambda host, friend=(), hp=445: evaluate(wait["expr"], {0: list(host), 1: list(friend)}, saved, self.boss(hp))  # noqa: E731
+            self.assertTrue(ok(fresh, [self.CLIENT_CLAIM.format(1)]), name)
+            self.assertFalse(ok(fresh[:2], [self.CLIENT_CLAIM.format(1)]), name)            # no sample since the fight
+            self.assertFalse(ok(fresh[:1], hp=449), name)  # no sample since the fight, even with HP still matching
+            self.assertFalse(ok(fresh, [self.CLIENT_CLAIM.format(1)], hp=441), name)        # a hit after the last sample
+            self.assertFalse(ok(fresh, [self.CLIENT_CLAIM.format(1), self.CLIENT_CLAIM.format(2)]), name)  # in flight
+            self.assertTrue(ok(fresh + [self.REJECT.format(2)], [self.CLIENT_CLAIM.format(1), self.CLIENT_CLAIM.format(2)]), name)
+            self.assertLessEqual(wait["timeoutMs"], 5000)
+
+    def test_each_window_opens_only_if_nothing_moved_since_the_aligned_snapshot(self):
+        for name, fighter, reviver in ROUNDS:
+            quiet, mark = step(f"{name}_quiet"), index(f"m_{name}0")
+            check = STEPS[mark + 1]
+            self.assertIn(f"SETUP FAILURE (window), not a targeting result: {name}'s window", check["message"])
+            self.assertEqual(STEPS[mark + 2]["as"], name)  # the round's fight follows at once
+            host = [target(1 - fighter), target(fighter), self.SAMPLE.format(2, 445), self.HOST_CLAIM.format(1)]
+            friend = [self.CLIENT_CLAIM.format(1)]
+            snap = evaluate(quiet["expr"], {0: host, 1: friend}, actors=self.boss(445))
+            self.assertEqual(snap, {"hits": 1, "claims": 1, "targets": 2, "aligned": True})
+            self.assertFalse(evaluate(quiet["expr"], {0: host, 1: friend}, actors=self.boss(441))["aligned"])
+            opens = lambda h, f=friend, s=snap: evaluate(check["expr"], {0: h, 1: list(f)}, {f"{name}_quiet": s})  # noqa: E731
+            self.assertTrue(opens(host), name)
+            self.assertFalse(opens(host + [ROXAS_HIT]), name)                                # a hit on Axel at the mark
+            self.assertFalse(opens(host, friend + [self.CLIENT_CLAIM.format(2)]), name)      # a claim sent at the mark
+            self.assertFalse(opens(host + [target(1 - fighter)]), name)                      # turned away at the mark
+            self.assertFalse(opens(host, s=dict(snap, aligned=False)), name)                 # snapshot was not aligned
+            # Ione's probe (1): Axel turned away during the settle and baseline reads, before the snapshot, so nothing
+            # moves after it; the window still must not open on the other seat.
+            turned = host + [target(1 - fighter)]
+            late = evaluate(quiet["expr"], {0: turned, 1: friend}, actors=self.boss(445))
+            self.assertFalse(opens(turned, s=late), name)
+
     def test_each_round_must_reach_its_milestone(self):
         for name, fighter, reviver in ROUNDS:
             reached = step(f"{name}: in 20 s Axel never chose")["expr"]

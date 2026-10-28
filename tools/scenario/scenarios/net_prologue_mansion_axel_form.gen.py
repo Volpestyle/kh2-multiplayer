@@ -331,6 +331,34 @@ def clone_xz(i):
             f"if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != {canon(i)}][0]")
 
 
+def boss_samples():
+    """The host's periodic Axel HP samples (every 60 frames), oldest first: hp_ledger's start HP is the last one."""
+    return (f"[int(m['hp']) for m in log_matches(r'\\[statehash\\] native epoch=\\d+ frame=\\d+ netId=\\d+ "
+            f"objectId={AXEL_OBJECT} hp=(?P<hp>-?\\d+) ', 0)]")
+
+
+def claims_settled():
+    """Every friend claim on Axel so far has its host application or reject (by seq), so none crosses a mark."""
+    seq = lambda pattern, i: f"[m['s'] for m in log_matches(r'{pattern}', {i})]"  # noqa: E731
+    claim = "\\[enemysync\\] {} hit claim connection=\\d+ seq=(?P<s>\\d+) epoch=\\d+ netId=\\d+ objectId=" + str(AXEL_OBJECT) + " "
+    reject = "\\[hitclaim\\] reject epoch=\\d+ seq=(?P<s>\\d+) [^\\n]*objectId=" + str(AXEL_OBJECT) + " "
+    return (f"(lambda c, h: all(s in h for s in c))({seq(claim.format('client'), 1)}, "
+            f"{seq(claim.format('host'), 0)} + {seq(reject, 0)})")
+
+
+def aligned():
+    """No Axel HP change since the host's last sample, and no friend claim in flight: hp_ledger's start HP is exact."""
+    return f"({claims_settled()} and ({boss_samples()} or [None])[-1] == {boss_hp(0)})"
+
+
+def quiet(extra=""):
+    """Counts that move with any Axel hit, claim or selection change (host and friend logs), plus `extra` entries."""
+    return (f"{{'hits': len(log_matches(r'(?P<x>victim=B_EX110@|\\[enemysync\\] host hit claim [^\\n]*objectId={AXEL_OBJECT} )', 0)), "
+            f"'claims': len(log_matches(r'\\[enemysync\\] client hit claim [^\\n]*objectId={AXEL_OBJECT} ', 1)), "
+            f"'targets': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId={AXEL_OBJECT} ', 0))"
+            f"{', ' + extra if extra else ''}}}")
+
+
 def standing():
     return "all(log_count('[downed] gate intercept', i) <= log_count('[downed] revive returned', i) for i in (0, 1))"
 
@@ -345,6 +373,7 @@ def separation():
 SEPARATION_MARGIN = 200  # beyond the policy's 150-unit hysteresis
 FIGHTER_NEAR = 350      # the fighter's approach stops inside this distance from Axel
 SELECT_SECONDS = 15     # the fighter's bound to draw Axel's selection before its round's window
+SETTLE_MS = 5000        # a fresh host HP sample (every ~1 s) and every friend claim applied, before the window
 # Where the HP fixture's revive guards may step aside (Ione 00c3ac51): Axel II's sealed encounter scope, and a circle
 # inside the positions the seats and Axel reached in runs vuh2912-hp-02/03 (centre (39, -27), up to 602 out).
 AXEL_ARENA = {"roomScope": AXEL, "center": [39, -27], "radius": 450}
@@ -390,10 +419,22 @@ def target_round(name, fighter, reviver):
         {"do": "assert", "expr": selected(fighter),
          "message": f"SETUP FAILURE (selection), not a targeting result: in {SELECT_SECONDS} s Axel's selection never "
                     f"named the {seat[fighter]} before {name}'s window"},
+        # Ione fc9e195f (2): setup hits must not reach the judged window. Wait for a fresh host HP sample after the
+        # selection fight that equals Axel's live HP, with every friend claim applied or rejected.
+        {"do": "save", "as": f"{name}_settle0", "expr": f"len({boss_samples()})"},
+        {"do": "wait_until", "expr": f"len({boss_samples()}) > saved['{name}_settle0'] and {aligned()}",
+         "timeoutMs": SETTLE_MS, "pollMs": 250},
         {"do": "save", "as": f"{name}_base", "expr": f"{{'chosen': {targets(fighter)}, 'claims': {host_claims()}, "
                                                     f"'bossHp': {boss_hp(0)}, 'hp': {canonical_hp(fighter)}, "
                                                     f"'downs': log_count('[downed] gate intercept', {fighter})}}"},
+        {"do": "save", "as": f"{name}_quiet", "expr": quiet(f"'aligned': {aligned()}")},
         marks(f"m_{name}0"),
+        # Ione fc9e195f (1): the window opens on the fighter's selection and settled HP, not merely after them. No
+        # Axel hit, claim or selection change between the aligned snapshot and here, so both held at the mark.
+        {"do": "assert", "expr": f"saved['{name}_quiet']['aligned'] and {quiet()} == {{k: saved['{name}_quiet'][k] "
+                                 f"for k in ('hits', 'claims', 'targets')}} and {selected(fighter)}",
+         "message": f"SETUP FAILURE (window), not a targeting result: {name}'s window opened without Axel's selection of "
+                    f"the {seat[fighter]} and settled boss HP"},
         # The clips run as long as the round can (the step waits for them), so the round's hits are on film.
         {"do": "fight", "instances": [fighter], "seconds": 20, "reach": 120, "as": name,
          "until": f"{selected(fighter)} and {hit} and {landed}",
