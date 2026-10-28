@@ -43,7 +43,7 @@ int main() {
     // run vuh2912-sora-01) asks for the skipped request; Roxas's logical downing (mode 4) runs its death.
     {
         FullPartyFacts held {};
-        held.host = held.downed = held.deadFlag = held.taskIdle = true;
+        held.host = held.downed = held.deadFlag = held.taskRead = true;
         for (std::uint32_t mode : {0u, 3u}) {
             held.gateMode = mode;
             CHECK(FullPartyPathFor(held) == FullPartyPath::GameOverRequest);
@@ -57,7 +57,12 @@ int main() {
         { auto f = logical; f.host = false; CHECK(FullPartyPathFor(f) == FullPartyPath::None); }
         { auto f = held; f.downed = false; CHECK(FullPartyPathFor(f) == FullPartyPath::None); }
         { auto f = held; f.deadFlag = false; CHECK(FullPartyPathFor(f) == FullPartyPath::None); } // revived meanwhile
-        { auto f = held; f.taskIdle = false; CHECK(FullPartyPathFor(f) == FullPartyPath::None); } // a game over is running
+        { auto f = held; f.task = 0x1234; CHECK(FullPartyPathFor(f) == FullPartyPath::None); }    // a game over is running
+        // Ione (ce23ee0c): a task pointer that could not be read is not idle, whatever its zero default says.
+        for (std::uint32_t mode : {0u, 3u}) {
+            auto f = held; f.gateMode = mode; f.taskRead = false; f.task = 0;
+            CHECK(FullPartyPathFor(f) == FullPartyPath::None);
+        }
         { auto f = held; f.gateMode = 4; CHECK(FullPartyPathFor(f) == FullPartyPath::None); }     // not a held death
         { auto f = held; f.gateMode = 1; CHECK(FullPartyPathFor(f) == FullPartyPath::None); }
         CHECK(std::string(FullPartyPathName(FullPartyPath::GameOverRequest)) == "game-over-request");

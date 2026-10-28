@@ -193,17 +193,20 @@ constexpr const char* GateReasonName(GateReason r) noexcept {
 // VUH-2931: how a downed host takes the full party's game over once everyone is down. A logically downed
 // Roxas host (mode 4) has not died, so it runs its native death. A Sora host's held death (mode 0 or 3)
 // already ran and its one game-over request was skipped, so the host issues that request itself, while
-// still natively dead and before any game-over task. Anything else is not this host's to take.
+// still natively dead and before any game-over task: the task pointer (0x2AE8050) read and zero. An unread task
+// pointer is not an idle one. Anything else is not this host's to take.
 enum class FullPartyPath : std::uint8_t { None, NativeDeath, GameOverRequest };
 struct FullPartyFacts {
-    bool host = false, downed = false, logical = false, deadFlag = false, taskIdle = false;
+    bool host = false, downed = false, logical = false, deadFlag = false, taskRead = false;
+    std::uintptr_t task = 0;
     std::uint32_t gateMode = 0;
 };
 constexpr FullPartyPath FullPartyPathFor(const FullPartyFacts& f) noexcept {
     if (!f.host || !f.downed) return FullPartyPath::None;
     if (f.logical) return FullPartyPath::NativeDeath;
-    return (f.gateMode == 0 || f.gateMode == 3) && f.deadFlag && f.taskIdle ? FullPartyPath::GameOverRequest
-                                                                             : FullPartyPath::None;
+    const bool taskIdle = f.taskRead && f.task == 0;
+    return (f.gateMode == 0 || f.gateMode == 3) && f.deadFlag && taskIdle ? FullPartyPath::GameOverRequest
+                                                                          : FullPartyPath::None;
 }
 constexpr const char* FullPartyPathName(FullPartyPath p) noexcept {
     switch (p) {

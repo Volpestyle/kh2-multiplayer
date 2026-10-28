@@ -94,6 +94,7 @@ struct Snap {
     float pos[3] {}, velX = 0.0f, velZ = 0.0f, motionTime = 0.0f, stickX = 0.0f, stickY = 0.0f;
     uint32_t motionId = 0;
     uintptr_t actor = 0, ctrl = 0, aux = 0, status = 0, task = 0;
+    bool taskRead = false; // VUH-2931: an unread game-over task is not an idle one
     int hp = 0, maxHp = 0;
     uint32_t flags = 0;
     bool deadAction = false, controllerOff = false;
@@ -263,7 +264,7 @@ static Snap Capture(uintptr_t actor) {
     uintptr_t eventContext = 1;
     s.inEvent = !(ReadHitTrace(g_exeBase + offsets::CUTSCENE_STATE, cutscene) && cutscene == 0 &&
                   ReadHitTrace(g_exeBase + offsets::EVENT_CONTEXT, eventContext) && eventContext == 0);
-    ReadHitTrace(g_exeBase + RVA_GAMEOVER_TASK, s.task);
+    s.taskRead = ReadHitTrace(g_exeBase + RVA_GAMEOVER_TASK, s.task);
     ReadHitTrace(g_exeBase + offsets::input::PROCESSED_ENTRY0 + 0x30, s.stickX);
     ReadHitTrace(g_exeBase + offsets::input::PROCESSED_ENTRY0 + 0x34, s.stickY);
     if (!actor) return s;
@@ -1428,7 +1429,8 @@ static void Tick(uintptr_t head) {
             party.downed = true;
             party.logical = g_down.logical;
             party.deadFlag = (s.flags & 4U) != 0;
-            party.taskIdle = s.task == 0;
+            party.taskRead = s.taskRead;
+            party.task = s.task;
             party.gateMode = g_down.lastGateMode;
             const FullPartyPath path = FullPartyPathFor(party);
             const PFN_Request request = g_down.lastGateMode == 3 ? g_down.origReq3 : g_down.origReq0;
