@@ -120,7 +120,7 @@ static void Log(const char*,...) {}
 struct ScriptActorRole {
     std::uint32_t objectId{};uintptr_t actor{},source{};bool axelHeld{};
     std::uint32_t resource{},epoch{};std::uint16_t netId{};std::uint8_t slot{0xFF};uintptr_t thread{};
-    bool axelWhitedOut{};
+    bool axelWhitedOut{};std::uint64_t connection{};bool axelWatched{};
 };
 static std::array<ScriptActorRole,3> g_smRoles{};
 static bool roleCurrent=true;
@@ -191,7 +191,7 @@ static bool SmOwnerBeginAxelRole(std::uint8_t slot,uintptr_t actor,uintptr_t sou
     static std::uint32_t sequence=0;
     auto& role=g_smRoles[slot];
     role={};role.resource=0x80000000u|++sequence;role.objectId=81;role.netId=netId;role.slot=slot;role.actor=actor;
-    role.source=source;role.epoch=scope.epoch;
+    role.source=source;role.epoch=scope.epoch;role.connection=scope.connections[slot];
     return true;
 }
 static unsigned callbacks=0;
@@ -226,7 +226,13 @@ static void __fastcall Reset(std::uint64_t*) { natives.calls.push_back("reset");
 static void __fastcall WhiteOut(std::uint64_t* args) {
     natives.calls.push_back("whiteout");natives.fade=R::FloatOf(args[0]);if(natives.fault)throw 1;
 }
-static void __fastcall WhiteIn(std::uint64_t* args) { natives.calls.push_back("whitein");natives.fade=R::FloatOf(args[0]); }
+static unsigned whiteInFaults=0; // the next payments that fault
+static void __fastcall WhiteIn(std::uint64_t* args) {
+    natives.calls.push_back("whitein");if(whiteInFaults){--whiteInFaults;throw 1;}natives.fade=R::FloatOf(args[0]);
+}
+// The client's trap pins (SmOwnerPin), refused at one RVA if set.
+static std::uint32_t refusedPin=0;
+static bool Pin(std::uint32_t rva,const std::uint8_t* body,std::size_t size) { return body && size && rva!=refusedPin; }
 static bool SmOwnerActorCurrent(const ScriptActorRole&) { return true; }
 using TrapFn=void(*)(std::uint64_t*);
 static struct { uintptr_t original{}; } g_smOwnerTraps[6];
@@ -255,6 +261,7 @@ void Setup(std::uint32_t groups) {
     g_axel={};memory.clear();handles={{kAxel,kAxelHandle},{kHostActor,kHostHandle},{kFriendActor,kFriendHandle}};
     enemytarget::g.candidateActor={kHostActor,kFriendActor,0};
     enemysync::scope={};enemysync::session=0xA1;enemysync::sentClaims=0;g_sm.hostActive=true;g_frameCounter=10;
+    for(auto& in:g_smAxelCameraHooks.in)in=true;
     scopeOk=true;roleBeginOk=true;roleBegins.clear();g_smRoles={};roleCurrent=true;emitted.clear();emitOk=true;duringCallback=nullptr;nativeWatches=0;callbacks=0;callbackPlayer=0;downedspike::down=false;
     g_soraActor=kHostActor;puppets={kFriendActor,0};abortArmed=true;Put(g_exeBase+enemytarget::RVA_NATIVE_PLAYER,kHostActor);
     Put(kAxel+0x100,uintptr_t{0x400000});Put(uintptr_t{0x400000},std::uint32_t{81});
@@ -651,7 +658,13 @@ int main() {
     // and Axel as its VM's source.
     {
         constexpr uintptr_t kName=0x700000,kNode=0x710000,kThread=0x720000,kVm=0x730000,kOther=0x740000;
-        constexpr std::uint32_t kNameHandle=0x70,kNodeHandle=0x71;
+        constexpr std::uint32_t kNameHandle=0x70,kNodeHandle=0x71,kThreadHandle=0x72;
+        // Kit's e4a7861e: the node is {u32 handle(thread), u32 handle(0) owner, f32 0, u32 handle(next)}.
+        const auto node=[&](std::uint32_t thread=kThreadHandle) {
+            handles[kNode]=kNodeHandle;handles[kThread]=kThreadHandle;
+            const std::uint32_t words[4]{thread,0,0,0};auto& bytes=memory[kNode];bytes.resize(sizeof(words));
+            std::memcpy(bytes.data(),words,sizeof(words));
+        };
         using Kind=R::AxelCameraKind;
         std::uint32_t label=303;
         const auto running=[&](uintptr_t thread,uintptr_t source) {
@@ -671,13 +684,15 @@ int main() {
         };
         const auto friendClearLight=[&](std::uint32_t groups=1u<<R::kOvertakerGroup) {
             Setup(groups);Frame();
-            handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});handles[kNode]=kNodeHandle;Put(kNode,kThread);
+            handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});node();
             running(kOther,kAxel);duringCallback=queue;
             const bool ran=SmAxelComplete(Claim(),nullptr);duringCallback=nullptr;
             return ran;
         };
-        check(friendClearLight() && g_axel.fade.thread==kThread && g_axel.fade.slot==1,
-              "under the owner's custody the host adopts D303 at its 2/20");
+        check(friendClearLight() && g_axel.fade.thread==kThread && g_axel.fade.threadHandle==kThreadHandle && g_axel.fade.slot==1,
+              "under the owner's custody the host adopts D303 at its 2/20, decoding the node's thread handle");
+        check(g_axel.fade.resource==g_smRoles[1].resource && g_axel.fade.connection==0x2222,
+              "with the role its RC's start went to");
         running(kThread,kAxel);
         const bool out=fade(Kind::WhiteOut,70.0f),reset=SmAxelFade(Kind::Reset,nullptr),in=fade(Kind::WhiteIn,30.0f);
         const auto ops=CameraOps();
@@ -685,6 +700,15 @@ int main() {
               ops[0].floatArgument && ops[0].slot==1 && !g_axel.fade.thread,
               "its white-out, reset and white-in go to the owner in order, none on the host, and white-in ends it");
         check(!fade(Kind::WhiteOut,70.0f),"after its white-in, that thread's fades are native again");
+        // Ione's 629ab5f1 (1): the handle, not the pointer, names D303.
+        Setup(1u<<R::kOvertakerGroup);Frame();
+        handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});node(0x99);running(kOther,kAxel);duringCallback=queue;
+        (void)SmAxelComplete(Claim(),nullptr);duringCallback=nullptr;
+        check(g_axel.cameraCustody==R::AxelCameraCustody::Owner && !g_axel.fade.thread,
+              "a node whose thread handle does not resolve adopts nothing");
+        (void)friendClearLight();running(kThread,kAxel);handles[kThread]=0x172; // freed, and another thread at its address
+        check(!fade(Kind::WhiteOut,70.0f) && !g_axel.fade.thread && CameraOps().empty(),
+              "once D303's handle no longer resolves to the running thread, that thread is another's and plays natively");
         (void)friendClearLight();
         running(kOther,kAxel);
         check(!fade(Kind::WhiteOut,40.0f) && !SmAxelFade(Kind::Reset,nullptr),
@@ -694,6 +718,19 @@ int main() {
         running(kThread,kAxel);roleCurrent=false;const auto sent=CameraOps().size();
         check(fade(Kind::WhiteOut,70.0f) && CameraOps().size()==sent,
               "once the owner's role has ended its ops are dropped, never shown on the host");
+        roleCurrent=true;
+        // Ione's 629ab5f1 (3): a later RC's role on the same seat and actor is not D303's.
+        {
+            const auto adopted=g_axel.fade.resource;const auto count=emitted.size();
+            (void)SmOwnerBeginAxelRole(1,kFriendActor,kAxel,7,enemysync::scope);
+            check(g_smRoles[1].resource!=adopted && fade(Kind::Reset,0) && emitted.size()==count,
+                  "a replacement RC's role never carries the retired one's D303, nor does the host show it");
+            g_smRoles[1].resource=adopted;g_smRoles[1].connection=0x3333;
+            check(fade(Kind::Reset,0) && emitted.size()==count,"nor a role with its resource under another connection");
+            g_smRoles[1].connection=0x2222;
+            check(fade(Kind::Reset,0) && emitted.size()==count+1 && emitted.back().effect==adopted,
+                  "the adopted role itself (as a continuation keeps it) still gets them");
+        }
         roleCurrent=true;SmAxelHostReset();
         check(!g_axel.actor && fade(Kind::WhiteIn,30.0f),"D303 stays the owner's after the host's Axel is gone");
         (void)friendClearLight();running(kThread,kAxel);g_frameCounter+=R::kAxelFadeLeaseFrames+1;
@@ -701,7 +738,7 @@ int main() {
         (void)friendClearLight();running(kThread,kAxel);++enemysync::scope.epoch;
         check(!fade(Kind::WhiteOut,70.0f) && !g_axel.fade.thread,"and with its epoch");
         Setup(1u<<R::kOvertakerGroup);Frame();
-        handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});handles[kNode]=kNodeHandle;Put(kNode,kThread);
+        handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});node();
         running(kOther,kAxel);duringCallback=queue;emitOk=false;
         (void)SmAxelComplete(Claim(),nullptr);duringCallback=nullptr;emitOk=true;
         check(g_axel.cameraCustody==R::AxelCameraCustody::Host && !g_axel.fade.thread,
@@ -709,12 +746,12 @@ int main() {
         label=304;(void)friendClearLight();label=303;
         check(!g_axel.fade.thread,"no other thread is adopted");
         Setup(1u<<R::kOvertakerGroup);Frame();
-        handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});handles[kNode]=kNodeHandle;Put(kNode,kThread);
+        handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});node();
         running(kOther,kHostActor);duringCallback=queue;(void)SmAxelComplete(Claim(),nullptr);duringCallback=nullptr;
         check(g_axel.cameraCustody==R::AxelCameraCustody::Owner && !g_axel.fade.thread,
               "nor a 2/20 whose VM source is not Axel's");
         Setup(1u<<R::kOvertakerGroup);g_seats[1].living=false;Frame();
-        handles[kNode]=kNodeHandle;Put(kNode,kThread);running(kOther,kAxel);
+        node();running(kOther,kAxel);
         bool watched=true;
         duringCallback=[&] { watched=SmAxelThreadWatched();queue(); };
         (void)SmAxelComplete(Claim(),nullptr);duringCallback=nullptr;
@@ -746,7 +783,14 @@ int main() {
 
     // The friend's replay of op 17 on its own Axel role, and the white-in its retirement owes.
     {
-        SmAxelCameraNativesInstall(0x140000000);
+        for(const std::uint32_t refused:{0x430B80u,0x430B60u,0x41DD70u,0x41DDB0u}) {
+            refusedPin=refused;SmAxelCameraNativesInstall(0x140000000,&Pin);
+            if(SmAxelCameraNativesReady() || g_smAxelNatives.watch || g_smAxelNatives.whiteIn)
+                check(false,"a refused replay pin resolves no native");
+        }
+        refusedPin=0;SmAxelCameraNativesInstall(0x140000000,nullptr);
+        check(!SmAxelCameraNativesReady(),"each of the four replay pins is needed (Ione's 629ab5f1: verified, not just assigned)");
+        SmAxelCameraNativesInstall(0x140000000,&Pin);
         const auto at=[](auto fn) { return reinterpret_cast<uintptr_t>(fn)-0x140000000; };
         check(SmAxelCameraNativesReady() && at(g_smAxelNatives.targetInit)==0x3BDA50 && at(g_smAxelNatives.targetSet)==0x3BEE60 &&
               at(g_smAxelNatives.watch)==0x176310 && at(g_smAxelNatives.reset)==0x430B60 &&
@@ -760,7 +804,7 @@ int main() {
         };
         const auto calls=[] { std::string all;for(const auto& c:natives.calls)all+=c+" ";return all; };
         check(op(R::AxelCameraKind::Watch,0) && calls()=="init set watch " && natives.zeroed && natives.subject==kAxel &&
-              !natives.zero,"a watch replays 1/207's body on a zeroed target, watching the Axel clone");
+              !natives.zero && role.axelWatched,"a watch replays 1/207's body on a zeroed target, watching the Axel clone");
         natives={};
         check(op(R::AxelCameraKind::Reset,0) && calls()=="reset ","a reset replays 1/295");
         natives={};
@@ -799,8 +843,42 @@ int main() {
               "a white-out that faults keeps its receipt, so the screen is still restored");
         natives.fault=false;SmAxelRetireCamera(role);SmAxelClientCameraTick();
         check(calls()=="whiteout whitein ","and its retirement whites in");
+        // Ione's 629ab5f1 (4): the debt stays until a payment returns.
+        natives={};whiteInFaults=1;role.axelWhitedOut=true;SmAxelRetireCamera(role);SmAxelClientCameraTick();
+        check(g_axel.whiteInOwed && calls()=="whitein " && natives.fade==0,"a white-in that faults is still owed");
+        SmAxelClientCameraTick();
+        check(!g_axel.whiteInOwed && calls()=="whitein whitein " && natives.fade==30.0f,
+              "and is paid once on the next safe frame");
+        natives={};whiteInFaults=5;SmAxelRetireCamera(role);
+        for(unsigned i=0;i<5;++i)SmAxelClientCameraTick();
+        check(!g_axel.whiteInOwed && natives.calls.size()==3,"one that keeps faulting is given up after three tries");
+        whiteInFaults=0;
         g_sm.hostActive=true;role.axelWhitedOut=true;SmAxelRetireCamera(role);
         check(!g_axel.whiteInOwed,"the host owes none");
+    }
+
+    // Ione's 629ab5f1 (2): custody needs all six of its host hooks, installed in order.
+    {
+        static std::vector<unsigned> tried;static unsigned refuse=99;
+        const auto swap=+[](R::AxelCameraHook hook) { tried.push_back(static_cast<unsigned>(hook));return static_cast<unsigned>(hook)!=refuse; };
+        constexpr unsigned kHooks=static_cast<unsigned>(R::AxelCameraHook::Count);
+        constexpr uintptr_t kName=0x700000;
+        for(refuse=0;refuse<kHooks;++refuse) {
+            (void)FriendOvertaker();tried.clear();SmAxelCameraHooksInstall(swap);
+            handles[kName]=0x70;Put(kName,std::uint32_t{0x3031});
+            const std::uint64_t start[2]{R::Tagged(R::kTagAddress,kAxelHandle),R::Tagged(R::kTagAddress,0x70)};
+            const std::uint64_t watch[1]{R::Tagged(R::kTagAddress,kAxelHandle)};
+            const bool kept=!SmAxelCamera(start) && !SmAxelCameraWatch(watch);
+            if(!kept || g_axel.cameraCustody!=R::AxelCameraCustody::Undecided || !Cameras().empty() || !CameraOps().empty() ||
+               tried.size()!=refuse+1 || g_smAxelCameraHooks.Complete())
+                check(false,"with one custody hook refused, the friend's start and watch stay on the host");
+        }
+        check(refuse==kHooks,"with any one of the six refused, a friend's start and watch play on the host and no later hook is tried");
+        refuse=99;tried.clear();SmAxelCameraHooksInstall(swap);
+        check(g_smAxelCameraHooks.Complete() && tried==std::vector<unsigned>{0,1,2,3,4,5},
+              "all six in: start, watch, white-out, white-in, reset, then 2/20");
+        SmAxelCameraHooksRevoke();
+        check(!g_smAxelCameraHooks.Complete(),"and revoked before the slots are restored");
     }
 
     // The friend's side: the host's offer, its prompt proof and its press, which claims and runs nothing locally.

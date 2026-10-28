@@ -31,6 +31,7 @@ struct ScriptActorRole {
     bool captured{},attached{};
     bool axelHeld{};  // VUH-2913 (client): this role attached the Axel clone (its source) to its actor (SmAxelApplyHold)
     bool axelWhitedOut{};  // VUH-2913 (client): its op 17 whited this game out, and no white-in has come (SmAxelApplyCameraOp)
+    bool axelWatched{};    // VUH-2913 (client): its op 17 started a watch, reported at its retirement
     // A spectator's clone is a visual target, never the role's command actor.
     ScriptOwnerVisual visual{};
     std::uint64_t captureValues[2]{};
@@ -220,6 +221,22 @@ static bool SmOwnerSwapOptional(OwnerTrapSlot& slot,uintptr_t table) {
         InterlockedCompareExchangePointer(reinterpret_cast<PVOID volatile*>(slot.entry),reinterpret_cast<void*>(slot.detour),
             reinterpret_cast<void*>(slot.original))==reinterpret_cast<void*>(slot.original);
     return slot.swapped;
+}
+// One of camera custody's slots (SmAxelCameraHooksInstall): bank 0 holds the fades, bank 2 2/20, bank 1 the rest.
+static bool SmOwnerSwapAxelCamera(R::AxelCameraHook hook) {
+    using H=R::AxelCameraHook;
+    uintptr_t table=0;
+    const unsigned bank=hook==H::WhiteOut || hook==H::WhiteIn?0u:hook==H::Thread?2u:1u;
+    if(!ReadHitTrace(g_exeBase+R::kTrapTables+8*bank,table) || !table)return false;
+    switch(hook) {
+        case H::Start:return SmOwnerSwapOptional(g_smAxelCameraSlot,table);
+        case H::Watch:return SmOwnerSwapOptional(g_smAxelWatchSlot,table);
+        case H::WhiteOut:return SmOwnerSwapOptional(g_smAxelWhiteOutSlot,table);
+        case H::WhiteIn:return SmOwnerSwapOptional(g_smAxelWhiteInSlot,table);
+        case H::Reset:return SmOwnerSwapOptional(g_smAxelResetSlot,table);
+        case H::Thread:return SmOwnerSwapOptional(g_smAxelThreadSlot,table);
+        default:return false;
+    }
 }
 static void SmOwnerRestoreSlot(OwnerTrapSlot& slot) {
     if(!slot.swapped)return;
@@ -1009,6 +1026,7 @@ struct ScriptOwnerContinuation {
     R::EntityCameraIdentity camera{};bool attached{},captured{},haveCapture{};
     bool axelHeld{}; // VUH-2913 (client): the Axel clone hold continues with its receipt
     bool axelWhitedOut{}; // and so does a white-out's
+    bool axelWatched{};
     std::uint64_t captureValues[2]{};
 };
 static ScriptOwnerContinuation SmOwnerContinueCamera(const ScriptActorRole& role,
@@ -1023,7 +1041,7 @@ static ScriptOwnerContinuation SmOwnerContinueCamera(const ScriptActorRole& role
     uintptr_t capture=0;
     ScriptOwnerContinuation next{role.camera,SmOwnerHasAttachment(role,!g_sm.hostActive),
         role.captured && ReadHitTrace(actor+0x2B0,capture) && capture==source};
-    next.axelHeld=SmAxelCloneHeld(role);next.axelWhitedOut=role.axelWhitedOut;
+    next.axelHeld=SmAxelCloneHeld(role);next.axelWhitedOut=role.axelWhitedOut;next.axelWatched=role.axelWatched;
     if(next.captured && role.haveCapture) {
         next.haveCapture=true;next.captureValues[0]=role.captureValues[0];next.captureValues[1]=role.captureValues[1];
     }
@@ -1787,10 +1805,11 @@ static int SmOwnerApply(const R::Call& call,uintptr_t source) {
         if(role.resource>call.effect)return 0;
         const auto camera=SmOwnerContinueCamera(role,scope,source,slot==scope.localSlot?g_soraActor:0,static_cast<std::uint8_t>(slot));
         if(camera.axelWhitedOut)role.axelWhitedOut=false; // the next role carries it
+        if(camera.axelWatched)role.axelWatched=false;
         SmOwnerRelease(role,true,false,camera.camera.context!=0);
         if(g_smOwnerCleanup[slot].role.resource)return 0;
         role={};role.camera=camera.camera;role.attached=camera.attached;role.captured=camera.captured;
-        role.axelHeld=camera.axelHeld;role.axelWhitedOut=camera.axelWhitedOut;role.haveCapture=camera.haveCapture;role.captureValues[0]=camera.captureValues[0];role.captureValues[1]=camera.captureValues[1];
+        role.axelHeld=camera.axelHeld;role.axelWhitedOut=camera.axelWhitedOut;role.axelWatched=camera.axelWatched;role.haveCapture=camera.haveCapture;role.captureValues[0]=camera.captureValues[0];role.captureValues[1]=camera.captureValues[1];
         role.resource=call.effect;role.netId=call.netId;role.objectId=call.objectId;role.source=source;
         role.slot=static_cast<std::uint8_t>(slot);role.connection=connection;role.epoch=scope.epoch;
         role.actor=slot==scope.localSlot?g_soraActor:0;role.deadline=GetTickCount64()+1000;role.admittedScope=scope;
@@ -2079,6 +2098,7 @@ static void SmOwnerShutdown() {
     // A callback already inside its detour may still need the trampoline.
     // Disable our entries, but leave trampoline reclamation to global teardown.
     g_smOwnerInstalled.store(false,std::memory_order_release);
+    SmAxelCameraHooksRevoke(); // no camera custody without its slots
     SmOwnerRestoreSlot(g_smAxelCameraSlot);
     SmOwnerRestoreSlot(g_smAxelCaptureQuerySlot);
     SmOwnerRestoreSlot(g_smAxelWatchSlot);
@@ -2152,7 +2172,7 @@ static bool SmOwnerInstall() {
         if(!slot.swapped){SmOwnerShutdown();return false;}
     }
     g_smOwnerInstalled.store(true,std::memory_order_release);
-    SmAxelCameraNativesInstall(g_exeBase); // VUH-2913: the friend's replay of op 17
+    SmAxelCameraNativesInstall(g_exeBase,&SmOwnerPin); // VUH-2913: the friend's replay of op 17, on its pinned traps
     enemysync::SetScriptCameraCurrent(&SmOwnerCameraCurrent);
     // Optional RC qualification must not roll back the existing one-brain
     // dispatch suppression or owner traps on a new pin/hook failure.
@@ -2160,17 +2180,10 @@ static bool SmOwnerInstall() {
         enemysync::SetScriptReactionCurrent(&SmNativeReactionCurrent);
     else Log("[script-rc-cache] unavailable pins=%u; existing owner suppression retained",reactionPins?1u:0u);
     (void)SmLifeInstall(table); // diagnostic refusal never rolls back the core
-    // VUH-2913: optional too. Refused, a friend's Axel RC camera keeps playing on the host, as before.
-    if(!SmOwnerSwapOptional(g_smAxelCameraSlot,table))Log("[axel-rc] camera_start_global hook refused; Axel's RC cameras stay native");
     if(!SmOwnerSwapOptional(g_smAxelCaptureQuerySlot,table))
         Log("[axel-rc] obj_motion_is_capture hook refused; the abort is unarmed, friends execute no Axel RC");
-    if(!SmOwnerSwapOptional(g_smAxelWatchSlot,table))Log("[axel-rc] camera_watch hook refused; Burst's watch stays native");
-    // D303 needs all four: the fades and the reset are hooked first, and 2/20 (which adopts D303) only if they are in.
-    uintptr_t bank0=0,bank2=0;
-    const bool fades=ReadHitTrace(g_exeBase+R::kTrapTables,bank0) && bank0 &&
-        SmOwnerSwapOptional(g_smAxelWhiteOutSlot,bank0) && SmOwnerSwapOptional(g_smAxelWhiteInSlot,bank0) &&
-        SmOwnerSwapOptional(g_smAxelResetSlot,table);
-    if(!fades || !ReadHitTrace(g_exeBase+R::kTrapTables+16,bank2) || !bank2 || !SmOwnerSwapOptional(g_smAxelThreadSlot,bank2))
-        Log("[axel-rc] D303 hooks refused fades=%u; Clear Light's white-out and reset stay native",fades?1u:0u);
+    // VUH-2913: optional too, and all or nothing (R::AxelCameraHooks). Refused, a friend's Axel RC camera keeps playing
+    // on the host, as before.
+    SmAxelCameraHooksInstall(&SmOwnerSwapAxelCamera);
     return true;
 }

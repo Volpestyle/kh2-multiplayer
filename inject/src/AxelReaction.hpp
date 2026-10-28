@@ -380,6 +380,15 @@ inline AxelCameraStep AxelCameraStepFor(bool axelSource,AxelCameraCustody custod
     if(custody==AxelCameraCustody::Owner)return AxelCameraStep::Withhold;
     return friendExecutor?AxelCameraStep::Offer:AxelCameraStep::Native;
 }
+// Custody needs every host hook the sequence's ops arrive through (Ione's 629ab5f1): with any of them refused, a later
+// op would run on the host after the first went to the owner. So the host's slots go in all or nothing for this, in
+// this order: the start, the watch, the fades and the reset, and last 2/20, which adopts D303 only once they are in.
+// Incomplete, every RC's camera stays the host's, as before custody.
+enum class AxelCameraHook : std::uint8_t { Start, Watch, WhiteOut, WhiteIn, Reset, Thread, Count };
+struct AxelCameraHooks {
+    bool in[static_cast<unsigned>(AxelCameraHook::Count)]{};
+    bool Complete() const noexcept { for(bool b:in)if(!b)return false;return true; }
+};
 // A friend RC's global camera op on the wire (255/17): Watch (1/207) and Reset (1/295) carry int 0, WhiteOut (0/31)
 // and WhiteIn (0/32) the fade's own positive float argument.
 enum class AxelCameraKind : std::uint32_t { Watch=1, Reset=2, WhiteOut=3, WhiteIn=4 };
@@ -394,20 +403,27 @@ inline bool AxelCameraOpValid(std::uint32_t kind,bool argFloat,std::uint32_t arg
 // (0x2A250B0 +0x60, copied at creation). Its three ops are recognized by both, so no other script's fade or reset is
 // ever taken from the host, and they go to the owner or are dropped. White-in ends it; so do a new epoch and, if the
 // thread dies early (3C5440), kAxelFadeLeaseFrames.
+// The node's first word is the thread's u32 handle (Kit, e4a7861e), not its pointer: the host keeps both, and the
+// thread is D303's only while that handle still resolves to it (Ione's 629ab5f1), so a thread freed and reallocated
+// at the same address is another. The ops go only to the role current at adoption (its resource and connection), and
+// a continuation keeps both; a later RC's role on the same seat and actor is never D303's.
 inline constexpr std::uint32_t kAxelWhiteOutThread=303,kAxelFadeLeaseFrames=600;
 struct AxelFadeCustody {
     std::uintptr_t thread{},axel{},actor{};
     std::uint8_t slot{0xFF};
     std::uint32_t epoch{},until{};
+    std::uint32_t threadHandle{},resource{};
+    std::uint64_t connection{};
 };
 inline bool AxelFadeAdopted(bool friendCallback,AxelCameraCustody custody,bool axelSource,std::uint32_t label,
                             std::uintptr_t thread) noexcept {
     return friendCallback && custody==AxelCameraCustody::Owner && axelSource && label==kAxelWhiteOutThread && thread;
 }
-inline bool AxelFadeOurs(const AxelFadeCustody& f,std::uintptr_t thread,std::uintptr_t vmSource,std::uint32_t epoch,
-                         std::uint32_t frame) noexcept {
-    return f.thread && thread==f.thread && f.axel && vmSource==f.axel && f.epoch==epoch &&
-        static_cast<std::int32_t>(f.until-frame)>=0;
+// resolved: what the adopted handle resolves to now.
+inline bool AxelFadeOurs(const AxelFadeCustody& f,std::uintptr_t thread,std::uintptr_t resolved,std::uintptr_t vmSource,
+                         std::uint32_t epoch,std::uint32_t frame) noexcept {
+    return f.thread && f.threadHandle && thread==f.thread && resolved==f.thread && f.axel && vmSource==f.axel &&
+        f.epoch==epoch && static_cast<std::int32_t>(f.until-frame)>=0;
 }
 // Which RCs begin that role at completion: Overtaker and Clear Light. Burst Frontier hooks the player into its steering
 // coroutine (1/112), and ScriptActorOwner's hook mints the role, adopting the capture issued just before it.

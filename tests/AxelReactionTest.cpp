@@ -493,11 +493,24 @@ int main() {
               !R::AxelFadeAdopted(true,Custody::Owner,false,303,0x720) && !R::AxelFadeAdopted(true,Custody::Owner,true,304,0x720) &&
               !R::AxelFadeAdopted(true,Custody::Owner,true,303,0),
               "only Axel's own D303, queued in a friend's callback under the owner's custody, is adopted");
-        const R::AxelFadeCustody fade{0x720,0x100,0x300,1,5,700};
-        check(R::AxelFadeOurs(fade,0x720,0x100,5,700) && !R::AxelFadeOurs(fade,0x721,0x100,5,700) &&
-              !R::AxelFadeOurs(fade,0x720,0x200,5,700) && !R::AxelFadeOurs(fade,0x720,0x100,6,700) &&
-              !R::AxelFadeOurs(fade,0x720,0x100,5,701) && !R::AxelFadeOurs({},0,0,5,700),
+        const R::AxelFadeCustody fade{0x720,0x100,0x300,1,5,700,0x72,0x80000002u,0x2222};
+        check(R::AxelFadeOurs(fade,0x720,0x720,0x100,5,700) && !R::AxelFadeOurs(fade,0x721,0x720,0x100,5,700) &&
+              !R::AxelFadeOurs(fade,0x720,0x720,0x200,5,700) && !R::AxelFadeOurs(fade,0x720,0x720,0x100,6,700) &&
+              !R::AxelFadeOurs(fade,0x720,0x720,0x100,5,701) && !R::AxelFadeOurs({},0,0,0,5,700),
               "a fade or reset is D303's only on its thread, with Axel as the source, in its epoch and lease");
+        auto unhandled=fade;unhandled.threadHandle=0;
+        check(!R::AxelFadeOurs(fade,0x720,0,0x100,5,700) && !R::AxelFadeOurs(fade,0x720,0x730,0x100,5,700) &&
+              !R::AxelFadeOurs(unhandled,0x720,0x720,0x100,5,700),
+              "and only while its adopted handle still resolves to that thread: another at its address is not D303");
+        R::AxelCameraHooks hooks{};
+        bool partial=false;
+        for(unsigned i=0;i<static_cast<unsigned>(R::AxelCameraHook::Count);++i) {
+            for(auto& in:hooks.in)in=true;
+            hooks.in[i]=false;partial=partial || hooks.Complete();
+        }
+        for(auto& in:hooks.in)in=true;
+        check(hooks.Complete() && !partial && !R::AxelCameraHooks{}.Complete(),
+              "camera custody needs every one of its six hooks: start, watch, white-out, white-in, reset and 2/20");
         const auto bits=[](float f) { std::uint32_t b=0;std::memcpy(&b,&f,sizeof(b));return b; };
         check(R::AxelCameraOpValid(1,false,0,0) && R::AxelCameraOpValid(2,false,0,0) && R::AxelCameraOpValid(3,true,bits(70),70) &&
               R::AxelCameraOpValid(4,true,bits(30),30),"watch, reset, white-out and white-in are the camera op's kinds");

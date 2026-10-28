@@ -25,6 +25,7 @@ struct SmAxelState {
     R::AxelFadeCustody fade{}; // D303 under a friend's custody; it outlives its executor and Axel himself
     // client
     bool whiteInOwed{};        // a retired role left this game whited out (SmAxelRetireCamera)
+    std::uint8_t whiteInAttempts{}; // faulted payments of that white-in so far (kSmAxelWhiteInAttempts)
     // client
     R::AxelOffers offers{};
     struct Identity { std::uint8_t slot{0xFF};std::uint64_t connection{};std::uint32_t epoch{}; };
@@ -32,6 +33,8 @@ struct SmAxelState {
     unsigned logs{};
 };
 static SmAxelState g_axel{};
+// Host: which of the camera custody's slots are in (R::AxelCameraHooks, SmAxelCameraHooksInstall).
+static R::AxelCameraHooks g_smAxelCameraHooks{};
 static constexpr unsigned kSmAxelLogs=256;
 static bool SmAxelLogBudget() noexcept { if(g_axel.logs>=kSmAxelLogs)return false;++g_axel.logs;return true; }
 
@@ -192,7 +195,16 @@ struct SmAxelCameraNatives {
     TrapFn reset{},whiteOut{},whiteIn{};
 };
 static SmAxelCameraNatives g_smAxelNatives{};
-static void SmAxelCameraNativesInstall(uintptr_t base) {
+// Resolved only when the four traps' pinned bodies match (Ione's 629ab5f1): 1/207's own bytes call 3BDA50, 3BEE60 and
+// 176310, and 1/295, 0/31 and 0/32 are called whole. Otherwise none is, and this game replays no op 17.
+static void SmAxelCameraNativesInstall(uintptr_t base,bool(*pin)(std::uint32_t,const std::uint8_t*,std::size_t)) {
+    g_smAxelNatives={};
+    if(!pin || !pin(0x430B80,R::kOwnerCameraWatch,sizeof(R::kOwnerCameraWatch)) ||
+       !pin(0x430B60,R::kOwnerCameraReset,sizeof(R::kOwnerCameraReset)) ||
+       !pin(0x41DD70,R::kOwnerWhiteOut,sizeof(R::kOwnerWhiteOut)) || !pin(0x41DDB0,R::kOwnerWhiteIn,sizeof(R::kOwnerWhiteIn))) {
+        Log("[axel-rc] camera replay pins refused; a friend RC's watch, fades and reset do not play on this game");
+        return;
+    }
     g_smAxelNatives.targetInit=reinterpret_cast<void(__fastcall*)(void*)>(base+0x3BDA50);
     g_smAxelNatives.targetSet=reinterpret_cast<void(__fastcall*)(void*,uintptr_t,std::uint32_t)>(base+0x3BEE60);
     g_smAxelNatives.watch=reinterpret_cast<void(__fastcall*)(void*)>(base+0x176310);
@@ -218,6 +230,7 @@ static bool SmAxelApplyCameraOp(ScriptActorRole& role,const R::Call& call,uintpt
     __try {
         if(kind==static_cast<std::uint32_t>(R::AxelCameraKind::Watch)) {
             alignas(16) std::uint8_t target[32]{};
+            role.axelWatched=true; // only reported at retirement: the watch ends natively (Kit's e4a7861e, read 4)
             g_smAxelNatives.targetInit(target);g_smAxelNatives.targetSet(target,source,0);g_smAxelNatives.watch(target);
         } else if(kind==static_cast<std::uint32_t>(R::AxelCameraKind::Reset)) {
             std::uint64_t args[1]{};g_smAxelNatives.reset(args);
@@ -234,18 +247,30 @@ static bool SmAxelApplyCameraOp(ScriptActorRole& role,const R::Call& call,uintpt
 }
 // Client: a role retired while this game is whited out owes a white-in (D303's own, 30), paid on the next safe frame.
 static void SmAxelRetireCamera(const ScriptActorRole& released) noexcept {
-    if(!g_sm.hostActive && released.objectId==R::kAxelIIObjectId && released.axelWhitedOut)g_axel.whiteInOwed=true;
+    if(g_sm.hostActive || released.objectId!=R::kAxelIIObjectId)return;
+    if(released.axelWhitedOut){g_axel.whiteInOwed=true;g_axel.whiteInAttempts=0;}
+    if((released.axelWatched || released.axelWhitedOut) && SmAxelLogBudget())
+        Log("[axel-rc] camera retired role=%u watched=%u whitedout=%u",released.resource,released.axelWatched?1u:0u,
+            released.axelWhitedOut?1u:0u);
 }
 static constexpr float kSmAxelRetireWhiteIn=30.0f;
-// Each owner frame: pay an owed white-in on the game thread, outside a load or transition.
+static constexpr std::uint8_t kSmAxelWhiteInAttempts=3;
+// Each owner frame: pay an owed white-in on the game thread, outside a load or transition. The debt stays until a
+// payment returns (Ione's 629ab5f1); one that faults is retried on the next safe frames, kSmAxelWhiteInAttempts in all.
 static void SmAxelClientCameraTick() {
     if(!g_axel.whiteInOwed)return;
-    if(g_sm.hostActive){g_axel.whiteInOwed=false;return;}
+    if(g_sm.hostActive){g_axel.whiteInOwed=false;g_axel.whiteInAttempts=0;return;}
     if(!SmGameThread() || warp::LoadPending() || warp::TransitionPending() || !SmAxelCameraNativesReady())return;
-    g_axel.whiteInOwed=false;
     std::uint32_t bits=0;std::memcpy(&bits,&kSmAxelRetireWhiteIn,sizeof(bits));
     std::uint64_t args[1]{R::Tagged(R::kTagFloat,bits)};
-    __try { g_smAxelNatives.whiteIn(args); } __except(EXCEPTION_EXECUTE_HANDLER){++g_sm.faults;return;}
+    __try { g_smAxelNatives.whiteIn(args); } __except(EXCEPTION_EXECUTE_HANDLER) {
+        ++g_sm.faults;
+        if(++g_axel.whiteInAttempts<kSmAxelWhiteInAttempts)return;
+        g_axel.whiteInOwed=false;g_axel.whiteInAttempts=0;
+        if(SmAxelLogBudget())Log("[axel-rc] camera retired whitein faulted; given up");
+        return;
+    }
+    g_axel.whiteInOwed=false;g_axel.whiteInAttempts=0;
     if(SmAxelLogBudget())Log("[axel-rc] camera retired whitein");
 }
 // Host: whether Axel is attached to this actor with his own pair (R::AxelAttachPair): 1 held, 0 not, -1 unread.
@@ -302,8 +327,9 @@ static bool SmAxelApplyHold(ScriptActorRole& role,bool hold) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){++g_sm.faults;return false;}
 }
 // R::AxelCameraStepFor on the host for a camera op whose object is this actor.
+// Without every custody hook in, no friend executor takes custody: its camera is the host's.
 static R::AxelCameraStep SmAxelCameraStep(uintptr_t object) {
-    const bool friendExecutor=g_axel.executor.command && g_axel.executor.slot && g_axel.executor.slot<3 && g_axel.executorActor;
+    const bool friendExecutor=g_smAxelCameraHooks.Complete() && g_axel.executor.command && g_axel.executor.slot && g_axel.executor.slot<3 && g_axel.executorActor;
     return R::AxelCameraStepFor(object && object==g_axel.actor,friendExecutor?g_axel.cameraCustody:R::AxelCameraCustody::Undecided,
         friendExecutor);
 }
@@ -370,6 +396,20 @@ static void SmAxelFlushWatch() {
         SmAxelEmitCameraOp(g_axel.executor.slot,g_axel.executorActor,R::AxelCameraKind::Watch,0);
     if(step==R::AxelCameraStep::Native || !SmAxelCameraSent(step,sent,"watch",0))SmOwnerCameraWatchNative(g_axel.watchArgs);
 }
+// Host: the custody slots in R::AxelCameraHooks order, stopping at the first refusal. swap installs one.
+static void SmAxelCameraHooksInstall(bool(*swap)(R::AxelCameraHook)) {
+    static constexpr const char* kNames[]{"camera_start_global","camera_watch","screen_whiteout","screen_whitein",
+        "camera_reset","thread_start"};
+    g_smAxelCameraHooks={};
+    for(unsigned i=0;i<static_cast<unsigned>(R::AxelCameraHook::Count);++i) {
+        if(!swap || !swap(static_cast<R::AxelCameraHook>(i))) {
+            Log("[axel-rc] %s hook refused; a friend's Axel RC camera stays on the host",kNames[i]);return;
+        }
+        g_smAxelCameraHooks.in[i]=true;
+    }
+}
+// Before the slots are restored: no custody without them.
+static void SmAxelCameraHooksRevoke() { g_smAxelCameraHooks={}; }
 // D303 (R::AxelFadeAdopted, R::AxelFadeOurs). The running VM thread and its program's source actor are read raw, with
 // no liveness or family check: D303 keeps Axel's after he dies.
 static constexpr uintptr_t kSmAxelCurrentThread=0x2A25048,kSmAxelVm=0x2A250B0;
@@ -382,13 +422,26 @@ static bool SmAxelThreadWatched() noexcept { return g_sm.hostActive && g_axel.in
 // Host 2/20, after its native call: [0] the label before it, the node handle after it.
 static void SmAxelThreadStarted(const std::uint64_t* before,const std::uint64_t* after) {
     if(!SmAxelThreadWatched() || !before || !after || R::BitsOf(before[0])!=R::kAxelWhiteOutThread)return;
-    uintptr_t thread=0;enemysync::DownedScope scope;
+    std::uint32_t threadHandle=0;enemysync::DownedScope scope;
     const auto node=R::TagOf(after[0])==R::kTagAddress?SmDecode(R::BitsOf(after[0])):0;
-    if(!node || !ReadHitTrace(node,thread))thread=0;
+    const auto thread=node && ReadHitTrace(node,threadHandle)?SmDecode(threadHandle):0;
     const bool axel=SmAxelHostCurrent() && SmAxelVmSource()==g_axel.actor;
     if(!R::AxelFadeAdopted(true,g_axel.cameraCustody,axel,R::BitsOf(before[0]),thread) || !SmOwnerScope(scope))return;
-    g_axel.fade={thread,g_axel.actor,g_axel.executorActor,g_axel.executor.slot,scope.epoch,g_frameCounter+R::kAxelFadeLeaseFrames};
-    if(SmAxelLogBudget())Log("[axel-rc] camera adopted D303 command=%u owner=%u",g_axel.executor.command,g_axel.executor.slot);
+    // Owner custody means the RC's start went to this role (Clear Light's begins before the callback); with none, the
+    // fade is still the owner's and is dropped.
+    const auto* role=SmAxelFriendRole(g_axel.executor.slot,g_axel.executorActor,true);
+    g_axel.fade={thread,g_axel.actor,g_axel.executorActor,g_axel.executor.slot,scope.epoch,g_frameCounter+R::kAxelFadeLeaseFrames,
+        threadHandle,role?role->resource:0u,role?role->connection:0u};
+    if(SmAxelLogBudget())Log("[axel-rc] camera adopted D303 command=%u owner=%u role=%u",g_axel.executor.command,
+        g_axel.executor.slot,g_axel.fade.resource);
+}
+// The role D303 was adopted with, while it is still that role: never a later RC's on the same seat and actor.
+static const ScriptActorRole* SmAxelFadeRole(const enemysync::DownedScope& scope) {
+    const auto& f=g_axel.fade;
+    if(!f.resource || f.slot>=3)return nullptr;
+    const auto& role=g_smRoles[f.slot];
+    return role.resource==f.resource && role.connection==f.connection && role.objectId==R::kAxelIIObjectId &&
+        role.actor==f.actor && SmOwnerCurrent(role,scope)?&role:nullptr;
 }
 // Whether the fade and reset hooks must look at this call: only while a D303 is adopted.
 static bool SmAxelFadePending() noexcept { return g_sm.hostActive && g_axel.fade.thread; }
@@ -402,11 +455,17 @@ static bool SmAxelFade(R::AxelCameraKind kind,const std::uint64_t* args) {
         if(SmAxelLogBudget())Log("[axel-rc] camera D303 expired owner=%u",g_axel.fade.slot);
         g_axel.fade={};return false;
     }
-    if(!R::AxelFadeOurs(g_axel.fade,thread,SmAxelVmSource(),scope.epoch,g_frameCounter))return false;
+    const auto resolved=SmDecode(g_axel.fade.threadHandle);
+    if(thread==g_axel.fade.thread && resolved!=thread) { // another thread at D303's address: D303 itself has ended
+        if(SmAxelLogBudget())Log("[axel-rc] camera D303 ended owner=%u",g_axel.fade.slot);
+        g_axel.fade={};return false;
+    }
+    if(!R::AxelFadeOurs(g_axel.fade,thread,resolved,SmAxelVmSource(),scope.epoch,g_frameCounter))return false;
     const float argument=kind==R::AxelCameraKind::Reset || !args?0.0f:R::FloatOf(args[0]);
-    const bool sent=SmAxelEmitCameraOp(g_axel.fade.slot,g_axel.fade.actor,kind,argument);
-    if(SmAxelLogBudget())Log("[axel-rc] camera %s D303 kind=%u owner=%u",sent?"forwarded":"dropped",
-        static_cast<unsigned>(kind),g_axel.fade.slot);
+    const auto* role=SmAxelFadeRole(scope);
+    const bool sent=role && SmEmit(SmAxelCameraOpRecord(*role,kind,argument));
+    if(SmAxelLogBudget())Log("[axel-rc] camera %s D303 kind=%u owner=%u role=%u%s",sent?"forwarded":"dropped",
+        static_cast<unsigned>(kind),g_axel.fade.slot,g_axel.fade.resource,role?"":" ended: not on any game");
     if(kind==R::AxelCameraKind::WhiteIn)g_axel.fade={};
     return true;
 }

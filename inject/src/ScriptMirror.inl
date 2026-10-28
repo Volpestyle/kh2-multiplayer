@@ -96,12 +96,14 @@ static bool SmAxelThreadWatched() noexcept;
 static void SmAxelThreadStarted(const std::uint64_t*,const std::uint64_t*);
 static bool SmAxelFadePending() noexcept;
 static bool SmAxelFade(R::AxelCameraKind,const std::uint64_t*);
+struct ScriptActorRole; // before its first use below (Kit's 09d8d37d: MSVC C2065)
 static bool SmAxelApplyCameraOp(ScriptActorRole&,const R::Call&,uintptr_t) noexcept;
 static void SmAxelRetireCamera(const ScriptActorRole&) noexcept;
 static void SmAxelClientCameraTick();
-static void SmAxelCameraNativesInstall(uintptr_t);
+static void SmAxelCameraNativesInstall(uintptr_t,bool(*)(std::uint32_t,const std::uint8_t*,std::size_t));
+static void SmAxelCameraHooksInstall(bool(*)(R::AxelCameraHook));
+static void SmAxelCameraHooksRevoke();
 static void SmAxelClientReset();
-struct ScriptActorRole;
 static bool SmAxelCloneHeld(const ScriptActorRole&);
 static bool SmAxelApplyHold(ScriptActorRole&,bool) noexcept;
 static R::Call SmAxelHoldRecord(const ScriptActorRole&,bool);
