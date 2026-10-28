@@ -1868,6 +1868,20 @@ def step_pilot_wait(ctx: Context, step: dict) -> dict:
     return results
 
 
+class InputWorker(threading.Thread):
+    """One bounded kh2ctl input call off the guard's thread; `error` keeps its failure (Ione 0b4cdc89)."""
+
+    def __init__(self, call) -> None:
+        super().__init__(daemon=True)
+        self.call, self.error = call, None
+
+    def run(self) -> None:
+        try:
+            self.call()
+        except Exception as error:  # a timeout or a failed kh2ctl: kept for the hold's record
+            self.error = f"{type(error).__name__}: {error}"
+
+
 def living_enemies(ctx: "Context", index: int) -> list[dict]:
     """Positions of the living enemies (object types 3 and 4, no F_ props) in one instance's game."""
     return [a["position"] for a in ctx.actors(index)
@@ -1911,22 +1925,33 @@ class ReviveGuard:
         except OSError:
             return 0
 
-    def hits(self, inst: "Instance", actor: int | None) -> int:
-        """Native hits on `actor` in the instance's log: `[hit]` lines naming it as the victim."""
+    def hits(self, inst: "Instance", actor: int | None) -> tuple[int, bool]:
+        """Native hits on `actor` in the instance's log (`[hit]` rows naming it as the victim), and whether that
+        evidence is spent: the inject logs at most HIT_LOG_LIMIT boss rows and as many others (EntityHook.cpp), so
+        once either budget is used up a zero count proves nothing (Ione 0b4cdc89 NOTE). Unreadable counts as spent."""
         if not actor:
-            return 0
+            return 0, True
         try:
             text = (LOGS / f"kh2coop_inject_{inst.pid}.log").read_text(encoding="utf-8", errors="replace")
         except OSError:
-            return 0
-        return len(re.findall(rf"^\[hit\] frame \d+ .*-> victim=\S+@{actor:X} ", text, re.M))
+            return 0, True
+        rows = re.findall(r"^\[hit\] frame \d+ attacker=(\S+) .*?-> victim=\S+?@([0-9A-F]+) ", text, re.M)
+        boss = sum(1 for attacker, _ in rows if attacker.startswith("B_"))
+        mine = sum(1 for _, victim in rows if victim == f"{actor:X}")
+        return mine, boss >= self.HIT_LOG_LIMIT or len(rows) - boss >= self.HIT_LOG_LIMIT
 
-    def press_hold(self, ms: int):
-        """Triangle for `ms` on the reviver, in a thread so the hold can be sampled while it runs."""
-        thread = threading.Thread(target=kh2ctl, args=("player-press", "--button", "triangle", "--duration-ms", str(ms)),
-                                  kwargs={"pid": self.friend.pid, "check": False}, daemon=True)
-        thread.start()
-        return thread
+    def input_free(self) -> bool:
+        """No earlier press is still running: the guard's inputs stay serial (Ione 0b4cdc89)."""
+        pressing = getattr(self, "pressing", None)
+        return pressing is None or not pressing.is_alive()
+
+    def press_hold(self, ms: int) -> "InputWorker":
+        """Triangle for `ms` on the reviver in a tracked worker, so the hold can be sampled while it runs. kh2ctl's
+        own timeout (ms plus PRESS_SLACK_S) bounds it; its error stays on the worker."""
+        worker = InputWorker(lambda: kh2ctl("player-press", "--button", "triangle", "--duration-ms", str(ms),
+                                            pid=self.friend.pid, check=False, timeout=ms / 1000 + self.PRESS_SLACK_S))
+        worker.start()
+        return worker
 
     @staticmethod
     def prompt_sample(game) -> dict | None:
@@ -1944,27 +1969,46 @@ class ReviveGuard:
         return {"frame": struct.unpack_from("<I", raw, 24)[0], "kind": kind, "slot": slot, "progress": progress,
                 "hide": hide, "triangle": triangle, "fires": fires}
 
-    def hold(self, event: dict, game, s: dict, revived) -> None:
-        """One revive hold, sampled: how far it got (progress 0..1000, Triangle frames) and why it ended, in order:
-        completed (a fire or a revive), hit (a native hit on the reviver or its HP fell), moved (out of range or no
-        target), hidden:<reason>, unread (no channel), full-unfired, or released (the press ended short)."""
-        hits, hp, pos = self.hits(self.friend, s.get("player")), s.get("hp"), s.get("pos")
+    def hold(self, event: dict, game, s: dict, revived) -> bool:
+        """One revive hold, sampled from the press until HOLD_TAIL_S after it completed: how far it got (progress
+        0..1000, Triangle frames) and an `end` tag, a diagnostic correlation rather than a proven cause, in order:
+        completed (a fire or a revive), hit (a logged native hit on the reviver or its HP fell), moved (out of range
+        or no target), hidden:<reason>, unread (no channel), full-unfired, or released (the press ended short). Once
+        the hit log's budget is spent `hits` is None unless it grew, and `hitEvidence` says so. False when the press
+        outlived its bound (`press-stuck`): the episode must end, and no input is sent while it runs."""
+        (hits, _), hp, pos = self.hits(self.friend, s.get("player")), s.get("hp"), s.get("pos")
         record = {"atS": round(self.now() - event["downedAt"], 1), "distance": event["last"].get("distance")}
         start, samples = self.now(), []
-        press = self.press_hold(self.HOLD_MS)
-        while True:
-            sample = self.prompt_sample(game)
-            if sample:
-                samples.append(sample)
-            if self.now() >= start + self.HOLD_MS / 1000 + self.HOLD_TAIL_S:
+
+        def sample() -> None:
+            row = self.prompt_sample(game)
+            if row:
+                samples.append(row)
+
+        press = self.pressing = self.press_hold(self.HOLD_MS)
+        limit = start + self.HOLD_MS / 1000 + self.PRESS_SLACK_S + 1.0
+        while press.is_alive() and self.now() < limit:
+            sample()
+            self.sleep(self.HOLD_SAMPLE_S)
+        stuck = press.is_alive()
+        done = self.now()
+        while not stuck:  # the release fires a full hold: sample HOLD_TAIL_S past the press's completion
+            sample()
+            if self.now() >= done + self.HOLD_TAIL_S:
                 break
             self.sleep(self.HOLD_SAMPLE_S)
-        press.join(timeout=5)
+        record.update(pressS=round(done - start, 2), pressError=getattr(press, "error", None))
+        if record["pressError"]:
+            event["lastError"] = f"press: {record['pressError']}"
         try:
             after = game.state()
         except Exception:  # a load between samples
             after = {}
-        hit = self.hits(self.friend, s.get("player")) - hits
+        later, spent = self.hits(self.friend, s.get("player"))
+        hit = later - hits
+        evidence = "exhausted" if spent else "log"
+        if spent and hit <= 0:
+            hit = None  # the budget ran out: a hit may have gone unlogged
         hp_drop = hp - after["hp"] if hp is not None and after.get("hp") is not None else None
         hide = next((self.HIDES[p["hide"]] if p["hide"] < len(self.HIDES) else str(p["hide"])
                      for p in samples if p["hide"] and p["hide"] != 10), None)  # fired is the hold's own success
@@ -1972,19 +2016,23 @@ class ReviveGuard:
         record.update(samples=len(samples), maxProgress=max((p["progress"] for p in samples), default=None),
                       endProgress=samples[-1]["progress"] if samples else None,
                       triangleFrames=samples[-1]["triangle"] - samples[0]["triangle"] if samples else None,
-                      fires=fires, hide=hide, hits=hit, hpDrop=hp_drop,
+                      fires=fires, hide=hide, hits=hit, hitEvidence=evidence, hpDrop=hp_drop,
                       movedBy=round(math.hypot(after["pos"][0] - pos[0], after["pos"][2] - pos[2]), 1)
                       if pos and after.get("pos") else None)
-        record["end"] = "completed" if fires > 0 or revived() else "hit" if hit > 0 or (hp_drop or 0) > 0 \
+        record["end"] = "press-stuck" if stuck else "completed" if fires > 0 or revived() \
+            else "hit" if (hit or 0) > 0 or (hp_drop or 0) > 0 \
             else "moved" if hide in ("out-of-range", "no-target") else f"hidden:{hide}" if hide \
             else "unread" if not samples else "full-unfired" if record["maxProgress"] >= 1000 else "released"
         if len(event.setdefault("holdLog", [])) < self.HOLD_LOG_CAP:
             event["holdLog"].append(record)
         else:
             event["holdLogDropped"] = event.get("holdLogDropped", 0) + 1
+        return not stuck
 
     def stick(self, s: dict, dx: float, dz: float, ms: int) -> None:
-        """Camera-relative stick toward world direction (dx, dz)."""
+        """Camera-relative stick toward world direction (dx, dz). Nothing while an earlier press still runs."""
+        if not self.input_free():
+            return
         fx, fz = s["forward"]
         d, f = math.hypot(dx, dz) or 1.0, math.hypot(fx, fz) or 1.0
         dx, dz, fx, fz = dx / d, dz / d, fx / f, fz / f
@@ -1998,6 +2046,9 @@ class ReviveGuard:
     # Lead #72 (vuh2912-hp-08): each hold samples the reviver's downed channel every HOLD_SAMPLE_S through the press
     # and HOLD_TAIL_S past it (a full hold fires on release), and the episode keeps the first HOLD_LOG_CAP records.
     HOLD_SAMPLE_S, HOLD_TAIL_S, HOLD_LOG_CAP = 0.05, 0.3, 32
+    # Ione 0b4cdc89: a press's kh2ctl call is bounded by HOLD_MS plus PRESS_SLACK_S, the hold waits for it (plus 1 s),
+    # and the 1 s release pause starts from its completion. HIT_LOG_LIMIT is the inject's [hit] row budget.
+    PRESS_SLACK_S, HIT_LOG_LIMIT = 3.0, 60
     HIDES = ("none", "off", "local-unavailable", "local-downed", "event", "menu", "transition", "native-reaction",
              "no-target", "out-of-range", "fired", "revive-off")  # RevivePrompt.hpp Hide
     INPUT_SLACK = 1.0  # seconds of the episode an input needs beyond its own duration
@@ -2120,6 +2171,14 @@ class ReviveGuard:
         return lost
 
     def run(self) -> None:
+        try:
+            self.guard_loop()
+        finally:  # no press outlives the guard (Ione 0b4cdc89), within the press's own bound
+            pressing = getattr(self, "pressing", None)
+            if pressing is not None:
+                pressing.join(timeout=self.HOLD_MS / 1000 + self.PRESS_SLACK_S + 1.0)
+
+    def guard_loop(self) -> None:
         downs = self.count(self.host, "[downed] gate intercept")
         friend = host = None
         while not self.stop.wait(0.5):
@@ -2200,10 +2259,12 @@ class ReviveGuard:
                                         None if fence else self.aside, self.ASIDE_TRAVEL)
                 if move[0] == "walk" and self.may_send(end, 0.4):
                     self.stick(s, move[1], move[2], 400)
-                elif move[0] == "hold" and self.may_send(end, self.HOLD_MS / 1000):
+                elif move[0] == "hold" and self.may_send(end, self.HOLD_MS / 1000) and self.input_free():
                     event["holds"] += 1
-                    self.hold(event, friend, s, revived)  # the press, sampled, and HOLD_TAIL_S of its 1 s pause
-                    self.sleep(1.0 - self.HOLD_TAIL_S)
+                    if not self.hold(event, friend, s, revived):  # the press, sampled, and HOLD_TAIL_S of its pause
+                        event["result"] = "press-stuck"
+                        break
+                    self.sleep(1.0 - self.HOLD_TAIL_S)  # the rest of the 1 s pause from the press's completion
                 elif move[0] == "aside":  # a proven native RC owns Triangle: out of its line, inside the envelope
                     lost = self.step_aside(event, s, move, pin, end, reads, revived)
                     if lost:  # a context lost during the aside ends the episode too
@@ -2251,15 +2312,21 @@ DOWNED_DOWN, DOWNED_REVIVED, DOWNED_FULL = "[downed] gate intercept", "[downed] 
 
 
 def enemy_clearance(ctx: Context, games: list) -> float | None:
-    """How far the nearest living enemy in the host's game stands from either seat (XZ), each seat at its own
-    game's position; None when a seat or the enemy list can't be read."""
+    """How far the nearest living enemy in the host's game stands from either seat (XZ), each seat at its own game's
+    canonical player (Game.state's validated `playerPos`, not the camera's target; Ione 0b4cdc89). None, unproven,
+    when a seat's canonical player or the enemy list can't be read, or a seat's player or room changed across the
+    lookup, or the seats stand in different rooms."""
     try:
-        seats = [game.state()["pos"] for game in games]
+        before = [game.state() for game in games]
         enemies = living_enemies(ctx, 0)
-    except Exception:  # a load between samples
+        after = [game.state() for game in games]
+    except Exception:  # a load between samples, or a lookup past its deadline
         return None
-    if not all(seats):
+    key = lambda s: (s.get("player"), tuple(s.get("roomScope") or ()))  # noqa: E731
+    if any(not s.get("player") or not s.get("playerPos") for s in after) \
+            or [key(s) for s in before] != [key(s) for s in after] or len({key(s)[1] for s in after}) != 1:
         return None
+    seats = [s["playerPos"] for s in after]
     return min((math.hypot(e["x"] - p[0], e["z"] - p[2]) for e in enemies for p in seats), default=math.inf)
 
 
@@ -2274,9 +2341,11 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     down, is a named harness failure, never a pass; so is `timeoutMs`. Each downing starts a paired background
     clip (`clipSeconds`, 12) when none is running. Both seats must be standing when the step starts. `aside`
     is both guards' envelope (ReviveGuard). `clearOf` {distance, maxMs} (lead #72, vuh2912-hp-08): each forced down
-    first waits, at most maxMs, until no living enemy stands within `distance` of either seat, then downs anyway;
-    its Kill event says which ({result: clear|timeout, nearest, waitedS}). Saved `as` (`owner_downs`): per owner
-    {kind, seat}, the downing events and both guards' events."""
+    first waits, at most maxMs, until no living enemy stands within `distance` of either seat's canonical player,
+    then downs anyway; its Kill event says which ({result: clear|timeout, nearest, waitedS}). Each read ends by the
+    wait's bound and the step's deadline, and a Kill follows only while the step has budget and no down, revive or
+    full-party down arrived during the read. Saved `as` (`owner_downs`): per owner {kind, seat}, the downing events
+    and both guards' events."""
     owners = [int(o) for o in step.get("owners", [1, 0])]
     name = step.get("as", "owner_downs")
 
@@ -2314,6 +2383,10 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
         return enemy_clearance(ctx, games)
 
     clearance = _clearance or read_clearance
+
+    def tallies() -> tuple:
+        """Every down, revive and full-party count now, to see whether any arrived during a clearance read."""
+        return tuple(count(i, needle) for i in (0, 1) for needle in (DOWNED_DOWN, DOWNED_REVIVED)) + (count(0, DOWNED_FULL),)
     for g in guards:
         g.thread.start()
     failure = None
@@ -2345,16 +2418,24 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
                 waiting = None  # a downing or revive since: the next forced down gets its own bound
             elif clear_of:
                 waiting = now() if waiting is None else waiting
-                nearest = clearance()
+                bound = min(waiting + clear_of["maxMs"] / 1000, deadline)
+                before = tallies()
+                try:  # Ione 0b4cdc89: every lookup ends by the wait's bound and the step's deadline
+                    with rpc_deadline(bound, now):
+                        nearest = clearance()
+                except subprocess.TimeoutExpired:
+                    nearest = None
                 cleared = nearest is not None and nearest >= clear_of["distance"]
-                if cleared or now() - waiting >= clear_of["maxMs"] / 1000:
+                if now() >= deadline or tallies() != before:
+                    ready = False  # spent: the deadline check below fails the step; or a down or revive came: recount
+                elif cleared or now() - waiting >= clear_of["maxMs"] / 1000:
                     clear = {"result": "clear" if cleared else "timeout",
                              "nearest": None if nearest is None else round(min(nearest, 1e6), 1),
                              "waitedS": round(now() - waiting, 1)}
                     waiting = None
                 else:
                     ready = False
-            if ready:
+            if ready and now() < deadline:
                 o = pending[0]
                 result = kill(o)
                 events.append({"seat": o, "kill": result, "atS": round(now() - start, 1), **({"clear": clear} if clear else {})})

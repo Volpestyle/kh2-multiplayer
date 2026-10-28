@@ -100,7 +100,9 @@ class Rig:
     def __init__(self, observation=YIELD, aside=ARENA, until=8.0, lookup=None, on_input=None, before=None, prompt=None):
         self.t, self.until, self.lookups, self.inputs, self.before = 0.0, until, 0, [], before
         self.prompt, self.hits, self.pressed_at = prompt, 0, None  # prompt(rig, seconds into the hold) -> fields
+        self.hits_spent, self.press_late, self.press_error = False, 0.0, None  # the hit budget; a press's lateness
         self.version = RUN.DOWNED_CHANNEL_VERSION
+        self.presses = []
         self.friend = {"free": True, "pos": (0.0, 0.0, 500.0), "react": BURST_FRONTIER, "reactObservation": observation,
                        "forward": (0.0, 1.0), "roomScope": SCOPE, "player": 0xA000}
         self.host = {"free": True, "pos": (0.0, 0.0, 560.0), "roomScope": SCOPE, "player": 0xB000}
@@ -112,7 +114,7 @@ class Rig:
         g.now, g.sleep, g.stop = (lambda: self.t), self.sleep, Stop(self)
         g.pilot = SimpleNamespace(Game=lambda pid: SimpleNamespace(
             state=lambda: self.read(pid), prompt_reactions=SimpleNamespace(read=self.channel)))
-        g.hits = lambda inst, actor: self.hits
+        g.hits = lambda inst, actor: (self.hits, self.hits_spent)
         g.press_hold = self.press
         self.revives, self.on_read = 0, None
         g.count = lambda inst, needle: int(self.t >= 1.0) if needle == "[downed] gate intercept" else self.revives
@@ -149,7 +151,9 @@ class Rig:
         self.pressed_at = self.t
         if self.on_input:
             self.on_input(self)
-        return SimpleNamespace(join=lambda timeout=None: None)
+        ends = self.t + ms / 1000 + self.press_late  # the press completes on the rig's clock, `press_late` late
+        self.presses.append({"start": self.t, "ends": ends})
+        return SimpleNamespace(is_alive=lambda: self.t < ends, join=lambda timeout=None: None, error=self.press_error)
 
     def channel(self):
         """The reviver's downed channel v7 (DownedSpikeState.hpp): prompt kind, slot, progress, hide, Triangle frames
@@ -498,6 +502,29 @@ class HoldLogTest(unittest.TestCase):
         rig.friend["react"], rig.version = 0, RUN.DOWNED_CHANNEL_VERSION - 1
         self.assertEqual(rig.run()[0]["holdLog"][0]["end"], "unread")
 
+    # Ione 0b4cdc89 NOTE: the inject logs at most 60 boss [hit] rows; once spent, no new row is no proof of no hit.
+    def test_a_spent_hit_budget_is_no_evidence_of_no_hit(self):
+        def prompt(rig, dt):
+            rig.hits_spent = True
+            return {"progress": climb(rig, dt, to=400), "triangle": int(dt * 60)}
+        _, events = self.run_holds(prompt)
+        hold = events[0]["holdLog"][0]
+        self.assertEqual((hold["hits"], hold["hitEvidence"], hold["end"]), (None, "exhausted", "released"))
+
+    def test_a_logged_hit_still_counts_after_the_budget_is_spent(self):
+        def prompt(rig, dt):
+            rig.hits_spent = True
+            if dt >= 0.5:
+                rig.hits = 1
+            return {"progress": 0}
+        _, events = self.run_holds(prompt)
+        hold = events[0]["holdLog"][0]
+        self.assertEqual((hold["hits"], hold["hitEvidence"], hold["end"]), (1, "exhausted", "hit"))
+
+    def test_a_hit_budget_with_room_is_log_evidence(self):
+        _, events = self.run_holds(lambda rig, dt: {"progress": 0})
+        self.assertEqual((events[0]["holdLog"][0]["hits"], events[0]["holdLog"][0]["hitEvidence"]), (0, "log"))
+
     def test_every_hold_is_logged_up_to_the_episode_bound(self):
         with mock.patch.object(GUARD, "HOLD_LOG_CAP", 3):
             rig, events = self.run_holds(lambda rig, dt: {"progress": 0}, until=200.0)
@@ -506,6 +533,97 @@ class HoldLogTest(unittest.TestCase):
         self.assertEqual(events[0]["holds"], holds)
         self.assertEqual(len(events[0]["holdLog"]), 3)
         self.assertEqual(events[0]["holdLogDropped"], holds - 3)
+
+
+class PressTest(unittest.TestCase):
+    """Ione 0b4cdc89 (3): the hold's press is tracked and bounded, input stays serial, a press that outlives its
+    bound ends the episode, and the 1 s release pause starts from the press's completion."""
+
+    def holding(self, until=8.0, **attrs):
+        rig = Rig(observation={"source": "raw"}, until=until, prompt=lambda rig, dt: {"progress": 0})
+        rig.friend["react"] = 0  # a plain revive hold
+        for name, value in attrs.items():
+            setattr(rig, name, value)
+        return rig
+
+    def test_a_late_press_gets_its_full_pause_from_completion(self):
+        for late in (0.0, 0.5, 2.0):
+            with self.subTest(late=late):
+                rig = self.holding(press_late=late)
+                rig.run()
+                holds = [i for i in rig.inputs if i["cmd"] == "player-press"]
+                self.assertGreater(len(holds), 1)
+                for press, following in zip(rig.presses, holds[1:]):
+                    self.assertAlmostEqual(press["ends"] + 1.0, following["t"], delta=GUARD.HOLD_SAMPLE_S + 1e-6)
+
+    def test_a_press_past_its_bound_ends_the_episode_and_sends_nothing_more(self):
+        rig = self.holding(press_late=1e6, until=60.0)
+        events = rig.run()
+        self.assertEqual(events[0]["result"], "press-stuck")
+        self.assertEqual(events[0]["holdLog"][0]["end"], "press-stuck")
+        self.assertEqual(len(rig.inputs), 1)  # the stuck press itself, nothing after it
+        bound = GUARD.HOLD_MS / 1000 + GUARD.PRESS_SLACK_S + 1.0
+        self.assertLessEqual(events[0]["seconds"], bound + GUARD.HOLD_SAMPLE_S + 1e-6)
+
+    def test_a_stuck_press_blocks_the_next_episodes_input_too(self):
+        rig = self.holding(press_late=1e6, until=30.0)
+        downs = rig.guard.count
+        rig.guard.count = lambda inst, needle: (int(rig.t >= 1.0) + int(rig.t >= 10.0)) \
+            if needle == "[downed] gate intercept" else downs(inst, needle)  # a second downing after the stuck episode
+        events = rig.run()
+        self.assertEqual([e["result"] for e in events], ["press-stuck", "timeout"])
+        self.assertGreater(events[1]["seconds"], 5.0)  # the next episode ran, inside the hold's reach throughout
+        self.assertEqual(len(rig.inputs), 1)  # and sent nothing beside the stuck press
+
+    def test_no_stick_input_while_a_press_still_runs(self):
+        rig = self.holding()
+        rig.guard.pressing = SimpleNamespace(is_alive=lambda: True)
+        with mock.patch.object(RUN, "kh2ctl", rig.kh2ctl):
+            rig.guard.stick(dict(rig.friend), 1.0, 0.0, 400)
+        self.assertEqual(rig.inputs, [])
+        self.assertFalse(rig.guard.input_free())
+
+    def test_a_press_error_is_kept_on_the_hold_and_the_episode(self):
+        rig = self.holding(press_error="TimeoutExpired: kh2ctl")
+        events = rig.run()
+        self.assertEqual(events[0]["holdLog"][0]["pressError"], "TimeoutExpired: kh2ctl")
+        self.assertEqual(events[0]["lastError"], "press: TimeoutExpired: kh2ctl")
+
+    def test_the_guard_drains_its_last_press_before_it_ends(self):
+        rig = self.holding(until=3.0)
+        joined = []
+        rig.press_late = 0.0
+        original = rig.press
+
+        def press(ms):
+            worker = original(ms)
+            worker.join = lambda timeout=None: joined.append(timeout)
+            return worker
+        rig.guard.press_hold = press
+        rig.run()
+        self.assertTrue(joined)
+        self.assertEqual(joined[-1], GUARD.HOLD_MS / 1000 + GUARD.PRESS_SLACK_S + 1.0)
+
+    def test_the_real_press_is_bounded_by_kh2ctls_own_timeout(self):
+        rig = self.holding()
+        seen = {}
+        with mock.patch.object(RUN, "kh2ctl", lambda *a, **k: seen.update(args=a, **k)):
+            worker = GUARD.press_hold(rig.guard, 1600)
+            worker.join(timeout=5)
+        self.assertEqual(seen["timeout"], 1.6 + GUARD.PRESS_SLACK_S)
+        self.assertEqual(seen["args"][:4], ("player-press", "--button", "triangle", "--duration-ms"))
+        self.assertFalse(worker.is_alive())
+        self.assertIsNone(worker.error)
+
+    def test_a_failing_real_press_keeps_its_error(self):
+        rig = self.holding()
+
+        def boom(*a, **k):
+            raise RUN.subprocess.TimeoutExpired("kh2ctl", 4.6)
+        with mock.patch.object(RUN, "kh2ctl", boom):
+            worker = GUARD.press_hold(rig.guard, 1600)
+            worker.join(timeout=5)
+        self.assertIn("TimeoutExpired", worker.error)
 
 
 class DeadlineTest(unittest.TestCase):
