@@ -1782,9 +1782,8 @@ static thornhittrace::Identity ThornIdentity(const nativehittrace::ActorSnapshot
     id.namePrefix = s.namePrefix;
     return id;
 }
-// HookedPerEntityUpdate, for the actor being updated, after enemymirror::PreUpdate.
-static void ThornHitTraceCapture(uintptr_t addr) {
-    if (!ThornHitTraceEnabled() || g_frameCounter % 30 != 29) return;
+// Shared admission for read-only Thorn observations, inside this actor's update only.
+static thornhittrace::Candidates ThornTraceCandidates(uintptr_t addr) {
     thornhittrace::Candidates c {};
     c.head = g_soraActor;
     (void)ReadHitTrace(g_exeBase + 0x2A105D0, c.canonical);  // the canonical player global (image data)
@@ -1796,17 +1795,94 @@ static void ThornHitTraceCapture(uintptr_t addr) {
         c.cloneBound[i] = ThornIdentity(d.boundActor);
     }
     c.bossBoundNow = enemysync::ActivationRole() == 2 && enemymirror::HostBrainBoundNow(addr);
-    static constexpr thornhittrace::Layout layout {
-        offsets::actor::OBJENTRY_PTR, 0x5C0, offsets::objentry::OBJECT_ID, offsets::objentry::TYPE_FLAGS,
-        offsets::objentry::NAME, offsets::actor::ENTITY_TRANSFORM + offsets::entity::POS_X, offsets::actor::ANIM_ID,
-        enemymirror::ACTOR_MOTION_CTRL + enemymirror::MOTION_TIME, 0xD10};
+    return c;
+}
+static constexpr thornhittrace::Layout kThornTraceLayout {
+    offsets::actor::OBJENTRY_PTR, 0x5C0, offsets::objentry::OBJECT_ID, offsets::objentry::TYPE_FLAGS,
+    offsets::objentry::NAME, offsets::actor::ENTITY_TRANSFORM + offsets::entity::POS_X, offsets::actor::ANIM_ID,
+    enemymirror::ACTOR_MOTION_CTRL + enemymirror::MOTION_TIME, 0xD10};
+// HookedPerEntityUpdate, for the actor being updated, after enemymirror::PreUpdate.
+static void ThornHitTraceCapture(uintptr_t addr) {
+    if (!ThornHitTraceEnabled() || g_frameCounter % 30 != 29) return;
+    const auto c = ThornTraceCandidates(addr);
     thornhittrace::Fields f {};
-    const auto role = thornhittrace::Capture(addr, c, layout,
+    const auto role = thornhittrace::Capture(addr, c, kThornTraceLayout,
         [](uintptr_t at, void* out, std::size_t n) { return ReadHitTraceMemory(at, out, n); }, f);
     if (role == thornhittrace::Role::None) return;
     const int slot = static_cast<int>(role) - 1;
     g_thornSnap[slot] = {f, g_frameCounter, true};
     if (role == thornhittrace::Role::Boss) g_thornCursor = enemysync::MirrorCursor();
+}
+
+// VUH-2808: observe each boundary that can move a seat during a friend-owned Thorn role, plus 120
+// frames after it ends. Off by default; bounded per process. No native calls or writes, and no cached
+// actor/source/thread pointers are followed. The existing per-update identity proof admits all reads.
+// Ground state/airborne are observations, not a terrain query or proof that collision actually ran.
+static void ThornFloorTraceCapture(uintptr_t addr, const char* stage) {
+    static const bool enabled = [] {
+        char value[2] {};
+        return GetEnvironmentVariableA("KH2COOP_THORN_FLOOR_TRACE", value, sizeof(value)) == 1 && value[0] == '1';
+    }();
+    if (!enabled) return;
+    std::uint8_t world = 0, room = 0;
+    if (!ReadHitTrace(g_exeBase + offsets::WORLD_ID, world) || world != 2 ||
+        !ReadHitTrace(g_exeBase + offsets::ROOM_ID, room) || room != 34) return;
+    static std::uint32_t lastOwnedFrame = 0;
+    static bool haveOwnedFrame = false;
+    const scriptmirror::ScriptActorRole* matched = nullptr;
+    for (const auto& role : scriptmirror::g_smRoles) {
+        if (!role.resource || role.objectId != 307 || role.slot == 0) continue;
+        lastOwnedFrame = g_frameCounter; haveOwnedFrame = true;
+        if (role.actor == addr || role.visual.actor == addr) matched = &role;
+    }
+    if (!haveOwnedFrame || g_frameCounter - lastOwnedFrame > 120) return;
+    static unsigned rows = 0;
+    if (rows >= 65536) {
+        if (rows == 65536) { ++rows; Log("[thorn-floor] saturated rows=65536"); }
+        return;
+    }
+    thornhittrace::Fields fields {};
+    const auto identity = thornhittrace::Capture(addr, ThornTraceCandidates(addr), kThornTraceLayout,
+        [](uintptr_t at, void* out, std::size_t n) { return ReadHitTraceMemory(at, out, n); }, fields);
+    if (identity == thornhittrace::Role::None || identity == thornhittrace::Role::Boss) return;
+    ++rows;
+    const auto entity = addr + offsets::actor::ENTITY_TRANSFORM;
+    std::uint32_t flags = 0, move = 0, airborne = 0, reads = 0;
+    uintptr_t thread = 0, capture = 0;
+    float velocity[3] {}, carried[3] {}, accel[6] {}, entityVy = 0, motionTime = 0;
+    const auto read = [&](unsigned bit, uintptr_t at, void* out, std::size_t n) {
+        if (ReadHitTraceMemory(at, out, n)) reads |= 1u << bit;
+    };
+    read(0, addr + ACTOR_COLLISION_FLAGS, &flags, sizeof(flags));
+    read(1, entity + offsets::entity::MOVE_STATE, &move, sizeof(move));
+    read(2, entity + offsets::entity::AIRBORNE_SUB, &airborne, sizeof(airborne));
+    read(3, entity + offsets::entity::VEL_Y, &entityVy, sizeof(entityVy));
+    read(4, addr + ACTOR_VELOCITY, velocity, sizeof(velocity));
+    read(5, addr + ACTOR_CARRIED_DISPLACEMENT, carried, sizeof(carried));
+    read(6, addr + ACTOR_ACCEL_BLOCK, accel, sizeof(accel));
+    read(7, addr + 0xD48, &thread, sizeof(thread));
+    read(8, addr + 0x2B0, &capture, sizeof(capture));
+    read(9, addr + kThornTraceLayout.motionTime, &motionTime, sizeof(motionTime));
+    const int puppet = PuppetIndexFor(addr);
+    const auto* driver = puppet >= 0 ? &g_puppets[puppet] : nullptr;
+    Log("[thorn-floor] side=%s stage=%s frame=%u cursor=%.1f load=%u transition=%u identity=%u actor=%llX role=%u seat=%u epoch=%u connection=%llu expectedThread=%llX haveRolePosition=%u rolePosition=%.3f,%.3f,%.3f pos=%.3f,%.3f,%.3f motion=%u motionTime=%.3f reads=%X collision=%X move=%u airborne=%u entityVy=%.3f velocity=%.3f,%.3f,%.3f carried=%.3f,%.3f,%.3f accelBlock=%.3f,%.3f,%.3f,%.3f,%.3f,%.3f thread=%llX capture=%llX puppet=%d collisionSaved=%u savedNoCollide=%u poseSeq=%u poseY=%.3f",
+        enemysync::ActivationRole() == 2 ? "client" : "host", stage, g_frameCounter, enemysync::MirrorCursor(),
+        warp::LoadSerial(), warp::TransitionSerial(),
+        static_cast<unsigned>(identity), static_cast<unsigned long long>(addr), matched ? matched->resource : 0,
+        matched ? matched->slot : 255u, matched ? matched->epoch : 0,
+        static_cast<unsigned long long>(matched ? matched->connection : 0),
+        static_cast<unsigned long long>(matched ? matched->thread : 0), matched && matched->havePosition ? 1u : 0u,
+        matched ? matched->position[0] : 0.0f, matched ? matched->position[1] : 0.0f, matched ? matched->position[2] : 0.0f,
+        fields.x, fields.y, fields.z, fields.motion, motionTime, reads, flags, move, airborne, entityVy,
+        velocity[0], velocity[1], velocity[2], carried[0], carried[1], carried[2],
+        accel[0], accel[1], accel[2], accel[3], accel[4], accel[5],
+        static_cast<unsigned long long>(thread), static_cast<unsigned long long>(capture), puppet,
+        driver && driver->noCollideSaved ? 1u : 0u, driver && driver->savedNoCollide ? 1u : 0u,
+        driver ? driver->pose.pose.seq : 0, driver ? driver->pose.pose.position.y : 0.0f);
+}
+static void ThornFloorTraceObserve(uintptr_t addr, const char* stage) {
+    __try { ThornFloorTraceCapture(addr, stage); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { /* A diagnostic fault cannot skip native or product work. */ }
 }
 static void ThornHitTraceText(const char* label, const ThornTraceSnap& s, char* out, std::size_t size) {
     if (!s.valid || s.frame + 1 != g_frameCounter) { std::snprintf(out, size, " %s=-", label); return; }
@@ -3963,6 +4039,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
     int savedFriendSlot = g_currentFriendSlot;
     __try { ObservePuppetBeforeUpdate(reinterpret_cast<uintptr_t>(actorObj)); }
     __except (EXCEPTION_EXECUTE_HANDLER) { /* Diagnostic cannot suppress the original. */ }
+    ThornFloorTraceObserve(reinterpret_cast<uintptr_t>(actorObj), "pre-native");
     if (!holdUpdate) g_origPerEntityUpdate(actorObj);
 
     // POST-UPDATE overrides â€” run after g_origPerEntityUpdate has finished.
@@ -3970,11 +4047,13 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
     // the animation based on the motion chain. Our override here gets the
     // LAST WORD on the animation before rendering.
     __try {
+        ThornFloorTraceObserve(reinterpret_cast<uintptr_t>(actorObj), holdUpdate ? "native-held" : "post-native");
         // Local avatar for the runtime (VUH-1490): Sora's state after his own
         // update this frame. seq carries the DLL's game-frame counter so a
         // recording shows dropped frames; the runtime restamps it to send.
         downedspike::PinDowned(reinterpret_cast<uintptr_t>(actorObj)); // VUH-2465
         scriptmirror::OwnerPostUpdate(reinterpret_cast<uintptr_t>(actorObj));
+        ThornFloorTraceObserve(reinterpret_cast<uintptr_t>(actorObj), "post-owner");
         if (reinterpret_cast<uintptr_t>(actorObj) == g_soraActor && g_avatarBridge.IsOpen()) {
             const auto eventState=*reinterpret_cast<const std::int32_t*>(g_exeBase+offsets::CUTSCENE_STATE);
             const auto eventContext=*reinterpret_cast<const uintptr_t*>(g_exeBase+offsets::EVENT_CONTEXT);
@@ -4026,6 +4105,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
             reinterpret_cast<uintptr_t>(actorObj) == g_soraActor) {
             SuppressSoraMovement();
         }
+        ThornFloorTraceObserve(reinterpret_cast<uintptr_t>(actorObj), "post-puppet");
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         render::InvalidateCoopHud();
         Log("EXCEPTION in post-update override");

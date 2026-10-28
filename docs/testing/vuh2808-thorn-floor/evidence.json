@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "friend_pilot.jsonl",
+      "size": 805871,
+      "sha256": "c551345d3cd24994b0a0b1cd9fa014cf26f7311e978eb733c8b77ba1819bcb21",
+      "url": "clankie://evidence/sha256/c551345d3cd24994b0a0b1cd9fa014cf26f7311e978eb733c8b77ba1819bcb21"
+    },
+    {
+      "path": "host_pilot.jsonl",
+      "size": 655615,
+      "sha256": "9e2c00b3769692aa7b41d0f9f012a2492e67b0802c8340c6e7938084e7f97ef0",
+      "url": "clankie://evidence/sha256/9e2c00b3769692aa7b41d0f9f012a2492e67b0802c8340c6e7938084e7f97ef0"
+    },
+    {
+      "path": "kh2coop_inject_176172.log",
+      "size": 2327496,
+      "sha256": "1f16978973dab4acaa8221b1a6782daccfb7b59ac5806bdb18b976c313ee60d0",
+      "url": "clankie://evidence/sha256/1f16978973dab4acaa8221b1a6782daccfb7b59ac5806bdb18b976c313ee60d0"
+    },
+    {
+      "path": "kh2coop_inject_2608.log",
+      "size": 2437066,
+      "sha256": "ff9beae6eed37a84f6b33ef6635cc23d8a689208299ed3e7e294848b5d8c3d99",
+      "url": "clankie://evidence/sha256/ff9beae6eed37a84f6b33ef6635cc23d8a689208299ed3e7e294848b5d8c3d99"
+    }
+  ]
+}

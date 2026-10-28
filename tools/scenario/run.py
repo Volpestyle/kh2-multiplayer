@@ -6004,6 +6004,12 @@ def run_scenario(path: Path, attempt: int) -> dict:
             log = LOGS / f"kh2coop_inject_{inst.pid}.log"
             if log.exists() and not (run_dir / log.name).exists():
                 shutil.copy2(log, run_dir / log.name)
+        # Absolute module path also works when run_scenario is embedded by a lane/test entrypoint.
+        import importlib.util
+        floor_spec = importlib.util.spec_from_file_location("scenario_thorn_floor", ROOT / "tools/scenario/thorn_floor.py")
+        floor_check = importlib.util.module_from_spec(floor_spec)
+        floor_spec.loader.exec_module(floor_check)
+        floor_check.check_run(run_dir, report, ctx.artifacts)
         report["desyncCollection"] = link_desync_reports(run_dir)
         if (run_dir / "desync-reports").exists():
             ctx.artifacts.append("desync-reports")
@@ -6034,6 +6040,9 @@ def run_scenario(path: Path, attempt: int) -> dict:
 def render_md(report: dict) -> str:
     lines = [f"# {report['scenario']} (attempt {report['attempt']}): {report['status'].upper()}", "",
              f"Started {report['started']}, {report.get('seconds', '?')} s, instances {report.get('instances')}.", ""]
+    if report.get("thornFloor"):
+        lines += [f"Thorn floor check: **{report['thornFloor']['status'].upper()}** "
+                  "([sampled canonical seat heights](thorn_floor.json)).", ""]
     if report.get("standInProtected"):
         protected = report["standInProtected"]
         after = protected.get("afterPilot")
