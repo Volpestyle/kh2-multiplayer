@@ -1034,14 +1034,20 @@ struct BossHitWitness {
     int32_t hpBefore, hpAfter;
     uint32_t reactions, refused, reactFrame, reactRequest;
     int32_t reactKind;
-    reactioncalls::Snapshot armed;  // lead #76: 0x3D6FC0's call counts when this witness armed
+    reactioncalls::Window calls;          // lead #76: 0x3D6FC0's calls while this witness is pending
+    reactioncalls::Lookback preArm;       // the victim's reaction applied in the hit frame before arming
+    reactioncalls::Applied preArmApplied;
 };
 static constexpr uintptr_t OFF_IGNORE_HIT = 0xD70;
 static constexpr uint32_t kWitnessFrames = 4;
 static constexpr unsigned kWitnessSlots = 4, kWitnessLogLimit = 64;
 static BossHitWitness g_witnesses[kWitnessSlots] = {};
 static unsigned g_witnessesLogged = 0;
-static reactioncalls::Table g_reactionCalls;  // lead #76: every 0x3D6FC0 call, per actor (game thread)
+static reactioncalls::Recent g_reactionsApplied;  // lead #76: the last applied 0x3D6FC0 calls (game thread)
+static uintptr_t ReactionIdentity(uintptr_t actor) noexcept {  // the actor's objentry pointer, 0 when unread
+    uintptr_t identity = 0;
+    return ReadHitTrace(actor + offsets::actor::OBJENTRY_PTR, identity) ? identity : 0;
+}
 
 static void NoteBossHitWitness(std::uint64_t seq, uintptr_t victim, uintptr_t record, uint32_t motion, float ignoreHit,
                                uint32_t reads, int32_t hpBefore, int32_t hpAfter) noexcept {
@@ -1056,7 +1062,9 @@ static void NoteBossHitWitness(std::uint64_t seq, uintptr_t victim, uintptr_t re
             if (w.seq) continue;
             w = {seq, GetTickCount64(), g_lastHit.attacker, victim, g_frameCounter, g_lastHit.atkpId, motion, reads,
                  ignoreHit, hpBefore, hpAfter};
-            w.armed = reactioncalls::Take(g_reactionCalls, victim);
+            const uintptr_t identity = ReactionIdentity(victim);
+            w.calls = reactioncalls::Arm(victim, identity);
+            w.preArm = reactioncalls::Before(g_reactionsApplied, victim, identity, g_frameCounter, w.preArmApplied);
             return;
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -1081,8 +1089,17 @@ static uintptr_t __fastcall HookedApplyReaction(void* actor, void* request) {
     const uintptr_t entry = g_origApplyReaction(actor, request);
     int16_t entryKind = -1;
     if (entry && !ReadHitTrace(entry + 2, entryKind)) entryKind = -1;
-    reactioncalls::Note(g_reactionCalls, reinterpret_cast<uintptr_t>(actor), idRead ? id : reactioncalls::kNone,
-                        entry != 0, entryKind, g_frameCounter);
+    const auto self = reinterpret_cast<uintptr_t>(actor);
+    const std::uint32_t requestId = idRead ? id : reactioncalls::kNone;
+    uintptr_t identity = 0;
+    bool identityRead = false;
+    const auto identityOf = [&] {  // read only for an applied call or a pending witness's victim
+        if (!identityRead) identity = ReactionIdentity(self), identityRead = true;
+        return identity;
+    };
+    if (entry) reactioncalls::Note(g_reactionsApplied, self, identityOf(), requestId, entryKind, g_frameCounter);
+    for (auto& w : g_witnesses)
+        if (w.seq) reactioncalls::Count(w.calls, self, w.calls.victim == self ? identityOf() : 0, requestId, entry != 0);
     if (idRead && id == 0 && !entry) return entry;
     for (auto& w : g_witnesses) {
         if (!w.seq || w.victim != reinterpret_cast<uintptr_t>(actor)) continue;
@@ -1112,24 +1129,30 @@ static void BossHitWitnessTick() noexcept {
         }
         if (g_witnessesLogged < kWitnessLogLimit) {
             ++g_witnessesLogged;
-            // Lead #76: 0x3D6FC0's calls since this witness armed, on any actor (callsAll) and on the victim (calls,
-            // with a request, applied), and the victim's last applied reaction whenever it came (lastApplied frame,
-            // its kind and request; -1 when none). Applied at or before hitFrame: before the witness armed.
-            const auto window = reactioncalls::Since(g_reactionCalls, w.victim, w.armed);
-            const auto* row = reactioncalls::Find(g_reactionCalls, w.victim);
+            // Lead #76: 0x3D6FC0's calls while this witness was pending, on any actor (callsAll) and on the victim
+            // (calls, with a request, applied), -1 unless callIdentity=ok and the victim is still the canonical
+            // player; and the victim's reaction applied in hitFrame before the witness armed (preArm found, with its
+            // kind and request; none; or unavailable). ReactionCalls.hpp has the identity limits.
+            const auto& c = w.calls;
+            const bool counted = same && reactioncalls::Available(c);
+            const auto victimCount = [&](std::uint32_t v) { return counted ? static_cast<long long>(v) : -1LL; };
+            static const char* const identityNames[] = {"ok", "unread", "changed"};
+            static const char* const lookbackNames[] = {"none", "found", "unavailable"};
+            const bool found = w.preArm == reactioncalls::Lookback::Found;
             const auto signedOr = [](std::uint32_t v) { return v == reactioncalls::kNone ? -1LL : static_cast<long long>(v); };
             Log("[hitwitness] seq=%llu hitFrame=%u hitTickMs=%llu frame=%u attacker=%llX victim=%llX atkp=%u hp=%d->%d "
                 "motion=%u->%u ignoreHit=%.1f->%.1f reads=%u same=%u reactions=%u refused=%u reaction=%d "
-                "reactRequest=%u reactFrame=%u reactHooked=%u callsAll=%u calls=%u callRequests=%u callApplied=%u "
-                "lastApplied=%lld lastKind=%d lastRequest=%lld callRowsEvicted=%u",
+                "reactRequest=%u reactFrame=%u reactHooked=%u callsAll=%u calls=%lld callRequests=%lld "
+                "callApplied=%lld callIdentity=%s preArm=%s preArmKind=%d preArmRequest=%lld",
                 static_cast<unsigned long long>(w.seq), w.frame,
                 static_cast<unsigned long long>(w.tickMs), g_frameCounter, static_cast<unsigned long long>(w.attacker),
                 static_cast<unsigned long long>(w.victim), w.atkpId, w.hpBefore, w.hpAfter, w.motion, motion,
                 double(w.ignoreHit), double(ignoreHit), reads, same ? 1u : 0u, w.reactions, w.refused,
                 w.reactions ? w.reactKind : -1, w.reactions ? w.reactRequest : UINT32_MAX, w.reactFrame,
-                g_origApplyReaction ? 1u : 0u, window.all, window.calls, window.requests, window.applied,
-                row ? signedOr(row->lastAppliedFrame) : -1LL, row ? row->lastKind : -1,
-                row ? signedOr(row->lastRequest) : -1LL, g_reactionCalls.evicted);
+                g_origApplyReaction ? 1u : 0u, c.all, victimCount(c.calls), victimCount(c.requests),
+                victimCount(c.applied), identityNames[static_cast<int>(c.state)],
+                lookbackNames[static_cast<int>(w.preArm)], found ? w.preArmApplied.kind : -1,
+                found ? signedOr(w.preArmApplied.request) : -1LL);
         }
         w = {};
     }
@@ -1521,7 +1544,7 @@ static int PuppetIndexFor(uintptr_t actor) {
 // stats line at a round's marks; the game thread logs it once per request. Reads and logs only.
 static HANDLE g_statsMarkMapping = nullptr;
 static statsmark::Channel* g_statsMark = nullptr;
-static long g_statsMarkSeen = 0;
+static std::int32_t g_statsMarkSeen = 0;
 
 static void OpenStatsMarkChannel() {
     wchar_t name[96];
@@ -1544,11 +1567,11 @@ static void OpenStatsMarkChannel() {
 
 static void StatsMarkTick() noexcept {
     if (!g_statsMark || !statsmark::Due(*g_statsMark, g_statsMarkSeen)) return;
-    const long requested = g_statsMark->requested;
+    const std::int32_t requested = g_statsMark->requested;
     g_statsMarkSeen = requested;
-    Log("[stats-mark] seq=%ld frame=%u", requested, g_frameCounter);
+    Log("[stats-mark] seq=%d frame=%u", requested, g_frameCounter);
     enemymirror::LogActorsNow();
-    InterlockedExchange(&g_statsMark->logged, requested);
+    InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_statsMark->logged), requested);
 }
 #include "EnemyTargetRemote.inl" // VUH-1515: KH2COOP_ENEMY_TARGET_REMOTE, default off
 #include "ScriptMirror.inl" // VUH-2252: host script calls on mirrored enemies, on with the enemy mirror

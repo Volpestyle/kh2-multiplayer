@@ -140,17 +140,22 @@ class BossTargetLedgerTest(unittest.TestCase):
         # VUH-2912: the 0x3D6FC0 reaction trace appends fields after same=; the ledger reads the line as before.
         global witness
         plain, original = run(), witness
-        # Lead #76: then 0x3D6FC0's call counts since the witness armed and the victim's last applied reaction.
-        witness = lambda *a, **k: original(*a, **k) + (" reactions=1 refused=0 reaction=2 reactRequest=40 "
-                                                        "reactFrame=901 reactHooked=1 callsAll=12 calls=4 "
-                                                        "callRequests=1 callApplied=1 lastApplied=901 lastKind=2 "
-                                                        "lastRequest=40 callRowsEvicted=0")
-        try:
-            extended = run()
-        finally:
-            witness = original
-        self.assertTrue(plain["pass"], plain["problems"])
-        self.assertEqual(plain, extended)
+        # Lead #76, Ione 10d8b494: then 0x3D6FC0's call counts in the witness window (-1 when the victim's identity
+        # is not established) and the hit-frame lookback.
+        suffixes = (" reactions=1 refused=0 reaction=2 reactRequest=40 reactFrame=901 reactHooked=1 callsAll=12 calls=4 "
+                    "callRequests=1 callApplied=1 callIdentity=ok preArm=found preArmKind=2 preArmRequest=40",
+                    " reactions=0 refused=0 reaction=-1 reactRequest=4294967295 reactFrame=0 reactHooked=1 callsAll=12 "
+                    "calls=-1 callRequests=-1 callApplied=-1 callIdentity=changed preArm=unavailable preArmKind=-1 "
+                    "preArmRequest=-1")
+        for suffix in suffixes:
+            with self.subTest(suffix=suffix):
+                witness = lambda *a, s=suffix, **k: original(*a, **k) + s
+                try:
+                    extended = run()
+                finally:
+                    witness = original
+                self.assertTrue(plain["pass"], plain["problems"])
+                self.assertEqual(plain, extended)
 
     def test_a_round_without_the_choice_fails(self):
         self.fails("the boss never chose seat 1", friend_choice=False)
