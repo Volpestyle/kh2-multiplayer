@@ -1,6 +1,6 @@
 {
- "name": "net_prologue_mansion_axel_hp_b1",
- "description": "VUH-2912, FM-02 rehearsal route into Axel II (02/14 btl137, B_EX110 81), two default dual-wield Roxases, shipped defaults, no protect; KH2COOP_TRACE_HITS and KH2COOP_ENEMY_MIRROR_TRACE are diagnostics only. Lease: no boss damage or boss hit on either seat before the host's admitted release. Then three short rounds, each filmed on both seats for its whole length: friend target (the friend walks in to Axel, the host walks away from him, again if still too close, and, once both seats stand measured apart, only revives; the friend fights, so the host's Axel must choose the friend's seat and the friend's own Roxas takes the native hit from its mirrored Axel), host target (the same, reversed) and interleaved (both fight). The boss HP ledger joins every host Axel HP change to one host native hit or one friend claim, and requires the host Axel's hits on the host's copy of the friend to be complete checked zeros (at least one in the friend round). The boss target ledger requires each round's choice of that seat before a native hit witnessed by its reaction motion and ignore-hit timer (and, on the friend, the driven host motion), never a choice of an ineligible candidate, and, around owner_downs, each downed seat out of Axel's candidates and never chosen. The atk_burst aim and leave distance read the canonical player directly; the friend round's position/motion samples and the host's boss hits measure that, unjudged. PC1's saves are Critical (22-HP Roxas, one Axel hit downs a 5-HP seat). Stops before victory. Rehearsal save, no save. B1 of the split: the host target round, then interleaved, each judged by both ledgers; no downs.",
+ "name": "net_prologue_mansion_axel_hp_b1_host",
+ "description": "VUH-2912, FM-02 rehearsal route into Axel II (02/14 btl137, B_EX110 81), two default dual-wield Roxases, shipped defaults, no protect; KH2COOP_TRACE_HITS and KH2COOP_ENEMY_MIRROR_TRACE are diagnostics only. Lease: no boss damage or boss hit on either seat before the host's admitted release. Then three short rounds, each filmed on both seats for its whole length: friend target (the friend walks in to Axel, the host walks away from him, again if still too close, and, once both seats stand measured apart, only revives; the friend fights, so the host's Axel must choose the friend's seat and the friend's own Roxas takes the native hit from its mirrored Axel), host target (the same, reversed) and interleaved (both fight). The boss HP ledger joins every host Axel HP change to one host native hit or one friend claim, and requires the host Axel's hits on the host's copy of the friend to be complete checked zeros (at least one in the friend round). The boss target ledger requires each round's choice of that seat before a native hit witnessed by its reaction motion and ignore-hit timer (and, on the friend, the driven host motion), never a choice of an ineligible candidate, and, around owner_downs, each downed seat out of Axel's candidates and never chosen. The atk_burst aim and leave distance read the canonical player directly; the friend round's position/motion samples and the host's boss hits measure that, unjudged. PC1's saves are Critical (22-HP Roxas, one Axel hit downs a 5-HP seat). Stops before victory. Rehearsal save, no save. B1-host of the split: the host target round alone, judged by both ledgers right after it; no interleaved, no downs.",
  "playerDefaults": true,
  "protect": [],
  "steps": [
@@ -295,13 +295,15 @@
      "instance": 0,
      "seconds": 20,
      "fps": 30,
-     "name": "host_target_host"
+     "name": "host_target_host",
+     "background": true
     },
     {
      "instance": 1,
      "seconds": 20,
      "fps": 30,
-     "name": "host_target_friend"
+     "name": "host_target_friend",
+     "background": true
     }
    ]
   },
@@ -316,57 +318,6 @@
    "message": "host_target: in 20 s Axel never chose the host with the host hit and landing damage"
   },
   {
-   "do": "wait_until",
-   "expr": "log_count('[downed] gate intercept', 0) <= log_count('[downed] revive returned', 0)",
-   "timeoutMs": 60000,
-   "pollMs": 250
-  },
-  {
-   "do": "revive_guard",
-   "on": false,
-   "as": "host_target_guard"
-  },
-  {
-   "do": "save",
-   "as": "m_interleaved0",
-   "expr": "[log_count('', 0), log_count('', 1)]"
-  },
-  {
-   "do": "save",
-   "as": "il_base",
-   "expr": "{'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0]}"
-  },
-  {
-   "do": "fight",
-   "instances": [
-    0,
-    1
-   ],
-   "seconds": 10,
-   "reach": 120,
-   "as": "interleaved",
-   "until": "len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)) > saved['il_base']['claims'] and ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0] < saved['il_base']['bossHp'] - sum(int(r['b']) - int(r['a']) for r in log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*beforeHp=(?P<b>\\d+) afterHp=(?P<a>\\d+) nativeOk=1', 0)[saved['il_base']['claims']:])",
-   "clips": [
-    {
-     "instance": 0,
-     "seconds": 12,
-     "fps": 30,
-     "name": "interleaved_host"
-    },
-    {
-     "instance": 1,
-     "seconds": 12,
-     "fps": 30,
-     "name": "interleaved_friend"
-    }
-   ]
-  },
-  {
-   "do": "save",
-   "as": "m_interleaved1",
-   "expr": "[log_count('', 0), log_count('', 1)]"
-  },
-  {
    "do": "wait",
    "ms": 4000
   },
@@ -376,30 +327,18 @@
    "expr": "[[(a['hp'], a.get('maxHp')) for a in actors(i) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] for i in (0, 1)]"
   },
   {
-   "do": "capture",
-   "instance": 0,
-   "name": "settled_host"
-  },
-  {
-   "do": "capture",
-   "instance": 1,
-   "name": "settled_friend"
-  },
-  {
    "do": "hp_ledger",
    "objectId": 81,
    "program": 137,
    "marks": [
     "m_host_target0",
-    "m_host_target1",
-    "m_interleaved0",
-    "m_interleaved1"
+    "m_host_target1"
    ],
    "as": "ledger",
    "require": false,
    "window": [
     "m_host_target0",
-    "m_interleaved1"
+    "m_host_target1"
    ],
    "phases": [
     {
@@ -409,13 +348,6 @@
      "host": true,
      "friend": false,
      "hitOnHost": true
-    },
-    {
-     "name": "interleaved",
-     "from": "m_interleaved0",
-     "to": "m_interleaved1",
-     "host": true,
-     "friend": true
     }
    ]
   },
@@ -459,6 +391,24 @@
    "as": "verdict",
    "require": true,
    "arrivalTimeoutMs": 20000
+  },
+  {
+   "do": "revive_guard",
+   "on": false,
+   "as": "host_target_guard"
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "settled_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "settled_friend"
   }
  ]
 }

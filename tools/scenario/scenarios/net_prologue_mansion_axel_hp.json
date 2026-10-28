@@ -295,13 +295,15 @@
      "instance": 0,
      "seconds": 20,
      "fps": 30,
-     "name": "friend_target_host"
+     "name": "friend_target_host",
+     "background": true
     },
     {
      "instance": 1,
      "seconds": 20,
      "fps": 30,
-     "name": "friend_target_friend"
+     "name": "friend_target_friend",
+     "background": true
     }
    ]
   },
@@ -325,6 +327,9 @@
    "do": "revive_guard",
    "on": false,
    "as": "friend_target_guard"
+  },
+  {
+   "do": "clip_wait"
   },
   {
    "do": "walk_to",
@@ -455,13 +460,15 @@
      "instance": 0,
      "seconds": 20,
      "fps": 30,
-     "name": "host_target_host"
+     "name": "host_target_host",
+     "background": true
     },
     {
      "instance": 1,
      "seconds": 20,
      "fps": 30,
-     "name": "host_target_friend"
+     "name": "host_target_friend",
+     "background": true
     }
    ]
   },
@@ -485,6 +492,14 @@
    "do": "revive_guard",
    "on": false,
    "as": "host_target_guard"
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "assert",
+   "expr": "all(log_count('[downed] gate intercept', i) <= log_count('[downed] revive returned', i) for i in (0, 1))",
+   "message": "SETUP FAILURE (window), not an HP result: interleaved needs both seats standing"
   },
   {
    "do": "save",
@@ -511,13 +526,15 @@
      "instance": 0,
      "seconds": 12,
      "fps": 30,
-     "name": "interleaved_host"
+     "name": "interleaved_host",
+     "background": true
     },
     {
      "instance": 1,
      "seconds": 12,
      "fps": 30,
-     "name": "interleaved_friend"
+     "name": "interleaved_friend",
+     "background": true
     }
    ]
   },
@@ -525,6 +542,9 @@
    "do": "save",
    "as": "m_interleaved1",
    "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
+   "do": "clip_wait"
   },
   {
    "do": "wait",

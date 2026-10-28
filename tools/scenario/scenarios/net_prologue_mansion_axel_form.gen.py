@@ -379,12 +379,13 @@ SETTLE_MS = 5000        # a fresh host HP sample (every ~1 s) and every friend c
 AXEL_ARENA = {"roomScope": AXEL, "center": [39, -27], "radius": 450}
 
 
-def target_round(name, fighter, reviver):
+def target_round(name, fighter, reviver, last=False):
     """The fighter walks in to Axel, then the reviver walks away; with both seats standing and measured apart, the
     round's baseline and window start. Then the reviver only revives while the fighter fights, filmed on both seats
     for the whole round. The round must reach its milestone (Axel's selection names the fighter, the fighter was hit
     or downed, it landed damage) before its end mark; boss_target_ledger.py judges the choice, its order before the hit
-    and the hit's witnesses."""
+    and the hit's witnesses. A `last` round (its run's only judged window) ends at its milestone: its ledgers follow
+    at once, and its guard and clips are collected after them, so a later party down is no failure (lead #56)."""
     base = f"saved['{name}_base']"
     seat = ("host", "friend")
     apart = (f"(lambda s: s['standing'] and s['{seat[reviver]}'] - s['{seat[fighter]}'] > {SEPARATION_MARGIN})"
@@ -435,19 +436,24 @@ def target_round(name, fighter, reviver):
                                  f"for k in ('hits', 'claims', 'targets')}} and {selected(fighter)} and {standing()}",
          "message": f"SETUP FAILURE (window), not a targeting result: {name}'s window opened without Axel's selection of "
                     f"the {seat[fighter]}, settled boss HP and both seats standing"},
-        # The clips run as long as the round can (the step waits for them), so the round's hits are on film.
+        # The clips run as long as the round can, so the round's hits are on film. They run in the background: in
+        # vuh2912-hp-06 the step waited ~70 s past the milestone for its 20 s clips to encode, and Axel downed both
+        # idle seats inside the window.
         {"do": "fight", "instances": [fighter], "seconds": 20, "reach": 120, "as": name,
          "until": f"{selected(fighter)} and {hit} and {landed}",
          "sample": {"expr": observe, "everyMs": 500},
-         "clips": [{"instance": 0, "seconds": 20, "fps": 30, "name": f"{name}_host"},
-                   {"instance": 1, "seconds": 20, "fps": 30, "name": f"{name}_friend"}]},
+         "clips": [{"instance": 0, "seconds": 20, "fps": 30, "name": f"{name}_host", "background": True},
+                   {"instance": 1, "seconds": 20, "fps": 30, "name": f"{name}_friend", "background": True}]},
         marks(f"m_{name}1"),
         {"do": "assert", "expr": f"saved['{name}']['until']['reached']",
          "message": f"{name}: in 20 s Axel never chose the {seat[fighter]} with the {seat[fighter]} hit and landing damage"},
-        # A downed fighter is revived by the reviver before the next round.
-        {"do": "wait_until", "expr": f"log_count('[downed] gate intercept', {fighter}) <= log_count('[downed] revive returned', {fighter})",
-         "timeoutMs": 60000, "pollMs": 250},
-        {"do": "revive_guard", "on": False, "as": f"{name}_guard"},
+        *([] if last else [
+            # A downed fighter is revived by the reviver before the next round.
+            {"do": "wait_until", "expr": f"log_count('[downed] gate intercept', {fighter}) <= log_count('[downed] revive returned', {fighter})",
+             "timeoutMs": 60000, "pollMs": 250},
+            {"do": "revive_guard", "on": False, "as": f"{name}_guard"},
+            {"do": "clip_wait"},
+        ]),
     ]
 
 
@@ -477,6 +483,8 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
     living = "[[(a['hp'], a.get('maxHp')) for a in actors(i) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] for i in (0, 1)]"
     fought = [*rounds, *(["interleaved"] if interleaved else [])]
     judged = fought or ["downs"]
+    # Lead #56: a split judges one round, and its ledgers run right after it, so a later party down is no failure.
+    single = len(fought) == 1 and not downs
     ledger_marks = [f"m_{name}{k}" for name in judged for k in (0, 1)]
     opening = [
         *arrival([HP_ENV, HP_ENV]),
@@ -490,23 +498,28 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
         {"do": "wait_until", "expr": f"len(log_matches(r'\\[enemy-mirror\\] take-over frame=\\d+ netId=\\d+ .*?objectId={AXEL_OBJECT}', 1)) > 0",
          "timeoutMs": 20000, "pollMs": 250},
     ]
-    fighting = [step for name in rounds for step in target_round(name, *HP_ROUNDS[name])]
+    fighting = [step for name in rounds for step in target_round(name, *HP_ROUNDS[name], last=single)]
     if interleaved:
         fighting += [
+            {"do": "assert", "expr": standing(),
+             "message": "SETUP FAILURE (window), not an HP result: interleaved needs both seats standing"},
             marks("m_interleaved0"),
             {"do": "save", "as": "il_base", "expr": f"{{'claims': {host_claims()}, 'bossHp': {boss_hp(0)}}}"},
-            # Both fight until a friend claim and a host native hit (an HP drop beyond the claims) both landed.
+            # Both fight until a friend claim and a host native hit (an HP drop beyond the claims) both landed. The
+            # clips run in the background, as the target rounds' (vuh2912-hp-06).
             {"do": "fight", "instances": [0, 1], "seconds": 10, "reach": 120, "as": "interleaved",
              "until": f"{host_claims()} > saved['il_base']['claims'] and {boss_hp(0)} < saved['il_base']['bossHp'] - {claim_drop}",
-             "clips": [{"instance": 0, "seconds": 12, "fps": 30, "name": "interleaved_host"},
-                       {"instance": 1, "seconds": 12, "fps": 30, "name": "interleaved_friend"}]},
+             "clips": [{"instance": 0, "seconds": 12, "fps": 30, "name": "interleaved_host", "background": True},
+                       {"instance": 1, "seconds": 12, "fps": 30, "name": "interleaved_friend", "background": True}]},
             marks("m_interleaved1"),
+            *([] if single else [{"do": "clip_wait"}]),
         ]
+    captures = [{"do": "capture", "instance": 0, "name": "settled_host"},
+                {"do": "capture", "instance": 1, "name": "settled_friend"}]
     settle = [
         {"do": "wait", "ms": 4000},
         {"do": "save", "as": "boss_settled", "expr": living},
-        {"do": "capture", "instance": 0, "name": "settled_host"},
-        {"do": "capture", "instance": 1, "name": "settled_friend"},
+        *([] if single else captures),
         {"do": "hp_ledger", "objectId": AXEL_OBJECT, "program": 137, "marks": ledger_marks, "as": "ledger", "require": False,
          "window": [ledger_marks[0], ledger_marks[-1]],
          "phases": [{"name": name, "from": f"m_{name}0", "to": f"m_{name}1", **HP_PHASES[name]} for name in judged]},
@@ -539,16 +552,28 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
                     "candidate, and drop each downed seat from its candidates"},
         {"do": "coop_verdict", "as": "verdict", "require": True, "arrivalTimeoutMs": 20000},
     ]
+    if single:
+        # Judged, then the guard off and the round's clips and stills collected: nothing after the verdict can fail
+        # on a party down or game over.
+        tail = [*([{"do": "revive_guard", "on": False, "as": f"{rounds[0]}_guard"}] if rounds else []),
+                {"do": "clip_wait"}, *captures]
+        return opening + fighting + settle + judging + tail
     middle = fighting + settle + downing if fought else downing + settle
     return opening + middle + judging
 
 
 # vuh2912-hp-02/03: chained on PC1's 22-HP saves, the later rounds and the downs fall to Axel's pressure, and the
 # friend round has passed twice. Lead #37 splits the remaining evidence: B1 the host round and interleaved, B2 the
-# downs, each judged alone and ending at its own milestone.
+# downs, each judged alone and ending at its own milestone. vuh2912-hp-06: B1's host round passed, then the party went
+# down before interleaved and its ledgers ever ran. Lead #56 splits B1 again: one judged round per run, its ledgers
+# right after it.
 HP_SPLITS = {
-    f"{HP_NAME}_b1": (dict(rounds=("host_target",), interleaved=True, downs=False),
-                      "B1 of the split: the host target round, then interleaved, each judged by both ledgers; no downs."),
+    f"{HP_NAME}_b1_host": (dict(rounds=("host_target",), interleaved=False, downs=False),
+                           "B1-host of the split: the host target round alone, judged by both ledgers right after it; "
+                           "no interleaved, no downs."),
+    f"{HP_NAME}_b1_inter": (dict(rounds=(), interleaved=True, downs=False),
+                            "B1-inter of the split: interleaved right after the take-over, judged by both ledgers right "
+                            "after it; no target round, no downs."),
     f"{HP_NAME}_b2": (dict(rounds=(), interleaved=False, downs=True),
                       "B2 of the split: owner_downs right after the release, the hp_ledger over its window, and the "
                       "target ledger's downs; no target rounds."),
