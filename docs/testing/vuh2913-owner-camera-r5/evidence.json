@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "raw-evidence.zip",
+      "size": 286605,
+      "sha256": "042a2fd7a50f877f4a5337a777afb4a2bf49ca14a6403811fd41097a3b6fae0f",
+      "url": "clankie://evidence/sha256/042a2fd7a50f877f4a5337a777afb4a2bf49ca14a6403811fd41097a3b6fae0f"
+    }
+  ]
+}
