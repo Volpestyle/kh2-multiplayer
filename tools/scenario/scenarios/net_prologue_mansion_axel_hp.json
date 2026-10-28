@@ -329,7 +329,8 @@
    "as": "friend_target_guard"
   },
   {
-   "do": "clip_wait"
+   "do": "clip_wait",
+   "require": true
   },
   {
    "do": "walk_to",
@@ -494,7 +495,8 @@
    "as": "host_target_guard"
   },
   {
-   "do": "clip_wait"
+   "do": "clip_wait",
+   "require": true
   },
   {
    "do": "assert",
@@ -544,7 +546,8 @@
    "expr": "[log_count('', 0), log_count('', 1)]"
   },
   {
-   "do": "clip_wait"
+   "do": "clip_wait",
+   "require": true
   },
   {
    "do": "wait",

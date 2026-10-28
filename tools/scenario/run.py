@@ -797,9 +797,8 @@ def step_fight(ctx: Context, step: dict) -> dict:
         clip_result: dict = {}
 
         def film(clip=clip, inst=inst, out=out, clip_result=clip_result) -> None:
-            clip_result.update(kh2ctl("clip", "--seconds", str(clip.get("seconds", 5)), "--fps",
-                                      str(clip.get("fps", 10)), "--out", str(out), pid=inst.pid,
-                                      check=False, timeout=180))
+            film_into(clip_result, "clip", "--seconds", str(clip.get("seconds", 5)), "--fps", str(clip.get("fps", 10)),
+                      "--out", str(out), pid=inst.pid, timeout=180)
 
         if clip.get("background"):
             thread = threading.Thread(target=film, daemon=True)
@@ -1090,6 +1089,36 @@ def step_capture(ctx: Context, step: dict) -> dict:
     return {"path": out.name, "receipt": receipt}
 
 
+def film_into(result: dict, *args: str, pid: int, timeout: float) -> None:
+    """Run one kh2ctl clip into `result`. A worker that raises (a kh2ctl timeout) leaves a failed receipt, not an
+    empty one (Ione 2990c3d8, VUH-2912)."""
+    try:
+        result.update(kh2ctl(*args, pid=pid, check=False, timeout=timeout))
+    except Exception as exc:  # noqa: BLE001 - the receipt is the record
+        result.update(ok=False, error=f"{type(exc).__name__}: {exc}")
+
+
+def mp4_finalized(path: Path) -> bool:
+    """True when the MP4's top-level boxes include moov. An encoder cut before it finishes leaves none, and the file
+    can't be decoded (vuh2912-hp-05)."""
+    try:
+        with path.open("rb") as f:
+            while len(header := f.read(8)) == 8:
+                size, kind = int.from_bytes(header[:4], "big"), header[4:8]
+                if kind == b"moov":
+                    return True
+                if size == 1:  # a 64-bit size follows the type
+                    size, skip = int.from_bytes(f.read(8), "big"), 16
+                else:
+                    skip = 8
+                if size < skip:  # 0 (to end of file) or corrupt: no moov after it
+                    return False
+                f.seek(size - skip, 1)
+    except OSError:
+        return False
+    return False
+
+
 def clip_receipt(ctx: Context, out: Path, result: dict) -> dict:
     """Retain native frame timing and present rates, including background clips."""
     for suffix in (".capture-time.jsonl", ".receipt.json"):
@@ -1106,7 +1135,7 @@ def step_clip(ctx: Context, step: dict) -> dict:
     if step.get("background"):
         # Film while later steps run (VUH-2342); clip_wait collects it before any capture on that instance.
         result: dict = {}
-        thread = threading.Thread(target=lambda: result.update(kh2ctl(*args, pid=inst.pid, check=False, timeout=180)),
+        thread = threading.Thread(target=film_into, args=(result, *args), kwargs={"pid": inst.pid, "timeout": 180},
                                   daemon=True)
         thread.start()
         ctx.saved.setdefault("_background_clips", []).append((thread, out, result))
@@ -1117,14 +1146,29 @@ def step_clip(ctx: Context, step: dict) -> dict:
 
 
 def step_clip_wait(ctx: Context, step: dict) -> dict:
-    """Collect every background clip (step_clip with background) and record its receipt."""
-    receipts = []
-    for thread, out, result in ctx.saved.pop("_background_clips", []):
+    """Collect every background clip (step_clip with background) and record its receipt.
+
+    The clips stay registered until every one has finished, so a failure while waiting (a game exit, a hang) leaves
+    them all to the run's bounded teardown drain (Ione 2990c3d8 (1), VUH-2912). Popped first, they were neither
+    drained nor reported. With "require" every clip must have succeeded with a finalized MP4, or the step fails as
+    an evidence failure that blocks the run (2990c3d8 (2)); without it a failed clip is only its receipt."""
+    for thread, _, _ in ctx.saved.get("_background_clips", []):
         while thread.is_alive():
             ctx.sleep(0.5)
+    receipts = []
+    for thread, out, result in ctx.saved.pop("_background_clips", []):
         if out.exists():
             ctx.artifacts.append(out.name)
         receipts.append(clip_receipt(ctx, out, result))
+    if step.get("require"):
+        for receipt in receipts:
+            receipt["finalized"] = mp4_finalized(ctx.run_dir / receipt["path"])
+        failed = [r["path"] for r in receipts if not (r["ok"] and r["finalized"])]
+        if failed or not receipts:
+            error = StepFailed(f"EVIDENCE FAILURE (clips), not a game result: {failed or 'no clips'} did not finish "
+                               f"as finalized MP4s")
+            error.details = {"clips": receipts}
+            raise error
     return {"clips": receipts}
 
 

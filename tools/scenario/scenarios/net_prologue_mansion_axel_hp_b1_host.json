@@ -398,7 +398,8 @@
    "as": "host_target_guard"
   },
   {
-   "do": "clip_wait"
+   "do": "clip_wait",
+   "require": true
   },
   {
    "do": "capture",
