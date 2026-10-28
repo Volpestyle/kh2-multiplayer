@@ -224,7 +224,22 @@
   {
    "do": "revive_guard",
    "host": 1,
-   "friend": 0
+   "friend": 0,
+   "aside": {
+    "roomScope": [
+     2,
+     20,
+     0,
+     137,
+     137,
+     137
+    ],
+    "center": [
+     39,
+     -27
+    ],
+    "radius": 450
+   }
   },
   {
    "do": "fight",
@@ -333,7 +348,22 @@
   {
    "do": "revive_guard",
    "host": 0,
-   "friend": 1
+   "friend": 1,
+   "aside": {
+    "roomScope": [
+     2,
+     20,
+     0,
+     137,
+     137,
+     137
+    ],
+    "center": [
+     39,
+     -27
+    ],
+    "radius": 450
+   }
   },
   {
    "do": "fight",
@@ -516,7 +546,22 @@
    ],
    "as": "owner_downs",
    "clipSeconds": 12,
-   "timeoutMs": 240000
+   "timeoutMs": 240000,
+   "aside": {
+    "roomScope": [
+     2,
+     20,
+     0,
+     137,
+     137,
+     137
+    ],
+    "center": [
+     39,
+     -27
+    ],
+    "radius": 450
+   }
   },
   {
    "do": "clip_wait"
