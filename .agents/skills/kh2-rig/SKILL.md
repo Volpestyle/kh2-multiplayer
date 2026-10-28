@@ -45,6 +45,8 @@ Most rig capabilities already exist. Before writing a new helper, look here, the
 
 ## Gotchas (each cost real attempts)
 
+- **Thorn floor fall (VUH-2808):** opt-in `KH2COOP_THORN_FLOOR_TRACE=1` on both game boots samples native/owner/puppet update boundaries during friend-owned Thorn roles and their 120-frame exit tail. Rows include XYZ, collision bit0x40, move/airborne state, dynamics, D48, role and read availability; capped at65,536 rows. Scenario closure automatically flags retained canonical pilot samples at Y>1000 in TT34 field gameplay (`thorn_floor.json`). [Trace contract and archive control](../../../docs/testing/vuh2808-thorn-floor/README.md). This is tracing/regression, not recovery proof; PC build/live still needs its separate authorization.
+
 - **Logical-down lethal fixtures:** use `kh2ctl hit damage --victim <canonical actor> --amount <current HP>`. Its native TakeDamage path reaches the hooked stat funnel. `hit kill` calls the original ApplyStatDelta trampoline and bypasses the logical-down clamp, producing held native death instead. See `docs/DOWNED_REVIVE.md` and `docs/ENEMY_PARITY.md`; a mode0 death cannot qualify the mode4 logical hold or revive.
 
 - **Absolute HUD reads:** native HUD objects may be on a heap below the executable; display views live in the DLL. Use scenario `peek_at`, which wraps the RVA subtraction to unsigned 64-bit before calling `kh2ctl peek`. A negative Python hex string (`0x-...`) reads the wrong location. Keep the native `peek` command's module-base arithmetic; don't infer a module base from a heap actor.

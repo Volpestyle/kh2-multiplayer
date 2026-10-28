@@ -43,6 +43,21 @@ wire, native ABI, retries, leases or pilots. The limited landing evidence above
 does not qualify the terminal bundle. The later failure chronology below is
 historical; it does not override the current status above.
 
+## Friend floor fall (VUH-2808)
+
+In zr103 the host's friend actor crossed Y=0 during friend-owned role
+2147483658, while still on motion252. The later `role-not-current` refusal
+followed native D48 cancellation; missing-bank fallback is too late to explain
+the initial crossing. Host owner-pose op4 replays all XYZ on the friend's
+canonical player with no floor check. Native collision state at the crossing
+is absent from the archive, so a corrective write is not justified yet.
+
+`KH2COOP_THORN_FLOOR_TRACE=1` enables bounded per-update position/collision
+observations around native movement, owner replay and generic puppet playback.
+Scenario closure also checks retained canonical pilot samples for either seat
+more than1000 units below the Y=0 arena floor and records `thorn_floor.json`.
+See [the diagnosis, trace contract and checks](testing/vuh2808-thorn-floor/README.md).
+
 ## Victory handoff (VUH-2807)
 
 The retained zr100 kill delivered native315 to the friend with a healthy control

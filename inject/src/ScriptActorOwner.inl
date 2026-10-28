@@ -642,18 +642,19 @@ static bool SmOwnerClaimResidue(const ScriptActorRole& role,uintptr_t actor,int 
 }
 static bool SmOwnerBindVisual(ScriptActorRole& role,const enemysync::DownedScope& scope,uintptr_t actor) {
     if(role.visual.actor)return role.visual.actor==actor && SmOwnerVisualCurrent(role,scope);
+    const char* currentReason="not-checked";
     // VUH-2580: a refused bind names itself once per role and reason.
     const auto refuse=[&](const char* why) {
         if(role.bindRefused!=why && g_smVisualDiagLogs<64) {
             ++g_smVisualDiagLogs;role.bindRefused=why;
-            Log("[script-visual] bind refused role=%u seat=%u actor=%llX reason=%s",role.resource,role.slot,
-                static_cast<unsigned long long>(actor),why);
+            Log("[script-visual] bind refused role=%u seat=%u actor=%llX reason=%s currentReason=%s",role.resource,role.slot,
+                static_cast<unsigned long long>(actor),why,currentReason);
         }
         return false;
     };
     if(!role.haveCapture || role.slot>=3)return false;
     if(g_smVisualCleanup[role.slot].role.resource || g_smVisualCleanupBusy[role.slot])return refuse("cleanup-pending");
-    if(!SmOwnerCurrent(role,scope))return refuse("role-not-current");
+    if(!SmOwnerCurrent(role,scope,&currentReason))return refuse("role-not-current");
     if(GetTickCount64()>=role.deadline)return refuse("deadline");
     if(actor==g_soraActor || !IsPlayerClassActor(actor))return false;
     const auto index=PuppetIndexFor(actor);
