@@ -131,6 +131,27 @@ class AxelHpFixtureTest(unittest.TestCase):
             self.assertAlmostEqual(x, 900)
             self.assertAlmostEqual(z, 0)
 
+    # vuh2912-hp-01: Axel knocked the host off a 4 s walk, and nothing had brought the friend near him.
+    def test_the_fighter_walks_in_and_the_reviver_walks_again_if_still_too_close(self):
+        world = lambda host_x, clone_x: {0: [roxas(HOST, host_x), roxas(CLONE, clone_x)], 1: [roxas(HOST, 1000)]}
+        at = dict(positions={("B_EX110", 0): (0, 0, 0), ("B_EX110", 1): (0, 0, 0)}, peeks={0: HOST, 1: HOST})
+        for name, fighter, reviver in ROUNDS:
+            walk_in, away, retry = step(f"{name}_walk_in"), step(f"{name}_walk_away"), step(f"{name}_walk_away_retry")
+            self.assertTrue(index(f"{name}_walk_in") < index(f"{name}_walk_away") < index(f"{name}_walk_away_retry")
+                            < index(f"{name}_separation"), name)
+            self.assertEqual((walk_in["instance"], walk_in["body"], retry["instance"]), (fighter, "self", reviver))
+            self.assertGreaterEqual(min(away["timeoutMs"], retry["timeoutMs"]), 8000)
+            x, z = evaluate(walk_in["targetExpr"], actors=world(1000, 1000), **at)
+            self.assertAlmostEqual(x, 250)  # in toward Axel, short of him
+            self.assertAlmostEqual(z, 0)
+            near, far = (1000, 100) if fighter == 1 else (100, 1000)  # (host_x, clone_x) once apart
+            self.assertTrue(evaluate(walk_in["until"], actors=world(near, far), **at), name)  # already in: no walk
+            self.assertFalse(evaluate(walk_in["until"], actors=world(1000, 1000), **at), name)
+            self.assertTrue(evaluate(retry["until"], actors=world(near, far), **at), name)  # apart: the retry does nothing
+            self.assertFalse(evaluate(retry["until"], actors=world(near, near), **at), name)
+            self.assertFalse(evaluate(retry["until"], {reviver: ["[downed] gate intercept mode=4 logical=1"]},
+                                      actors=world(near, far), **at), name)
+
     # REQUIRED 1, 2 and 4 live in the ledgers; the fixture must ask them for it.
     def test_ledgers_judge_the_rounds_and_the_downs(self):
         ledger = step("ledger")
