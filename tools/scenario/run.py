@@ -70,11 +70,44 @@ class InstanceDied(Exception):
 # kh2ctl
 # --------------------------------------------------------------------------
 
+_rpc = threading.local()  # this thread's kh2ctl deadline (rpc_deadline)
+
+
+class rpc_deadline:
+    """Within this block, every kh2ctl call on this thread ends by `deadline` on `clock` (time.monotonic by
+    default): its timeout is capped to the time left, and none is left raises subprocess.TimeoutExpired at once.
+    A nested block can only shorten it (VUH-2931: owner_downs' killWhen reads within the step's budget)."""
+
+    def __init__(self, deadline: float, clock=time.monotonic) -> None:
+        self.deadline, self.clock = deadline, clock
+
+    def __enter__(self) -> "rpc_deadline":
+        self.previous = getattr(_rpc, "limit", None)
+        tighter = self.previous is None or self.deadline - self.clock() < self.previous[0] - self.previous[1]()
+        _rpc.limit = (self.deadline, self.clock) if tighter else self.previous
+        return self
+
+    def __exit__(self, *exc) -> None:
+        _rpc.limit = self.previous
+
+
+def rpc_timeout(timeout: float, what: object = "kh2ctl") -> float:
+    """`timeout` capped by this thread's rpc_deadline, if any."""
+    limit = getattr(_rpc, "limit", None)
+    if limit is None:
+        return timeout
+    left = limit[0] - limit[1]()
+    if left <= 0:
+        raise subprocess.TimeoutExpired(what, 0)
+    return min(timeout, left)
+
+
 def kh2ctl(*args: str, pid: int | None = None, check: bool = True, timeout: float = 120,
            env: dict | None = None) -> dict:
     cmd = [str(KH2CTL), *map(str, args)]
     if pid is not None:
         cmd += ["--pid", str(pid)]
+    timeout = rpc_timeout(timeout, cmd)
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                           env=dict(os.environ, **env) if env else None,
                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -1767,7 +1800,10 @@ class ReviveGuard:
     REACH, HOLD_MS, TIMEOUT = 100.0, 1600, 60.0
     KEEP_AWAY = 300.0  # step away from the nearest living enemy inside this
 
-    def __init__(self, ctx: Context, host: int, friend: int, hold_ms: int | None = None) -> None:
+    def __init__(self, ctx: Context, host: int, friend: int, hold_ms: int | None = None,
+                 aside: dict | None = None) -> None:
+        self.aside = aside  # the qualified envelope for asides (revive_move); None never steps aside
+        self.now, self.sleep = time.monotonic, time.sleep
         if hold_ms is not None:  # VUH-2632 (D17): Standard's revive hold is 300 frames (~5 s)
             self.HOLD_MS = int(hold_ms)
         spec = _importlib_util.spec_from_file_location("kh2coop_route_pilot", PILOT)
@@ -1795,29 +1831,64 @@ class ReviveGuard:
         kh2ctl("player-input", "--lx", f"{dx * fz - dz * fx:.2f}", "--ly", f"{dx * fx + dz * fz:.2f}",
                "--duration-ms", str(ms), pid=self.friend.pid, check=False)
 
-    ASIDE_MS = 400  # one sideways step while a native RC holds Triangle (revive_move)
+    # An aside (revive_move) is up to ASIDE_PULSES sideways pulses of ASIDE_MS, each sent only after a fresh check,
+    # and only inside the step's `aside` envelope (Ione 00c3ac51): {"roomScope": the six-part scope, "center": [x, z],
+    # "radius": r}. ASIDE_TRAVEL bounds one aside's travel for the endpoint check. No envelope: never aside.
+    ASIDE_MS, ASIDE_PULSES, ASIDE_TRAVEL = 100, 4, 300.0
+    INPUT_SLACK = 1.0  # seconds of the episode an input needs beyond its own duration
 
     def living_enemies(self) -> list[dict]:
         return [a["position"] for a in self.ctx.actors(self.friend.index)
                 if a.get("objectType") in (3, 4) and not a["name"].startswith("F_") and a.get("hp", -1) > 0]
 
     @staticmethod
-    def revive_move(own, target, react: int, enemies: list[dict], reach: float) -> tuple:
+    def native_yield(s: dict) -> bool:
+        """Whether a fresh downed-prompt receipt, matched to this actor and room scope, shows a native actionable
+        command owning Triangle (hide reason 7). The raw command alone is not proof: the reader keeps it for
+        unknown, frozen or out-of-scope receipts."""
+        seen = s.get("reactObservation") or {}
+        return bool(s.get("react")) and seen.get("source") == "downed-prompt-v7" and seen.get("promptHide") == 7
+
+    @staticmethod
+    def aside_fence(envelope: dict | None, pin: tuple | None, s: dict, h: dict) -> str:
+        """Why an aside may not run now ("" when it may): the reviver `s` and downed seat `h` must both be in the
+        envelope's room scope, in the scope and with the actors pinned when the episode began, and the reviver free."""
+        if envelope is None:
+            return "no-envelope"
+        scope = tuple(s.get("roomScope") or ())
+        if scope != tuple(envelope["roomScope"]) or tuple(h.get("roomScope") or ()) != scope:
+            return "room"
+        if pin is None or pin != (scope, s.get("player"), h.get("player")):
+            return "context"
+        return "" if s.get("free") and s.get("pos") else "not-free"
+
+    @staticmethod
+    def revive_move(own, target, react: int, native: bool, enemies: list[dict], reach: float,
+                    envelope: dict | None = None, travel: float = 300.0) -> tuple:
         """One tick of a revive, from the reviver's and the downed seat's positions: ("walk", dx, dz) toward the
-        downed seat, ("hold",) to revive, ("aside", dx, dz) while a native RC owns Triangle, or ("wait",).
+        downed seat, ("hold",) to revive, ("aside", dx, dz) while a proven native RC owns Triangle, or ("wait",).
         vuh2912-hp-02: Axel's Burst Frontier offer (444) held Triangle while Axel kept attacking, and the reviver
         stood in his line until it fell. Aside is perpendicular to the line from the nearest living enemy, so the
-        reviver leaves the line of spheres along that enemy's forward (and its attack) instead of waiting in it."""
+        reviver leaves the line of spheres along that enemy's forward (and its attack) instead of waiting in it. It
+        needs `native` (native_yield) and an envelope (aside_fence passed) whose circle holds both the reviver and
+        the aside's endpoint `travel` away; the other perpendicular is tried second. Otherwise it waits."""
         dx, dz = target[0] - own[0], target[2] - own[2]
         if math.hypot(dx, dz) > reach:
             return ("walk", dx, dz)
         if react == 0:
             return ("hold",)
-        if not enemies:
+        if not native or envelope is None or not enemies:
             return ("wait",)
         near = min(enemies, key=lambda e: math.hypot(e["x"] - own[0], e["z"] - own[2]))
         ex, ez = own[0] - near["x"], own[2] - near["z"]
-        return ("aside", -ez, ex) if ex or ez else ("wait",)
+        d = math.hypot(ex, ez)
+        (cx, cz), radius = envelope["center"], envelope["radius"]
+        if not d or math.hypot(own[0] - cx, own[2] - cz) > radius:
+            return ("wait",)
+        for sx, sz in ((-ez, ex), (ez, -ex)):
+            if math.hypot(own[0] + travel * sx / d - cx, own[2] + travel * sz / d - cz) <= radius:
+                return ("aside", sx, sz)
+        return ("wait",)
 
     def keep_away(self, friend) -> None:
         try:
@@ -1827,13 +1898,43 @@ class ReviveGuard:
             enemies = self.living_enemies()
         except Exception:  # a load between samples
             return
-        if not enemies:
+        if not enemies or self.stop.is_set():  # a lookup that returns after the stop sends nothing
             return
         x, z = s["pos"][0], s["pos"][2]
         near = min(enemies, key=lambda e: math.hypot(e["x"] - x, e["z"] - z))
         if math.hypot(near["x"] - x, near["z"] - z) < self.KEEP_AWAY:
             self.stick(s, x - near["x"], z - near["z"], 500)
             self.keepAwaySteps += 1
+
+    def may_send(self, end: float, seconds: float) -> bool:
+        """An input of `seconds` may start: not stopped, and it ends inside the episode with INPUT_SLACK to spare.
+        Input calls are never capped mid-pulse, which would leave the pulse held."""
+        return not self.stop.is_set() and self.now() + seconds + self.INPUT_SLACK <= end
+
+    def step_aside(self, event: dict, s: dict, move: tuple, pin: tuple, end: float, reads, revived) -> None:
+        """Send one aside's pulses, each after a fresh check of both seats (stop, budget, revive, room scope,
+        actors, native yield); the first failed check sends nothing more and is counted in asideStops."""
+        event["asides"] = event.get("asides", 0) + 1
+        stop = ""
+        for pulse in range(self.ASIDE_PULSES):
+            if pulse:
+                try:
+                    h, s = reads()
+                except Exception:  # a load or menu between samples
+                    stop = "read"
+                    break
+                stop = "revived" if revived() else self.aside_fence(self.aside, pin, s, h) or \
+                    ("" if self.native_yield(s) else "yield-ended")
+                if stop:
+                    break
+            if not self.may_send(end, self.ASIDE_MS / 1000):
+                stop = "stopped" if self.stop.is_set() else "budget"
+                break
+            self.stick(s, move[1], move[2], self.ASIDE_MS)
+            event["asidePulses"] = event.get("asidePulses", 0) + 1
+        if stop:
+            stops = event.setdefault("asideStops", {})
+            stops[stop] = stops.get(stop, 0) + 1
 
     def run(self) -> None:
         downs = self.count(self.host, "[downed] gate intercept")
@@ -1851,51 +1952,91 @@ class ReviveGuard:
                 continue
             downs = now
             returned = self.count(self.host, "[downed] revive returned")
-            event = {"downedAt": time.monotonic(), "result": "timeout", "holds": 0}
-            end = time.monotonic() + self.TIMEOUT
-            while time.monotonic() < end and not self.stop.is_set():
-                if self.count(self.host, "[downed] revive returned") > returned:
+            revived = lambda: self.count(self.host, "[downed] revive returned") > returned  # noqa: E731
+            reads = lambda: (host.state(), friend.state())  # noqa: E731
+            event = {"downedAt": self.now(), "result": "timeout", "holds": 0}
+            end = self.now() + self.TIMEOUT
+            pin = None  # (scope, reviver actor, downed actor) at the episode's first free read
+            while self.now() < end and not self.stop.is_set():
+                if revived():
                     event["result"] = "revived"
                     break
                 try:
-                    target = host.state()["pos"]
-                    s = friend.state()
+                    h, s = reads()
                 except Exception as error:  # a load or menu between samples
                     event["lastError"] = str(error)
-                    time.sleep(0.5)
+                    self.sleep(0.5)
                     continue
-                event["last"] = {"free": s["free"], "react": s["react"], "friend": s["pos"], "host": target}
+                if pin is None and s["free"] and s.get("player") and h.get("player"):
+                    pin = (tuple(s.get("roomScope") or ()), s["player"], h["player"])
+                fence = self.aside_fence(self.aside, pin, s, h)
+                enemies = []
+                if self.native_yield(s) and not fence:
+                    try:
+                        with rpc_deadline(end, self.now):  # the lookup ends inside the episode
+                            enemies = self.living_enemies()
+                    except subprocess.TimeoutExpired:
+                        event["lastError"] = "enemies lookup: no episode budget left"
+                        continue
+                    except Exception as error:  # a load between samples
+                        event["lastError"] = f"enemies lookup: {error}"
+                        self.sleep(0.3)
+                        continue
+                    if self.stop.is_set() or self.now() >= end or revived():
+                        continue  # the loop condition or the revive check ends the episode
+                    try:  # fresh context after the lookup, before any input
+                        h, s = reads()
+                    except Exception as error:
+                        event["lastError"] = str(error)
+                        self.sleep(0.5)
+                        continue
+                    fence = self.aside_fence(self.aside, pin, s, h)
+                target = h["pos"]
+                native = self.native_yield(s)
+                event["last"] = {"free": s["free"], "react": s["react"], "native": native, "friend": s["pos"],
+                                 "host": target}
                 if not s["free"] or not s["pos"] or not target:
-                    time.sleep(0.5)
+                    self.sleep(0.5)
                     continue
                 event["last"]["distance"] = round(math.hypot(target[0] - s["pos"][0], target[2] - s["pos"][2]), 1)
-                try:
-                    enemies = self.living_enemies() if s["react"] else []
-                except Exception:  # a load between samples
-                    enemies = []
-                move = self.revive_move(s["pos"], target, s["react"], enemies, self.REACH)
-                if move[0] == "walk":
+                if native and fence:
+                    declined = event.setdefault("asideDeclined", {})
+                    declined[fence] = declined.get(fence, 0) + 1
+                move = self.revive_move(s["pos"], target, s["react"], native, enemies, self.REACH,
+                                        None if fence else self.aside, self.ASIDE_TRAVEL)
+                if move[0] == "walk" and self.may_send(end, 0.4):
                     self.stick(s, move[1], move[2], 400)
-                elif move[0] == "hold":
+                elif move[0] == "hold" and self.may_send(end, self.HOLD_MS / 1000):
                     kh2ctl("player-press", "--button", "triangle", "--duration-ms", str(self.HOLD_MS),
                            pid=self.friend.pid, check=False)
                     event["holds"] += 1
-                    time.sleep(1.0)
-                elif move[0] == "aside":  # the native reaction command owns Triangle: out of its line
-                    event["asides"] = event.get("asides", 0) + 1
-                    self.stick(s, move[1], move[2], self.ASIDE_MS)
+                    self.sleep(1.0)
+                elif move[0] == "aside":  # a proven native RC owns Triangle: out of its line, inside the envelope
+                    self.step_aside(event, s, move, pin, end, reads, revived)
                 else:
-                    time.sleep(0.3)  # the native reaction command still owns Triangle
-            event["seconds"] = round(time.monotonic() - event.pop("downedAt"), 1)
+                    self.sleep(0.3)  # the native reaction command still owns Triangle, or no budget is left
+            event["seconds"] = round(self.now() - event.pop("downedAt"), 1)
             self.events.append(event)
 
 
+def aside_envelope_ok(aside: object) -> bool:
+    """The `aside` envelope's shape (ReviveGuard): a six-part room scope, a center [x, z] and a positive radius."""
+    number = lambda v: type(v) in (int, float) and math.isfinite(v)  # noqa: E731
+    return isinstance(aside, dict) and set(aside) == {"roomScope", "center", "radius"} \
+        and isinstance(aside["roomScope"], list) and len(aside["roomScope"]) == 6 \
+        and all(type(v) is int for v in aside["roomScope"]) \
+        and isinstance(aside["center"], list) and len(aside["center"]) == 2 and all(map(number, aside["center"])) \
+        and number(aside["radius"]) and aside["radius"] > 0
+
+
 def step_revive_guard(ctx: Context, step: dict) -> dict:
-    """Start (`on`, default) or stop the friend's revive helper; see ReviveGuard."""
+    """Start (`on`, default) or stop the friend's revive helper; see ReviveGuard. `aside` (also on owner_downs)
+    is the qualified envelope that admits its asides; without one it never steps aside."""
     guard = getattr(ctx, "revive_guard", None)
     if step.get("on", True):
         if guard is None:
-            ctx.revive_guard = ReviveGuard(ctx, step.get("host", 0), step.get("friend", 1), step.get("holdMs"))
+            ctx.revive_guard = ReviveGuard(ctx, step.get("host", 0), step.get("friend", 1), step.get("holdMs"),
+                                           step.get("aside"))
             ctx.revive_guard.thread.start()
         return {"started": True}
     if guard is None:
@@ -1920,8 +2061,9 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     enemy downed it (natural) or this step's DownedSpike Kill did (forced, only while neither seat is down and
     no forced down is still open, `gapMs` after the last revive). Both seats down at once, or a host full-party
     down, is a named harness failure, never a pass; so is `timeoutMs`. Each downing starts a paired background
-    clip (`clipSeconds`, 12) when none is running. Both seats must be standing when the step starts. Saved
-    `as` (`owner_downs`): per owner {kind, seat}, the downing events and both guards' events."""
+    clip (`clipSeconds`, 12) when none is running. Both seats must be standing when the step starts. `aside`
+    is both guards' envelope (ReviveGuard). Saved `as` (`owner_downs`): per owner {kind, seat}, the downing events
+    and both guards' events."""
     owners = [int(o) for o in step.get("owners", [1, 0])]
     name = step.get("as", "owner_downs")
 
@@ -1939,7 +2081,7 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
 
     count = _count or log_count
     kill = _kill or (lambda index: step_downed_kill(ctx, {"instance": index, "require": False})["result"])
-    guard = _guard or (lambda downed, reviver: ReviveGuard(ctx, downed, reviver, step.get("holdMs")))
+    guard = _guard or (lambda downed, reviver: ReviveGuard(ctx, downed, reviver, step.get("holdMs"), step.get("aside")))
     clip = _clip or film
     now, sleep = _now or time.monotonic, _sleep or ctx.sleep
     base = {i: (count(i, DOWNED_DOWN), count(i, DOWNED_REVIVED)) for i in (0, 1)}
@@ -6031,6 +6173,8 @@ def validate_scenario(scenario: dict) -> None:
             compile(step["until"], f"<{prefix} fight until>", "eval")
         if kind == "protect" and type(step.get("afterPilot", False)) is not bool:
             raise ValueError(f"{prefix}: protect afterPilot must be a boolean")
+        if kind in ("revive_guard", "owner_downs") and "aside" in step and not aside_envelope_ok(step["aside"]):
+            raise ValueError(f"{prefix}: aside must be {{roomScope: six integers, center: [x, z], radius > 0}}")
         if kind == "test_enemy_hp":
             if "enemy_hp_write" not in scenario.get("testOnly", []):
                 raise ValueError(f'{prefix}: test_enemy_hp needs "testOnly": ["enemy_hp_write"]')

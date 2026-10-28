@@ -312,6 +312,9 @@ def separation():
 
 SEPARATION_MARGIN = 200  # beyond the policy's 150-unit hysteresis
 FIGHTER_NEAR = 350      # the fighter's approach stops inside this distance from Axel
+# Where the HP fixture's revive guards may step aside (Ione 00c3ac51): Axel II's sealed encounter scope, and a circle
+# inside the positions the seats and Axel reached in runs vuh2912-hp-02/03 (centre (39, -27), up to 602 out).
+AXEL_ARENA = {"roomScope": AXEL, "center": [39, -27], "radius": 450}
 
 
 def target_round(name, fighter, reviver):
@@ -349,7 +352,7 @@ def target_round(name, fighter, reviver):
                                                     f"'bossHp': {boss_hp(0)}, 'hp': {canonical_hp(fighter)}, "
                                                     f"'downs': log_count('[downed] gate intercept', {fighter})}}"},
         marks(f"m_{name}0"),
-        {"do": "revive_guard", "host": fighter, "friend": reviver},
+        {"do": "revive_guard", "host": fighter, "friend": reviver, "aside": AXEL_ARENA},
         # The clips run as long as the round can (the step waits for them), so the round's hits are on film.
         {"do": "fight", "instances": [fighter], "seconds": 20, "reach": 120, "as": name,
          "until": f"{selected(fighter)} and {hit} and {landed}",
@@ -419,7 +422,8 @@ def hp_steps():
          "message": "the boss's hits on the friend must stay native on the friend: no forwarded RemoteHit or vetoed local hit"},
         # A downed seat is no candidate: one down and partner revive per owner, bracketed for the target ledger.
         marks("m_downs0"),
-        {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000},
+        {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000,
+         "aside": AXEL_ARENA},
         {"do": "clip_wait"},
         marks("m_downs1"),
         {"do": "assert", "expr": "all(saved['owner_downs']['owners'][k] for k in ('0', '1'))",
