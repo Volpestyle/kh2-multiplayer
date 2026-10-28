@@ -2663,6 +2663,75 @@ def step_downed_kill(ctx: Context, step: dict) -> dict:
     return {"instance": inst.index, "seq": seq, "result": result}
 
 
+STATS_MARK_MAGIC, STATS_MARK_VERSION, STATS_MARK_SIZE = 0x4B52414D, 1, 16  # inject/src/StatsMark.hpp
+
+
+class StatsMarkChannel:
+    """One instance's stats-mark channel (inject/src/StatsMark.hpp: magic, version, requested, logged), opened, never
+    created: the DLL makes it only with the hit trace on."""
+
+    def __init__(self, pid: int) -> None:
+        from ctypes import wintypes as wt
+        self.k32 = k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenFileMappingW.argtypes = [wt.DWORD, wt.BOOL, wt.LPCWSTR]
+        k32.OpenFileMappingW.restype = wt.HANDLE
+        k32.MapViewOfFile.argtypes = [wt.HANDLE, wt.DWORD, wt.DWORD, wt.DWORD, ctypes.c_size_t]
+        k32.MapViewOfFile.restype = ctypes.c_void_p
+        k32.UnmapViewOfFile.argtypes = [ctypes.c_void_p]
+        k32.CloseHandle.argtypes = [wt.HANDLE]
+        self.handle = k32.OpenFileMappingW(2 | 4, False, f"Local\\kh2coop_mark_{pid}")  # FILE_MAP_WRITE | READ
+        self.view = k32.MapViewOfFile(self.handle, 2 | 4, 0, 0, STATS_MARK_SIZE) if self.handle else None
+
+    def read(self) -> tuple[int, int, int, int] | None:
+        return struct.unpack("<IIii", ctypes.string_at(self.view, STATS_MARK_SIZE)) if self.view else None
+
+    def request(self, seq: int) -> None:
+        ctypes.memmove(self.view + 8, struct.pack("<i", seq), 4)
+
+    def close(self) -> None:
+        if self.view:
+            self.k32.UnmapViewOfFile(self.view)
+        if self.handle:
+            self.k32.CloseHandle(self.handle)
+
+
+def step_stats_mark(ctx: Context, step: dict, *, _open=None, _now=None, _sleep=None) -> dict:
+    """VUH-2912 (lead #76, run vuh2912-hp-09): ask each of `instances` (default [0, 1]) to log the enemy mirror's
+    per-actor stats line now, and wait until each has (`timeoutMs`, 2000). A window shorter than the mirror's
+    300-frame stats interval then still holds a sample for the HP ledger's one-brain check. Place it just inside a
+    window: after its start mark, before its end mark. Fails on a missing or foreign channel, or no receipt."""
+    open_channel = _open or StatsMarkChannel
+    now, sleep = _now or time.monotonic, _sleep or time.sleep
+    channels, seqs = {}, {}
+    try:
+        for index in step.get("instances", [0, 1]):
+            inst = ctx.inst(index)
+            channel = channels[index] = open_channel(inst.pid)
+            row = channel.read()
+            if row is None:
+                raise StepFailed(f"stats_mark: no stats-mark channel on instance {index} (the hit trace is off?)")
+            magic, version, requested, logged = row
+            if (magic, version) != (STATS_MARK_MAGIC, STATS_MARK_VERSION):
+                raise StepFailed(f"stats_mark: instance {index} channel magic/version {magic:#x}/{version}, want "
+                                 f"{STATS_MARK_MAGIC:#x}/{STATS_MARK_VERSION}")
+            seqs[index] = requested + 1
+            channel.request(seqs[index])
+        deadline = now() + step.get("timeoutMs", 2000) / 1000
+        waiting = set(seqs)
+        while waiting:
+            waiting = {i for i in waiting if channels[i].read()[3] != seqs[i]}
+            if not waiting:
+                break
+            if now() >= deadline:
+                raise StepFailed(f"stats_mark: no stats logged on instance(s) {sorted(waiting)} in time "
+                                 "(gameplay frames stopped?)")
+            sleep(0.02)
+    finally:
+        for channel in channels.values():
+            channel.close()
+    return {"seq": seqs}
+
+
 def step_relay(ctx: Context, step: dict) -> dict:
     """Start the relay (kh2coop_server) on loopback for this run."""
     port = str(step.get("port", 7782))
@@ -6152,7 +6221,7 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "assert": step_assert, "save": step_save, "protect": step_protect, "hang_check": step_hang_check, "coop_verdict": step_coop_verdict,
          "hp_ledger": step_hp_ledger, "target_ledger": step_target_ledger,
          "revive_guard": step_revive_guard, "downed_kill": step_downed_kill, "press_continue": step_press_continue,
-         "owner_downs": step_owner_downs,
+         "owner_downs": step_owner_downs, "stats_mark": step_stats_mark,
          "capture": step_capture, "clip": step_clip, "clip_wait": step_clip_wait, "pilot_wait": step_pilot_wait, "pilot_until": step_pilot_until, "avatar_stall": step_avatar_stall,
          "spawn_late_birth": step_spawn_late_birth,
          "crash": step_crash, "freeze": step_freeze,

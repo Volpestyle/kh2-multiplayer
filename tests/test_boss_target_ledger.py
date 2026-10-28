@@ -140,8 +140,11 @@ class BossTargetLedgerTest(unittest.TestCase):
         # VUH-2912: the 0x3D6FC0 reaction trace appends fields after same=; the ledger reads the line as before.
         global witness
         plain, original = run(), witness
+        # Lead #76: then 0x3D6FC0's call counts since the witness armed and the victim's last applied reaction.
         witness = lambda *a, **k: original(*a, **k) + (" reactions=1 refused=0 reaction=2 reactRequest=40 "
-                                                        "reactFrame=901 reactHooked=1")
+                                                        "reactFrame=901 reactHooked=1 callsAll=12 calls=4 "
+                                                        "callRequests=1 callApplied=1 lastApplied=901 lastKind=2 "
+                                                        "lastRequest=40 callRowsEvicted=0")
         try:
             extended = run()
         finally:

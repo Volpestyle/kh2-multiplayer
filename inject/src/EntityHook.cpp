@@ -96,6 +96,8 @@
 #include "kh2coop/AvatarPositionFaultChannel.hpp"
 #include <limits>
 #include "SpawnPickHook.hpp"
+#include "ReactionCalls.hpp" // VUH-2912 witness diagnostics (lead #76)
+#include "StatsMark.hpp"
 
 namespace kh2coop {
 namespace inject {
@@ -1032,12 +1034,14 @@ struct BossHitWitness {
     int32_t hpBefore, hpAfter;
     uint32_t reactions, refused, reactFrame, reactRequest;
     int32_t reactKind;
+    reactioncalls::Snapshot armed;  // lead #76: 0x3D6FC0's call counts when this witness armed
 };
 static constexpr uintptr_t OFF_IGNORE_HIT = 0xD70;
 static constexpr uint32_t kWitnessFrames = 4;
 static constexpr unsigned kWitnessSlots = 4, kWitnessLogLimit = 64;
 static BossHitWitness g_witnesses[kWitnessSlots] = {};
 static unsigned g_witnessesLogged = 0;
+static reactioncalls::Table g_reactionCalls;  // lead #76: every 0x3D6FC0 call, per actor (game thread)
 
 static void NoteBossHitWitness(std::uint64_t seq, uintptr_t victim, uintptr_t record, uint32_t motion, float ignoreHit,
                                uint32_t reads, int32_t hpBefore, int32_t hpAfter) noexcept {
@@ -1052,6 +1056,7 @@ static void NoteBossHitWitness(std::uint64_t seq, uintptr_t victim, uintptr_t re
             if (w.seq) continue;
             w = {seq, GetTickCount64(), g_lastHit.attacker, victim, g_frameCounter, g_lastHit.atkpId, motion, reads,
                  ignoreHit, hpBefore, hpAfter};
+            w.armed = reactioncalls::Take(g_reactionCalls, victim);
             return;
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -1074,6 +1079,10 @@ static uintptr_t __fastcall HookedApplyReaction(void* actor, void* request) {
     uint16_t id = UINT16_MAX;  // read before the call, which may clear the request
     const bool idRead = ReadHitTrace(reinterpret_cast<uintptr_t>(request), id);
     const uintptr_t entry = g_origApplyReaction(actor, request);
+    int16_t entryKind = -1;
+    if (entry && !ReadHitTrace(entry + 2, entryKind)) entryKind = -1;
+    reactioncalls::Note(g_reactionCalls, reinterpret_cast<uintptr_t>(actor), idRead ? id : reactioncalls::kNone,
+                        entry != 0, entryKind, g_frameCounter);
     if (idRead && id == 0 && !entry) return entry;
     for (auto& w : g_witnesses) {
         if (!w.seq || w.victim != reinterpret_cast<uintptr_t>(actor)) continue;
@@ -1082,9 +1091,8 @@ static uintptr_t __fastcall HookedApplyReaction(void* actor, void* request) {
             continue;
         }
         if (w.reactions++) continue;
-        int16_t kind = -1;
         w.reactRequest = idRead ? id : UINT32_MAX;
-        w.reactKind = ReadHitTrace(entry + 2, kind) ? kind : -1;
+        w.reactKind = entryKind;
         w.reactFrame = g_frameCounter;
     }
     return entry;
@@ -1104,14 +1112,24 @@ static void BossHitWitnessTick() noexcept {
         }
         if (g_witnessesLogged < kWitnessLogLimit) {
             ++g_witnessesLogged;
+            // Lead #76: 0x3D6FC0's calls since this witness armed, on any actor (callsAll) and on the victim (calls,
+            // with a request, applied), and the victim's last applied reaction whenever it came (lastApplied frame,
+            // its kind and request; -1 when none). Applied at or before hitFrame: before the witness armed.
+            const auto window = reactioncalls::Since(g_reactionCalls, w.victim, w.armed);
+            const auto* row = reactioncalls::Find(g_reactionCalls, w.victim);
+            const auto signedOr = [](std::uint32_t v) { return v == reactioncalls::kNone ? -1LL : static_cast<long long>(v); };
             Log("[hitwitness] seq=%llu hitFrame=%u hitTickMs=%llu frame=%u attacker=%llX victim=%llX atkp=%u hp=%d->%d "
                 "motion=%u->%u ignoreHit=%.1f->%.1f reads=%u same=%u reactions=%u refused=%u reaction=%d "
-                "reactRequest=%u reactFrame=%u reactHooked=%u", static_cast<unsigned long long>(w.seq), w.frame,
+                "reactRequest=%u reactFrame=%u reactHooked=%u callsAll=%u calls=%u callRequests=%u callApplied=%u "
+                "lastApplied=%lld lastKind=%d lastRequest=%lld callRowsEvicted=%u",
+                static_cast<unsigned long long>(w.seq), w.frame,
                 static_cast<unsigned long long>(w.tickMs), g_frameCounter, static_cast<unsigned long long>(w.attacker),
                 static_cast<unsigned long long>(w.victim), w.atkpId, w.hpBefore, w.hpAfter, w.motion, motion,
                 double(w.ignoreHit), double(ignoreHit), reads, same ? 1u : 0u, w.reactions, w.refused,
                 w.reactions ? w.reactKind : -1, w.reactions ? w.reactRequest : UINT32_MAX, w.reactFrame,
-                g_origApplyReaction ? 1u : 0u);
+                g_origApplyReaction ? 1u : 0u, window.all, window.calls, window.requests, window.applied,
+                row ? signedOr(row->lastAppliedFrame) : -1LL, row ? row->lastKind : -1,
+                row ? signedOr(row->lastRequest) : -1LL, g_reactionCalls.evicted);
         }
         w = {};
     }
@@ -1498,6 +1516,40 @@ static int PuppetIndexFor(uintptr_t actor) {
 
 #include "CloneNeutralInput.inl"
 #include "EnemyMirror.inl" // VUH-1515 step 2: mirrored enemies on clients (default off)
+
+// VUH-2912 stats marks (lead #76, StatsMark.hpp): with the hit trace on, the runner asks for the mirror's per-actor
+// stats line at a round's marks; the game thread logs it once per request. Reads and logs only.
+static HANDLE g_statsMarkMapping = nullptr;
+static statsmark::Channel* g_statsMark = nullptr;
+static long g_statsMarkSeen = 0;
+
+static void OpenStatsMarkChannel() {
+    wchar_t name[96];
+    swprintf_s(name, L"%s%lu", statsmark::kNamePrefix, GetCurrentProcessId());
+    g_statsMarkMapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+                                            sizeof(statsmark::Channel), name);
+    if (g_statsMarkMapping) {
+        g_statsMark = static_cast<statsmark::Channel*>(
+            MapViewOfFile(g_statsMarkMapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(statsmark::Channel)));
+    }
+    if (!g_statsMark) {
+        Log("  WARNING: stats mark channel creation failed (%lu)", GetLastError());
+        return;
+    }
+    g_statsMark->version = statsmark::kVersion;
+    g_statsMark->requested = g_statsMark->logged = 0;
+    InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_statsMark->magic), static_cast<LONG>(statsmark::kMagic));
+    Log("  Stats mark channel open (Local\\kh2coop_mark_%lu)", GetCurrentProcessId());
+}
+
+static void StatsMarkTick() noexcept {
+    if (!g_statsMark || !statsmark::Due(*g_statsMark, g_statsMarkSeen)) return;
+    const long requested = g_statsMark->requested;
+    g_statsMarkSeen = requested;
+    Log("[stats-mark] seq=%ld frame=%u", requested, g_frameCounter);
+    enemymirror::LogActorsNow();
+    InterlockedExchange(&g_statsMark->logged, requested);
+}
 #include "EnemyTargetRemote.inl" // VUH-1515: KH2COOP_ENEMY_TARGET_REMOTE, default off
 #include "ScriptMirror.inl" // VUH-2252: host script calls on mirrored enemies, on with the enemy mirror
 
@@ -3974,6 +4026,7 @@ static void __fastcall HookedPerEntityUpdate(void* actorObj) {
                 allyhit::Tick(g_frameCounter); // stats line (silent when off or unchanged)
                 ThornHitTraceTick();           // VUH-2617: default off
                 BossHitWitnessTick();          // VUH-2912: only with the hit trace on
+                StatsMarkTick();               // VUH-2912 (lead #76): only with the hit trace on
                 struggleorbs::NoteGameThread();
                 enemysync::OrbTick();          // VUH-2466: the friend shows the host's Struggle orbs
             }
@@ -4521,6 +4574,7 @@ bool Initialize(uintptr_t exeBase) {
     }
     nativehittrace::Configure(hitTrace || causalTrace, hitTraceVerified, hitTraceInstalled);
     if (hitTrace) {  // VUH-2912 witness: reactions, read only
+        OpenStatsMarkChannel();  // lead #76: the runner's per-mark stats requests
         if (std::memcmp(reinterpret_cast<const void*>(exeBase + RVA_APPLY_REACTION), kApplyReactionBytes,
                         sizeof(kApplyReactionBytes)) == 0) {
             void* target = reinterpret_cast<void*>(exeBase + RVA_APPLY_REACTION);

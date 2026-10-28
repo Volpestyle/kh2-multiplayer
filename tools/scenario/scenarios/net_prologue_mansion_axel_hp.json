@@ -278,6 +278,9 @@
    "message": "SETUP FAILURE (window), not a targeting result: friend_target's window opened without Axel's selection of the friend, settled boss HP and both seats standing"
   },
   {
+   "do": "stats_mark"
+  },
+  {
    "do": "fight",
    "instances": [
     1
@@ -306,6 +309,9 @@
      "background": true
     }
    ]
+  },
+  {
+   "do": "stats_mark"
   },
   {
    "do": "save",
@@ -444,6 +450,9 @@
    "message": "SETUP FAILURE (window), not a targeting result: host_target's window opened without Axel's selection of the host, settled boss HP and both seats standing"
   },
   {
+   "do": "stats_mark"
+  },
+  {
    "do": "fight",
    "instances": [
     0
@@ -472,6 +481,9 @@
      "background": true
     }
    ]
+  },
+  {
+   "do": "stats_mark"
   },
   {
    "do": "save",
@@ -509,6 +521,9 @@
    "expr": "[log_count('', 0), log_count('', 1)]"
   },
   {
+   "do": "stats_mark"
+  },
+  {
    "do": "save",
    "as": "il_base",
    "expr": "{'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0]}"
@@ -539,6 +554,9 @@
      "background": true
     }
    ]
+  },
+  {
+   "do": "stats_mark"
   },
   {
    "do": "save",
@@ -634,6 +652,9 @@
    "expr": "[log_count('', 0), log_count('', 1)]"
   },
   {
+   "do": "stats_mark"
+  },
+  {
    "do": "owner_downs",
    "owners": [
     1,
@@ -664,6 +685,9 @@
   },
   {
    "do": "clip_wait"
+  },
+  {
+   "do": "stats_mark"
   },
   {
    "do": "save",

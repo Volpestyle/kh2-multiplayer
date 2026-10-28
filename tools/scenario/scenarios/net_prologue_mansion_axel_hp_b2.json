@@ -172,6 +172,9 @@
    "expr": "[log_count('', 0), log_count('', 1)]"
   },
   {
+   "do": "stats_mark"
+  },
+  {
    "do": "owner_downs",
    "owners": [
     1,
@@ -199,6 +202,9 @@
     "distance": 500,
     "maxMs": 20000
    }
+  },
+  {
+   "do": "stats_mark"
   },
   {
    "do": "save",

@@ -278,6 +278,9 @@
    "message": "SETUP FAILURE (window), not a targeting result: host_target's window opened without Axel's selection of the host, settled boss HP and both seats standing"
   },
   {
+   "do": "stats_mark"
+  },
+  {
    "do": "fight",
    "instances": [
     0
@@ -306,6 +309,9 @@
      "background": true
     }
    ]
+  },
+  {
+   "do": "stats_mark"
   },
   {
    "do": "save",
