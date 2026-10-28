@@ -808,10 +808,12 @@ int main() {
         bool watched=true;
         duringCallback=[&] { watched=SmAxelThreadWatched();queue(); };
         (void)SmAxelComplete(Claim(),nullptr);duringCallback=nullptr;
-        check(!g_axel.fade.thread && !watched,"nor any from the host's own RC, whose 2/20 the hook never looks at");
+        check(!g_axel.fade.thread && watched && g_axel.nativeFades.size()==1 &&
+              g_axel.nativeFades.front().thread==kThread && g_axel.nativeFades.front().threadHandle==kThreadHandle,
+              "the host's own RC supplies native thread proof without adopting any Owner binding");
         Setup(1u<<R::kOvertakerGroup);Frame();reads=0;
         check(!SmAxelThreadWatched() && !SmAxelFadePending() && !SmAxelFade(Kind::WhiteOut,nullptr) && !reads,
-              "with nothing adopted and no friend callback running, the 2/20, fade and reset hooks read nothing");
+              "with no retained proof and no validated callback running, the 2/20, fade and reset hooks read nothing");
     }
     {
         // Every op-17 kind the custody path can build passes both of the real wire rules.

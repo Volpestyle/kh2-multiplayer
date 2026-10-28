@@ -91,7 +91,8 @@ def main():
     args = parser.parse_args()
     mains = [('read-sites', Path(__file__).with_name('AxelCameraReadProbe.inl').read_text()),
              ('cross-sequence', Path(__file__).with_name('AxelCameraSequenceProbe.inl').read_text()),
-             ('pending-sequence', Path(__file__).with_name('AxelCameraPendingSequenceProbe.inl').read_text())]
+             ('pending-sequence', Path(__file__).with_name('AxelCameraPendingSequenceProbe.inl').read_text()),
+             ('host-sequence', Path(__file__).with_name('AxelCameraHostSequenceProbe.inl').read_text())]
     if args.ione_r3:
         for name in ('identity-read-counterexamples', 'pending-retirement-counterexamples'):
             src = (args.ione_r3/(name+'.cpp')).read_text()

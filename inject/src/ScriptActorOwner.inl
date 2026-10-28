@@ -1216,7 +1216,7 @@ static void __fastcall SmOwnerCameraWatch(std::uint64_t* args) {
     if(SmGameThread()?SmAxelCameraWatch(SmCopyArgs(args,before,1)?before:nullptr):SmAxelCameraUnobserved())return;
     reinterpret_cast<TrapFn>(g_smAxelWatchSlot.original)(args);
 }
-// 2/20 always runs natively; afterwards, inside a friend's callback, SmAxelThreadStarted may adopt D303.
+// 2/20 always runs natively; inside a validated RC callback, retain its native or friend Owner D303 identity.
 static void __fastcall SmOwnerThreadStart(std::uint64_t* args) {
     std::uint64_t before[2]{},after[1]{};
     const bool watched=SmAxelThreadWatched();

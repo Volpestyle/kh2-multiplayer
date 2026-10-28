@@ -19,6 +19,7 @@ struct SmAxelState {
     int heldSent{-1};        // the friend role's last attachment record: -1 none, 0 detach, 1 attach
     R::AxelCameraCustody cameraCustody{}; // R::AxelCameraStepFor: whose this RC's camera sequence is
     bool inFriendCallback{}; // a friend's completion is running the native callback (SmAxelComplete)
+    bool inHostCallback{}; // a validated seat-0 completion is running its native callback; never Owner authority
     bool watchPending{};     // Burst's 1/207, waiting for the callback's end (SmAxelFlushWatch)
     R::AxelCameraStep watchStep{};
     std::uint64_t watchArgs[1]{};
@@ -508,8 +509,8 @@ static bool SmAxelVmSourceKnown(uintptr_t& actor) {
     if(!ReadHitTrace(g_exeBase+kSmAxelVm,vm))return false;
     return !vm || ReadHitTrace(vm+0x60,actor);
 }
-// Whether the 2/20 hook must look at this call: only inside a friend's callback. Nothing is read otherwise.
-static bool SmAxelThreadWatched() noexcept { return g_sm.hostActive && g_axel.inFriendCallback; }
+// Only validated RC callbacks supply thread provenance. Friend Owner admission stays separate from seat-0 proof.
+static bool SmAxelThreadWatched() noexcept { return g_sm.hostActive && (g_axel.inFriendCallback || g_axel.inHostCallback); }
 // D303's thread from its node: the node handle, the node's first word (the thread's handle, kept once read), then that
 // handle. False when a lookup could not be made; true with thread 0 when one answered that nothing is queued.
 static bool SmAxelNodeThread(std::uint32_t nodeHandle,std::uint32_t& threadHandle,uintptr_t& thread) {
@@ -530,8 +531,8 @@ static bool SmAxelThreadHasOwner(const R::AxelFadeCustody& native) {
     };
     return same(g_axel.fade) || std::any_of(g_axel.olderFades.begin(),g_axel.olderFades.end(),same);
 }
-// A refused first start also owns its D303. Preserve only positive native identity: an unread Host observation
-// cannot exempt a candidate from an older Owner binding. No role or retained Owner snapshot lends this authority.
+// A validated seat-0 callback, or a friend's refused first start, owns its native D303. Preserve only positive
+// identity: an unread observation cannot exempt a candidate from an older Owner binding. No Owner snapshot lends it.
 static void SmAxelRememberNativeThread(const std::uint64_t* before,const std::uint64_t* after) {
     if(!before || !after || !SmGameThread() || SmAxelCameraHost()!=SmAxelRead::Ours)return;
     if(R::BitsOf(before[0])!=R::kAxelWhiteOutThread || R::TagOf(after[0])!=R::kTagAddress)return;
@@ -549,7 +550,7 @@ static void SmAxelRememberNativeThread(const std::uint64_t* before,const std::ui
 static void SmAxelThreadStarted(const std::uint64_t* before,const std::uint64_t* after) {
     if(!SmAxelThreadWatched())return;
     SmAxelExpireCamera();
-    if(g_axel.cameraCustody==R::AxelCameraCustody::Host){SmAxelRememberNativeThread(before,after);return;}
+    if(g_axel.inHostCallback || g_axel.cameraCustody==R::AxelCameraCustody::Host){SmAxelRememberNativeThread(before,after);return;}
     const auto& c=g_axel.cameraOwner;
     const bool labelKnown=before!=nullptr;
     if(labelKnown && R::BitsOf(before[0])!=R::kAxelWhiteOutThread)return;
@@ -563,7 +564,7 @@ static void SmAxelThreadStarted(const std::uint64_t* before,const std::uint64_t*
     const auto nodeHandle=after && R::TagOf(after[0])==R::kTagAddress?R::BitsOf(after[0]):0u;
     const bool known=after && (!nodeHandle || SmAxelNodeThread(nodeHandle,threadHandle,thread));
     // Retained snapshots protect their own sequences; only this callback's Owner decision may adopt a new one.
-    if(!R::AxelFadeAdopted(true,g_axel.cameraCustody,true,R::kAxelWhiteOutThread,thread || !known))return;
+    if(!R::AxelFadeAdopted(g_axel.inFriendCallback,g_axel.cameraCustody,true,R::kAxelWhiteOutThread,thread || !known))return;
     // A new callback is not completion of an older D303. Keep its binding and original lease too.
     if(g_axel.fade.axel)g_axel.olderFades.push_back(g_axel.fade);
     g_axel.fade=c;auto& f=g_axel.fade;
@@ -829,8 +830,9 @@ static bool SmAxelComplete(const enemysync::ScriptReactionCompletionRecord& clai
         Log("[axel-rc] complete source=%u resource=%u occurrence=%llu command=%u owner=%u host-press=%u",
             claim.netId,claim.resource,claim.occurrence,command,claim.ownerSlot,nativeTarget?1u:0u);
     g_axel.inFriendCallback=claim.ownerSlot!=0;
+    g_axel.inHostCallback=claim.ownerSlot==0; // after window/scope/seat-actor validation, only for this callback
     g_smReactionCallback(receiver,player,command,nativeTarget?nativeTarget:fallback);
-    g_axel.inFriendCallback=false;
+    g_axel.inFriendCallback=false;g_axel.inHostCallback=false;
     SmAxelFlushWatch();
     return true;
 }

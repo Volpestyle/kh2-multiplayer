@@ -437,6 +437,10 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
       earlier candidate. The proof survives executor/role retirement, without borrowing their authority. An Owner
       binding of the same node/handle takes precedence. Native proofs retire on identified white-in with readable
       arguments or their original 600-frame lease; observing the same queued identity again cannot renew it.
+      A genuine seat-0 RC supplies native provenance too: only after `SmAxelComplete` validates its window,
+      scope, connection and seat actor, `inHostCallback` observes 2/20 for that callback's duration. It is separate
+      from `inFriendCallback`, which remains required for Owner adoption. An idle host executor or a refused
+      completion supplies no callback provenance. Neither callback flag bypasses the fade identity matcher.
       An unread scope, host handle or null role lookup at adoption cannot erase or replace current Owner authority.
     - **Three read outcomes** (Ione's `b318dd1b`, `7d1375e5`). Known-ours may deliver, known-not-ours stays native,
       and unread is withheld and dropped without clearing custody. This applies to the VM pointer and source,
