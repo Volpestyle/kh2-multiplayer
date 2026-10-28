@@ -7,6 +7,7 @@ import importlib.util
 import threading
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 from pathlib import Path
 
@@ -144,6 +145,67 @@ class OwnerDownsTest(unittest.TestCase):
         self.assertIn("no revive within 20000 ms", str(error))
         self.assertEqual(rig.kills, [])
         self.assertGreater(ctx.saved["owner_downs"]["killDeferred"], 0)
+
+    # Ione 9acdd2ef: killWhen's reads run within the step's budget, and the deadline holds before a Kill.
+    @staticmethod
+    def slow_rpc(rig, seconds, value):
+        """A predicate whose one kh2ctl read takes `seconds` unless rpc_deadline caps it sooner."""
+        def evaluate(text):
+            took = RUN.rpc_timeout(seconds)
+            rig.t = round(rig.t + took, 2)
+            if took < seconds:
+                raise RUN.subprocess.TimeoutExpired("entities", took)
+            return value
+        return evaluate
+
+    def test_a_slow_true_predicate_is_capped_to_the_step_budget(self):
+        rig = Rig()
+        _, _, error = rig.run(evaluate=self.slow_rpc(rig, 30.0, True), killWhen="slow", timeoutMs=20000)
+        self.assertIn("no revive within 20000 ms", str(error))
+        self.assertEqual(rig.kills, [])  # uncapped, it returned True at 31.5 s and Killed seat 1
+        self.assertLessEqual(rig.t, 20.5)
+
+    def test_a_slow_false_predicate_is_capped_to_the_step_budget(self):
+        rig = Rig()
+        _, _, error = rig.run(evaluate=self.slow_rpc(rig, 30.0, False), killWhen="slow", timeoutMs=20000)
+        self.assertIn("no revive within 20000 ms", str(error))
+        self.assertEqual(rig.kills, [])
+        self.assertLessEqual(rig.t, 20.5)
+
+    def test_a_true_predicate_that_ends_past_the_deadline_issues_no_kill(self):
+        rig = Rig()
+        def late(text):
+            rig.t = round(rig.t + 25.0, 2)  # a read the cap does not cover
+            return True
+        _, _, error = rig.run(evaluate=late, killWhen="late", timeoutMs=20000)
+        self.assertIn("no revive within 20000 ms", str(error))
+        self.assertEqual(rig.kills, [])
+
+    def test_a_fast_predicate_inside_the_budget_still_kills(self):
+        rig = Rig()
+        result, _, error = rig.run(evaluate=self.slow_rpc(rig, 0.5, True), killWhen="fast", timeoutMs=60000)
+        self.assertIsNone(error)
+        self.assertEqual([seat for _, seat in rig.kills], [1, 0])
+
+    def test_rpc_deadline_caps_kh2ctl_and_nests_only_tighter(self):
+        clock = [0.0]
+        now = lambda: clock[0]
+        self.assertEqual(RUN.rpc_timeout(120), 120)  # no deadline: unchanged
+        with RUN.rpc_deadline(10.0, now):
+            self.assertEqual(RUN.rpc_timeout(120), 10.0)
+            with RUN.rpc_deadline(50.0, now):  # a looser inner deadline cannot extend it
+                self.assertEqual(RUN.rpc_timeout(120), 10.0)
+            with RUN.rpc_deadline(4.0, now):
+                self.assertEqual(RUN.rpc_timeout(120), 4.0)
+            seen = {}
+            with mock.patch.object(RUN.subprocess, "run", lambda cmd, **kw: seen.update(kw) or
+                                   SimpleNamespace(stdout='{"ok": true}', stderr="")):
+                RUN.kh2ctl("entities", pid=1)
+            self.assertEqual(seen["timeout"], 10.0)
+            clock[0] = 10.0
+            with self.assertRaises(RUN.subprocess.TimeoutExpired):
+                RUN.rpc_timeout(120)
+        self.assertEqual(RUN.rpc_timeout(120), 120)
 
     def test_without_kill_when_nothing_is_deferred(self):
         rig = Rig()

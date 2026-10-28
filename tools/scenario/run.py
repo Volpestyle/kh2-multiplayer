@@ -70,11 +70,44 @@ class InstanceDied(Exception):
 # kh2ctl
 # --------------------------------------------------------------------------
 
+_rpc = threading.local()  # this thread's kh2ctl deadline (rpc_deadline)
+
+
+class rpc_deadline:
+    """Within this block, every kh2ctl call on this thread ends by `deadline` on `clock` (time.monotonic by
+    default): its timeout is capped to the time left, and none is left raises subprocess.TimeoutExpired at once.
+    A nested block can only shorten it (VUH-2931: owner_downs' killWhen reads within the step's budget)."""
+
+    def __init__(self, deadline: float, clock=time.monotonic) -> None:
+        self.deadline, self.clock = deadline, clock
+
+    def __enter__(self) -> "rpc_deadline":
+        self.previous = getattr(_rpc, "limit", None)
+        tighter = self.previous is None or self.deadline - self.clock() < self.previous[0] - self.previous[1]()
+        _rpc.limit = (self.deadline, self.clock) if tighter else self.previous
+        return self
+
+    def __exit__(self, *exc) -> None:
+        _rpc.limit = self.previous
+
+
+def rpc_timeout(timeout: float, what: object = "kh2ctl") -> float:
+    """`timeout` capped by this thread's rpc_deadline, if any."""
+    limit = getattr(_rpc, "limit", None)
+    if limit is None:
+        return timeout
+    left = limit[0] - limit[1]()
+    if left <= 0:
+        raise subprocess.TimeoutExpired(what, 0)
+    return min(timeout, left)
+
+
 def kh2ctl(*args: str, pid: int | None = None, check: bool = True, timeout: float = 120,
            env: dict | None = None) -> dict:
     cmd = [str(KH2CTL), *map(str, args)]
     if pid is not None:
         cmd += ["--pid", str(pid)]
+    timeout = rpc_timeout(timeout, cmd)
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                           env=dict(os.environ, **env) if env else None,
                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -1893,8 +1926,9 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     clip (`clipSeconds`, 12) when none is running. Both seats must be standing when the step starts.
     `killWhen` (VUH-2931, run vuh2931-sora-01: the Kill landed while Axel was combo-hitting the reviver, which fell
     before reviving) is an expression that must also be true before each forced Kill; an expression that cannot be
-    evaluated yet (a load between samples) is false. It only defers a Kill: natural downs count as before, and
-    `timeoutMs` still bounds the step. Saved `as` (`owner_downs`): per owner {kind, seat}, the downing events, both
+    evaluated yet (a load between samples) is false. Its kh2ctl reads are capped to the step's remaining
+    `timeoutMs` (rpc_deadline), and the deadline is checked again before a Kill. It only defers a Kill: natural
+    downs count as before, and `timeoutMs` still bounds the step. Saved `as` (`owner_downs`): per owner {kind, seat}, the downing events, both
     guards' events and how many polls `killWhen` deferred a due Kill."""
     owners = [int(o) for o in step.get("owners", [1, 0])]
     name = step.get("as", "owner_downs")
@@ -1920,8 +1954,9 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
 
     def evaluate_when() -> bool:
         try:
-            return bool(ctx.eval(when_expr))
-        except Exception:  # a load or menu between samples
+            with rpc_deadline(deadline, now):  # its reads end within the step's budget
+                return bool(ctx.eval(when_expr))
+        except Exception:  # a load or menu between samples, or no budget left
             return False
 
     ready = _when or (evaluate_when if when_expr else (lambda: True))
@@ -1960,7 +1995,7 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
             due = not down_now and not open_forced and pending and now() - last_revive >= step.get("gapMs", 1500) / 1000
             if due and not ready():
                 deferred += 1
-            elif due:
+            elif due and now() < deadline:  # killWhen may have spent the rest of the budget
                 o = pending[0]
                 result = kill(o)
                 events.append({"seat": o, "kill": result, "atS": round(now() - start, 1)})
