@@ -359,6 +359,23 @@ class AxelHpSplitTest(unittest.TestCase):
         self.assertEqual(order, sorted(order))  # the ledger judges the closed downs window and pins the boss first
         self.assertEqual(self.named(b2, "owner_downs"), self.named(FULL, "owner_downs"))
 
+    # vuh2912-hp-07: owner_downs passed in 8.6 s, then its 42 s clip_wait left both seats idle with the guards off and
+    # Axel took the party to a game over before m_downs1. B2 now closes and judges its window right after owner_downs,
+    # and collects the clips and stills only after the verdict, as the single-round splits do.
+    def test_b2_judges_right_after_owner_downs_and_collects_after_the_verdict(self):
+        b2 = SPLIT["b2"]
+        at = lambda name: b2.index(self.named(b2, name))  # noqa: E731
+        downs, verdict = at("owner_downs"), at("verdict")
+        self.assertEqual(b2[downs + 1].get("as"), "m_downs1")
+        between = b2[downs + 1:verdict]
+        self.assertFalse([s for s in between if s["do"] in ("wait_until", "clip_wait", "capture", "revive_guard")])
+        self.assertEqual([s["do"] for s in between],
+                         ["save", "assert", "save", "wait", "save", "hp_ledger", "assert", "assert", "assert",
+                          "target_ledger", "assert"])
+        self.assertEqual([s["do"] for s in b2[verdict + 1:]], ["clip_wait", "capture", "capture"])
+        self.assertNotIn("require", b2[verdict + 1])  # owner_downs' films are diagnostics
+        assert_background_films(self, b2)
+
     def test_every_other_split_step_is_the_full_fixtures_own(self):
         for key, steps in SPLIT.items():
             with self.subTest(key):
@@ -366,7 +383,7 @@ class AxelHpSplitTest(unittest.TestCase):
                 self.assertTrue(all(s in FULL for s in others), [s for s in others if s not in FULL][:2])
                 self.assertEqual([s for s in steps if s["do"] == "boot"], [s for s in FULL if s["do"] == "boot"])
                 self.assertEqual(self.named(steps, "verdict"), FULL[-1])  # the coop verdict
-                if key not in SINGLE:
+                if key not in SINGLE and key != "b2":
                     self.assertEqual(steps[-1], FULL[-1])
 
 
