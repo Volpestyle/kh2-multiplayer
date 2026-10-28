@@ -64,6 +64,23 @@ as historical evidence. The final no-game FileIO qualification passed, but its
 old live wrapper binds bots04/exact35 and that baseline. Bots05 uses the full
 install detector above; no old wrapper or old movie baseline is reused.
 
+For protected-save closure, compare the actual files against both a nonempty
+JSON baseline (`[{"path": absolute_path, "sha256": lowercase_hash}, ...]`) and
+the retained pre-run copies, preserving their paths relative to the save root:
+
+```powershell
+python -B tools/rig/save_manifest.py --baseline "$evidence/saves-before.json" --save-root $saveRoot --copies "$evidence/saves-readonly-copy" > "$evidence/save-check.json"
+if ($LASTEXITCODE -ne 0) { throw 'STOP: protected-save comparison failed' }
+```
+
+The checker requires exact hashes, byte-identical copies and the same file set.
+It handles one or several records; an empty or wrapped baseline fails. Do not
+compare a root JSON array through PowerShell's `@( ... | ConvertFrom-Json )`:
+Windows PowerShell 5 can retain it as one nested array, giving misleading counts
+and comparisons. VUH-2808 trace01 falsely flagged four unchanged saves this way;
+the independent byte comparison proved 4/4 unchanged. Keep the original failed
+receipt alongside the recheck; never restore saves to repair a checker failure.
+
 ## Combat pilot: Reversals, Thorn's danger bands, openings and keep-away (VUH-2617)
 
 **Evidence.**
