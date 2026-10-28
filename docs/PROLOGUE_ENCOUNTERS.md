@@ -237,6 +237,9 @@ Day 5 Sandlot fights, FM-01 with a host warp (2026-10-21 UTC, PC1 loopback, VUH-
   or one friend claim applied on the host. The friend's puppet hits must zero on the host, its own
   hits must leave its copy alone, its copy's brain must stay skipped, and both seats must settle on the
   host's HP.
+- Axel's reaction commands (Overtaker, Clear Light, Burst Frontier) exist only in Axel II; Axel I offers
+  none. The static inventory of their offers, motions, cameras and release paths is
+  `docs/AXEL_REACTIONS.md` (VUH-2913).
 - On PC1's Critical saves (22-HP Roxas, 6-damage Axel hits), every solo round ended in a native game
   over within about 10 s, whichever bot or revive aid ran. So the scenario judges one round with both
   seats fighting, and the solo phases come from separate shakedowns:
