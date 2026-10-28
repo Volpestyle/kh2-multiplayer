@@ -538,8 +538,11 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
     downing = [
         # A downed seat is no candidate: one down and partner revive per owner, bracketed for the target ledger.
         marks("m_downs0"),
+        # vuh2912-hp-08 (lead #72): Axel hit the reviver 14 times in 26 s and broke every hold. Each forced down waits,
+        # at most 20 s and labelled, until Axel is 500 units from both seats: just over the 90th percentile (479) of how
+        # far he travelled in the second before each of his 96 hits on a seat in hp-05, hp-07 and hp-08 (max 591).
         {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000,
-         "aside": AXEL_ARENA},
+         "aside": AXEL_ARENA, "clearOf": {"distance": 500, "maxMs": 20000}},
         *([] if downs_only else [{"do": "clip_wait"}]),
         marks("m_downs1"),
         {"do": "assert", "expr": "all(saved['owner_downs']['owners'][k] for k in ('0', '1'))",

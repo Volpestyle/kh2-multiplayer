@@ -24,7 +24,7 @@ class Rig:
     """Log counts per seat; `script` maps a simulated second to callbacks; a Kill downs its seat (Ok) and the
     other seat's guard revives it `revive` seconds later unless that seat is down too."""
 
-    def __init__(self, script=None, revive=3.0, kill_result="Ok"):
+    def __init__(self, script=None, revive=3.0, kill_result="Ok", clearance=None):
         self.t, self.counts, self.script = 0.0, {(i, n): 0 for i in (0, 1) for n in (DOWN, UP, FULL)}, dict(script or {})
         self.revive, self.kill_result, self.kills, self.clips, self.guards = revive, kill_result, [], [], []
         self.pending = []  # (time, seat) revives
