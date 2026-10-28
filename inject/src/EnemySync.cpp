@@ -7729,6 +7729,20 @@ std::uint16_t HostEnemyNetId(uintptr_t actor, std::uint32_t objectId) noexcept {
     return static_cast<std::uint16_t>(spawn.spawnIndex + 1);
 }
 
+uintptr_t HostLiveEnemyActor(std::uint32_t objectId, std::uint16_t& netId) noexcept {
+    netId = 0;
+    if (CurrentRole() != Role::Host || g_epoch == 0 || g_hostBeginPending) return 0;
+    uintptr_t actor = 0;
+    for (const Spawn& spawn : g_inst.spawns) {
+        if (spawn.objectId != objectId || !spawn.present || !spawn.announced || spawn.deathSent ||
+            spawn.lifecycleRetired || !spawn.actor || spawn.spawnIndex + 1 > 0xFFFF) continue;
+        if (actor) { netId = 0; return 0; }
+        actor = spawn.actor;
+        netId = static_cast<std::uint16_t>(spawn.spawnIndex + 1);
+    }
+    return actor;
+}
+
 bool HostEnemyLive(std::uint16_t netId, std::uint32_t objectId) noexcept {
     if (CurrentRole() != Role::Host || g_epoch == 0 || g_hostBeginPending || !netId) return false;
     return std::any_of(g_inst.spawns.begin(), g_inst.spawns.end(), [&](const Spawn& spawn) {

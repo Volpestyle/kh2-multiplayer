@@ -1051,7 +1051,10 @@ static void __fastcall SmOwnerPlayer(std::uint64_t* args) {
     enemysync::DownedScope scope;
     if(!source || !SmOwnerScope(scope))return;
     auto* role=SmOwnerRoleForSource(source);
-    const auto slot=role && SmOwnerCurrent(*role,scope)?role->slot:SmOwnerNearest(source,scope);
+    // VUH-2913: inside Axel II's RC flow, the seat that ran it, not the nearest one.
+    const int axel=SmAxelExecutorSlot(source);
+    const auto slot=R::AxelPlayerSlot(axel>=0,static_cast<std::uint8_t>(axel),
+        role && SmOwnerCurrent(*role,scope)?role->slot:SmOwnerNearest(source,scope));
     const auto actor=slot>=0 && slot<3?SmOwnerSeatActor(static_cast<std::uint8_t>(slot)):0;
     const auto handle=SmOwnHandle(actor);
     if(handle)args[0]=R::Tagged(R::kTagAddress,handle);
@@ -1063,7 +1066,7 @@ static void __fastcall SmOwnerHook(std::uint64_t* args) {
     const auto actor=source && SmOwnerScope(scope)?SmActorOf(args[0],ignored):0;
     const auto slot=SmOwnerActorSeat(actor);
     reinterpret_cast<TrapFn>(g_smOwnerTraps[1].original)(args); // VM context remains native
-    if(!source || !actor || slot<0 || slot>=3 || g_smRoleSequence==0x7FFFFFFFu)return;
+    if(!source || !actor || slot<0 || slot>=3 || g_smRoleSequence>=R::kOwnerRoleSequenceCap)return;
     // VUH-2611: every hook of this seat consumes its pending capture, adopted below or not.
     const auto pending=g_smPendingCapture[static_cast<unsigned>(slot)];g_smPendingCapture[static_cast<unsigned>(slot)]={};
     uintptr_t thread=0,vmSource=0;

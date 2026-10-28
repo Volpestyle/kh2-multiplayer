@@ -84,6 +84,7 @@ static void SmTickReactions();
 static int SmApplyReactionOffer(const R::Call&,uintptr_t);
 static int SmApplyReactionOwner(const R::Call&,uintptr_t);
 static bool SmCompleteReaction(const enemysync::ScriptReactionCompletionRecord&);
+static int SmAxelExecutorSlot(uintptr_t);
 static bool SmSetReactionCommand(const ReactionBinding&,std::uint32_t) noexcept;
 static bool SmOwnerInstall();
 static std::uint16_t SmNativeReactionCurrent(std::uint16_t) noexcept;
@@ -809,6 +810,7 @@ static const char* SmRcConsumeReason(const R::ReactionWindow& w,const R::Reactio
 }
 
 #include "ScriptActorOwner.inl"
+#include "AxelReactions.inl"
 
 static bool SmAttackVector(uintptr_t attack, const std::uint64_t* values) noexcept {
     __try {
@@ -1084,6 +1086,7 @@ static bool SmRcObservedSource(const SmRcProof& observed,std::uint32_t handle) n
 static bool SmRcKnownSource(std::uint32_t handle) noexcept {
     if(!handle)return false;
     if(SmRcObservedSource(g_smRcOwnedSource,handle) || SmRcObservedSource(g_smRcAccepted,handle))return true;
+    if(SmAxelKnownSource(handle))return true;
     for(const auto& binding:g_sm.reactions)if(binding.resource && SmOwnHandle(binding.owner)==handle &&
         SmRcSourceCurrent(binding.owner,binding.netId,binding.objectId))return true;
     for(const auto& role:g_smRoles)if(role.resource && role.sourceHandle==handle &&
@@ -1122,7 +1125,8 @@ static bool SmRcProofNow(uintptr_t controller,std::uint16_t command,
     id.load=warp::LoadSerial();id.transition=warp::TransitionSerial();id.actorHandle=SmOwnHandle(g_soraActor);
     uintptr_t playerStatus=0,playerEntry=0,source=0,sourceStatus=0,sourceEntry=0,native=0;
     if(!SmRcRoots(localActor,playerStatus,playerEntry))return false;
-    if(target[2]) {
+    if(target[2] && SmAxelProof(command,target,scope,connection,source,native,id)) {
+    } else if(target[2]) {
         const ReactionBinding* selected=nullptr;
         for(const auto& binding:g_sm.reactions) {
             if(!binding.resource || binding.handle!=target[2] || SmOwnHandle(binding.owner)!=target[0])continue;
@@ -1443,6 +1447,7 @@ static bool SmSetReactionCommand(const ReactionBinding& binding,std::uint32_t co
 static void SmTickReactions() {
     enemysync::DownedScope scope;
     if(!enemysync::CaptureDownedScope(scope))return;
+    SmAxelFrame(scope);
     const auto seats=SmReactionSeats(scope);
     const auto role=enemysync::ActivationRole();
     for(auto& binding:g_sm.reactions) {
@@ -1494,6 +1499,7 @@ static void SmTickReactions() {
     }
 }
 static int SmApplyReactionOwner(const R::Call& c,uintptr_t actor) {
+    if(std::uint16_t command=0;R::AxelResourceFor(c.effect,c.objectId,command))return SmAxelApplyIdentity(c,command,actor)?1:0;
     if(c.effect&0x80000000u)return SmOwnerReactionIdentity(c)?1:0;
     enemysync::DownedScope scope;
     const auto* pair=g_sm.clientAttacks.Find(c.effect);
@@ -1518,6 +1524,7 @@ static int SmApplyReactionOwner(const R::Call& c,uintptr_t actor) {
     return 1;
 }
 static int SmApplyReactionOffer(const R::Call& c,uintptr_t actor) {
+    if(std::uint16_t command=0;R::AxelResourceFor(c.effect,c.objectId,command))return SmAxelApplyOffer(c,command,actor)?1:0;
     if(c.effect&0x80000000u)return SmOwnerReactionOffer(c)?1:0;
     enemysync::DownedScope scope;
     if(!enemysync::CaptureDownedScope(scope))return 0;
@@ -1535,6 +1542,8 @@ static int SmApplyReactionOffer(const R::Call& c,uintptr_t actor) {
     return 0;
 }
 static bool SmCompleteReaction(const enemysync::ScriptReactionCompletionRecord& completion) {
+    if(std::uint16_t command=0;R::AxelResourceFor(completion.resource,completion.objectId,command))
+        return SmAxelComplete(completion,nullptr);
     if(completion.resource&0x80000000u)return SmOwnerCompleteReaction(completion);
     auto trace=SmRcClaim(completion);trace.facts|=D::Native;trace.frame=g_frameCounter;
     trace.load=g_sm.load;trace.transition=g_sm.transition;
@@ -1598,6 +1607,7 @@ static void __fastcall SmReactionCallback(uintptr_t receiver,uintptr_t player,st
         return;
     }
     if(!attackHandle && SmOwnerReactionCallback(receiver,player,command,&acceptedTrace))return;
+    if(attackHandle && SmAxelReactionCallback(receiver,player,command,target))return; // VUH-2913
     for(auto& binding:g_sm.reactions) {
         if(binding.handle!=attackHandle || !binding.resource)continue;
         auto trace=D::Claim(binding.epoch,binding.resource,binding.objectId,binding.netId,command,binding.slot,binding.connection,binding.occurrence);

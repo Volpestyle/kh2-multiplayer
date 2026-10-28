@@ -221,3 +221,53 @@ Trap coverage the build adds:
 - ScriptActorOwner's traps today are 1/3, 1/112, 1/29, 1/157, 1/18, 1/102, 1/14 and 1/238.
 - Axel adds 1/164 (`camera_start_global`, which tail-jumps to the same `3DB2F0` as `obj_camera_start`), 1/207
   (`camera_watch`), 1/295 (`camera_reset`) and the screen white-out thread (2/20, then 0/31 and 0/32).
+
+## Owner routing (slice 1)
+
+Rules: `inject/src/AxelReaction.hpp`. Runtime: `inject/src/AxelReactions.inl`. Tests: `tests/AxelReactionTest.cpp`.
+
+**How an offer gets its owner:**
+- **Host mint.** While host Axel II is live in 02/14 btl137 (and only then), the host reads his collision masks
+  through the `3BA550` rule each frame. For each family:
+  - Overtaker (group 20) and Burst Frontier (group 23 or 24) are owned by the living seat inside the family's
+    spheres that is nearest Axel, using Axel's yaw.
+  - Clear Light is owned by the current Overtaker's seat, while that seat's actor on the host has `+0x638 == 490`
+    and `+0x18C` bit 21.
+- **One window per activation.** It keeps its owner while the offer is up, is consumed at most once, and only the
+  next activation opens a new occurrence.
+- **Wire.** Windows travel as reaction identity and offer records, with resource `0xFFFF0000|command` on Axel's
+  netId. Owner roles stop minting below that band.
+
+**Prompt and press:**
+- Axel II is a host-routed class, so on both seats the existing native RC cache (refresh `408520`, winner
+  `408BD0`, accept `3B22D0`) treats his offers as known.
+- A prompt shows, and native acceptance proceeds, only with a family-3 proof: this seat's live window for that
+  command, on the Axel actor the native target names (`{Axel, 0, collision object, -1}`, built by `3BEE00`).
+- **Host press.** `SmReactionCallback` gives every Axel II callback to the Axel path. It executes only on a seat-0
+  window, so a host press against a seat-1 window is refused and logged, and never runs with the host's Roxas.
+- **Friend press.** On its own window it consumes locally and sends the completion claim. The host consumes that
+  occurrence once and runs the callback with the friend's actor on the host.
+
+**sysobj_player (1/3):** inside Axel's script, 1/3 resolves to the executing seat while that executor is current,
+instead of the nearest seat. So `rc_run_up`, `rc_clear_light` and `idle_after_rc` attach to and wait on the seat
+that pressed. The executor ends at its 1200-frame lease, or once Axel's attachment to that actor and its capture
+by Axel have both been seen and are both gone.
+
+**Logs:** `[axel-rc] offer`, `offer end`, `client offer`, `local completion`, `complete`, `complete refused`,
+`press refused`, `executor engaged` and `executor end`, 256 lines per session.
+
+**Known limits after slice 1:**
+- **Prompt gating is by proof, not by native suppression code.**
+  - A seat without a live host window has its Axel prompt hidden by the existing cache gate. This holds for the
+    friend, and for the host while the friend owns the offer.
+  - One exception: while the canonical controller does not qualify (`SmRcController`), the query returns the raw
+    command, so the prompt shows. Its press is then refused at native acceptance, so it does nothing.
+  - The owner rule is geometric. The yaw transform (local −z forward) and the 100-unit seat tolerance are
+    unverified live. A seat the native picker would offer, but the host's geometry does not, sees no prompt.
+  - Prompt suppression stays tracked for the C or D slice, together with that live check. VUH-2913 is not done
+    while either seat can see a prompt that does nothing.
+- **Clear Light for a friend owner needs D.** The friend's own player is not yet captured into `AP12` locally, so
+  its native picker cannot meet `Require 490`. The host's chain also reads the friend's actor's trigger bits on
+  the host. Whether that actor runs AP12's motion triggers there is unverified.
+- **The friend's view of a friend-owned RC is D's.** The clone's capture, attachment, cameras and fades, and
+  Axel's pose while parented (EnemySync skips parented actors), are not replayed yet.

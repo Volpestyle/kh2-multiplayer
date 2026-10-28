@@ -115,7 +115,7 @@ struct NativeReactionIdentity {
     std::uint64_t occurrence{},incarnation{},connection{};
     std::uint32_t resource{},epoch{},load{},transition{},actorHandle{},objectId{},mode{};
     std::uint16_t source{},command{};
-    std::uint8_t slot{0xFF},family{}; // 1 attack, 2 actor command
+    std::uint8_t slot{0xFF},family{}; // 1 attack, 2 actor command, 3 Axel II window (AxelReaction.hpp)
     bool operator==(const NativeReactionIdentity&) const noexcept = default;
 };
 inline bool NativeReactionIdentityValid(const NativeReactionIdentity& id) noexcept {
@@ -123,7 +123,7 @@ inline bool NativeReactionIdentityValid(const NativeReactionIdentity& id) noexce
        !id.source || !id.command || id.slot>=3 || !id.actorHandle || !id.objectId ||
        !id.target[0] || id.target[1] || id.target[3]!=UINT32_MAX)return false;
     for(unsigned i=0;i<7;++i)if(!id.roots[i])return false;
-    return id.family==1 ? id.target[2] && id.roots[7] && !id.mode :
+    return id.family==1 || id.family==3 ? id.target[2] && id.roots[7] && !id.mode :
         id.family==2 && !id.target[2] && ValidOwnerCommandMode(id.mode);
 }
 struct NativeReactionReceipt {
@@ -202,11 +202,11 @@ inline std::uint16_t NativeReactionCommand(std::uint16_t raw,bool knownMirror,bo
 }
 // VUH-2620: whose native command waits for a host occurrence. An actor the host routes reactions for
 // (a reaction binding, a script-owner role or its cleanup) always does; a mirrored copy only when its
-// class's reactions are host-routed, which today is Twilight Thorn's script. Any other mirrored enemy's
-// command (a Dusk's Reversal 69, command 32) belongs to the seat that sees it and runs natively there,
-// as it did before the Thorn routing.
+// class's reactions are host-routed: Twilight Thorn's script, and Axel II's collision-offered commands
+// (VUH-2913, AxelReaction.hpp). Any other mirrored enemy's command (a Dusk's Reversal 69, command 32)
+// belongs to the seat that sees it and runs natively there, as it did before the Thorn routing.
 inline bool HostRoutedReactionClass(std::uint32_t objectId) noexcept {
-    return objectId==kh2coop::enemyclass::TwilightThorn;
+    return objectId==kh2coop::enemyclass::TwilightThorn || objectId==kh2coop::enemyclass::AxelII;
 }
 inline bool KnownReactionSource(bool hostRouted,bool mirroredCopy,std::uint32_t objectId) noexcept {
     return hostRouted || (mirroredCopy && HostRoutedReactionClass(objectId));

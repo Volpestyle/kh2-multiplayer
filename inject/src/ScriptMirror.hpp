@@ -27,6 +27,7 @@
 #include "kh2coop/ScriptActorBirth.hpp"
 #include "ScriptMirrorPins.hpp"
 #include "ScriptReaction.hpp"
+#include "AxelReaction.hpp"
 
 namespace kh2coop::inject::scriptmirror::rules {
 

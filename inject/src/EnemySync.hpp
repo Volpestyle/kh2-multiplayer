@@ -341,6 +341,9 @@ std::uint8_t SessionNativeDifficulty() noexcept;
 std::uint16_t HostEnemyNetId(uintptr_t actor, std::uint32_t objectId) noexcept;
 // Host: that announced spawn netId is still present and has neither died nor retired (VUH-2605 birth parent).
 bool HostEnemyLive(std::uint16_t netId, std::uint32_t objectId) noexcept;
+// Host: the one present, announced, living spawn of this object id (VUH-2913 Axel II); 0 when there is none
+// or more than one.
+uintptr_t HostLiveEnemyActor(std::uint32_t objectId, std::uint16_t& netId) noexcept;
 // Host: sends one RemoteHit for the owner of a hit clone through the captured-context ring.
 bool SendRemoteHit(std::uint8_t targetSlot, std::uint16_t netId, std::uint32_t objectId, std::uint32_t attackId,
                    std::int32_t damage, std::uint64_t& seqOut);
