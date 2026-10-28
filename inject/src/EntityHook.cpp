@@ -1132,9 +1132,11 @@ static void BossHitWitnessTick() noexcept {
             // Lead #76: 0x3D6FC0's calls while this witness was pending, on any actor (callsAll) and on the victim
             // (calls, with a request, applied), -1 unless callIdentity=ok and the victim is still the canonical
             // player; and the victim's reaction applied in hitFrame before the witness armed (preArm found, with its
-            // kind and request; none; or unavailable). ReactionCalls.hpp has the identity limits.
+            // kind and request; none; or unavailable). ReactionCalls.hpp has the identity limits. The final bookend
+            // (Ione e33b049c): the victim's objentry now must still be the armed one, or the counts are -1.
+            reactioncalls::Close(w.calls, same, same ? ReactionIdentity(w.victim) : 0);
             const auto& c = w.calls;
-            const bool counted = same && reactioncalls::Available(c);
+            const bool counted = reactioncalls::Available(c);
             const auto victimCount = [&](std::uint32_t v) { return counted ? static_cast<long long>(v) : -1LL; };
             static const char* const identityNames[] = {"ok", "unread", "changed"};
             static const char* const lookbackNames[] = {"none", "found", "unavailable"};
