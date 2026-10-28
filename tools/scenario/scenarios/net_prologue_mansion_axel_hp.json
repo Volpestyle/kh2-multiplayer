@@ -534,21 +534,21 @@
     0,
     1
    ],
-   "seconds": 10,
+   "seconds": 20,
    "reach": 120,
    "as": "interleaved",
    "until": "len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)) > saved['il_base']['claims'] and ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0] < saved['il_base']['bossHp'] - sum(int(r['b']) - int(r['a']) for r in log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*beforeHp=(?P<b>\\d+) afterHp=(?P<a>\\d+) nativeOk=1', 0)[saved['il_base']['claims']:])",
    "clips": [
     {
      "instance": 0,
-     "seconds": 12,
+     "seconds": 22,
      "fps": 30,
      "name": "interleaved_host",
      "background": true
     },
     {
      "instance": 1,
-     "seconds": 12,
+     "seconds": 22,
      "fps": 30,
      "name": "interleaved_friend",
      "background": true

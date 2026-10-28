@@ -519,11 +519,13 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
             STATS_MARK,
             {"do": "save", "as": "il_base", "expr": f"{{'claims': {host_claims()}, 'bossHp': {boss_hp(0)}}}"},
             # Both fight until a friend claim and a host native hit (an HP drop beyond the claims) both landed. The
-            # clips run in the background, as the target rounds' (vuh2912-hp-06).
-            {"do": "fight", "instances": [0, 1], "seconds": 10, "reach": 120, "as": "interleaved",
+            # clips run in the background, as the target rounds' (vuh2912-hp-06). vuh2912-hp-10 (lead #84): in 10 s the
+            # host pressed 3 times and landed nothing. Axel's full-screen fire filled about 2 s of it and he spent most
+            # of the rest at the friend's side, so the window is 20 s, still ending at the first of both hits.
+            {"do": "fight", "instances": [0, 1], "seconds": 20, "reach": 120, "as": "interleaved",
              "until": f"{host_claims()} > saved['il_base']['claims'] and {boss_hp(0)} < saved['il_base']['bossHp'] - {claim_drop}",
-             "clips": [{"instance": 0, "seconds": 12, "fps": 30, "name": "interleaved_host", "background": True},
-                       {"instance": 1, "seconds": 12, "fps": 30, "name": "interleaved_friend", "background": True}]},
+             "clips": [{"instance": 0, "seconds": 22, "fps": 30, "name": "interleaved_host", "background": True},
+                       {"instance": 1, "seconds": 22, "fps": 30, "name": "interleaved_friend", "background": True}]},
             STATS_MARK,
             marks("m_interleaved1"),
             *([] if single else [{"do": "clip_wait", "require": True}]),

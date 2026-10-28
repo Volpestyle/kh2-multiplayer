@@ -391,6 +391,17 @@ class AxelHpSplitTest(unittest.TestCase):
     # Lead #76 (vuh2912-hp-09): the round lasted 3.8 s, under the mirror's 300-frame stats interval, so the HP ledger's
     # one-brain check found no sample in its window. Every window now asks both seats for the stats line just inside
     # its marks: after the start mark (and its opening assert) and right before the end mark.
+    # Lead #84 (vuh2912-hp-10): the host landed nothing in a 10 s interleaved window. It is 20 s, still ending at the
+    # first of both hits, and each seat's background clip covers it.
+    def test_the_interleaved_window_is_20_s_and_its_clips_cover_it(self):
+        for key, steps in (("full", FULL), ("b1_inter", SPLIT["b1_inter"])):
+            with self.subTest(key):
+                fight = self.named(steps, "interleaved")
+                self.assertEqual((fight["seconds"], fight["reach"]), (20, 120))
+                self.assertIn("until", fight)
+                self.assertEqual(len(fight["clips"]), 2)
+                self.assertTrue(all(c["seconds"] >= fight["seconds"] for c in fight["clips"]))
+
     def test_every_window_holds_a_stats_mark_just_inside_each_end(self):
         for key, steps in [("full", FULL), *SPLIT.items()]:
             names = [s["as"][:-1] for s in steps if s["do"] == "save" and s.get("as", "").startswith("m_")
