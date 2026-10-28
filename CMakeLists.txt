@@ -797,7 +797,8 @@ if(MSVC)
 else()
     target_compile_options(kh2coop_axel_reaction_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
-# The adapter (AxelReactions.inl) against simulated native memory: completion, 1/3 and the safe abort at 1/18 and 1/29.
+# The adapter (AxelReactions.inl) against simulated native memory: completion, 1/3, the safe abort at 1/18, 1/29 and
+# 1/101, and the client hold of the Axel clone.
 add_executable(kh2coop_axel_reaction_adapter_test tests/AxelReactionAdapterTest.cpp)
 target_include_directories(kh2coop_axel_reaction_adapter_test PRIVATE inject/src common/include)
 if(MSVC)

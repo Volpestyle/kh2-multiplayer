@@ -1,7 +1,9 @@
 // VUH-2913: the Axel II adapter itself (inject/src/AxelReactions.inl), compiled against simulated native memory and
 // stand-ins for ScriptMirror/ScriptActorOwner (after Ione's review probes). It drives the real host frame, completion,
-// 1/3 decision and the safe abort at 1/18 and 1/29 that the hooks call. The hook bodies themselves (SmOwnerPlayer,
-// SmOwnerAttach, SmOwnerCapture) only call these, and the ScriptActorOwner role is a recorder here.
+// 1/3 decision, the safe abort at 1/18, 1/29 and 1/101 that the hooks call, and the client's hold of the Axel clone
+// (op 13/14) against recorded native attach/detach. The hook bodies themselves (SmOwnerPlayer, SmOwnerAttach,
+// SmOwnerCapture, SmOwnerCaptureQuery) only call these, the slot installer is SmOwnerAxelAbortReady's stand-in, and
+// the host's ScriptActorOwner role is a recorder here.
 #include "ScriptMirror.hpp"
 
 #include <cstdarg>
@@ -9,6 +11,12 @@
 #include <cstring>
 #include <map>
 #include <vector>
+#ifdef _MSC_VER
+#include <excpt.h>
+#else
+#define __try try
+#define __except(filter) catch(...)
+#endif
 
 namespace R = kh2coop::inject::scriptmirror::rules;
 
@@ -61,19 +69,28 @@ static std::uint32_t SmOwnHandle(uintptr_t actor) noexcept {
     if(!ReadHitTrace(actor+4,handle) || !handle || SmDecode(handle)!=actor)return 0;
     return handle;
 }
-// As ScriptMirror's: the argument names an object, whose +4 names the actor.
+// As ScriptMirror's: the argument names an object, whose +4 names the actor, which has an object entry.
 static uintptr_t SmActorOf(std::uint64_t arg,std::uint32_t& objectId) noexcept {
-    objectId=0;std::uint32_t handle=0;
+    objectId=0;std::uint32_t handle=0;uintptr_t entry=0;
     const auto object=R::TagOf(arg)==R::kTagAddress?SmDecode(R::BitsOf(arg)):0;
-    return object && ReadHitTrace(object+4,handle)?SmDecode(handle):0;
+    const auto actor=object && ReadHitTrace(object+4,handle)?SmDecode(handle):0;
+    return actor && ReadHitTrace(actor+offsets::actor::OBJENTRY_PTR,entry) && entry &&
+        ReadHitTrace(entry+offsets::objentry::OBJECT_ID,objectId)?actor:0;
 }
 static bool scopeOk=true;
 static bool SmOwnerScope(enemysync::DownedScope& out) { out=enemysync::scope;return scopeOk; }
 static std::array<R::ReactionSeat,3> g_seats;
 static std::array<R::ReactionSeat,3> SmOwnerLivingSeats(const enemysync::DownedScope&) { return g_seats; }
 namespace enemytarget {
+constexpr uintptr_t RVA_NATIVE_PLAYER=0x2A105D0;
 static struct { std::array<uintptr_t,3> candidateActor{};std::array<std::uint8_t,3> ownerSlot{0,1,2}; } g;
 }
+static uintptr_t g_exeBase=0x140000000;
+static std::array<uintptr_t,2> puppets{};
+static uintptr_t PuppetTarget(int index) { return puppets[static_cast<std::size_t>(index)]; }
+// The installer's answer: the core traps and the optional 1/101 slot are in (SmOwnerAxelAbortReady).
+static bool abortArmed=true;
+static bool SmOwnerAxelAbortReady() noexcept { return abortArmed; }
 static uintptr_t SmOwnerSeatActor(std::uint8_t slot) {
     const std::array<R::ReactionActorCandidate,3> candidates{{
         {enemytarget::g.candidateActor[0],0},
@@ -122,7 +139,20 @@ static void Callback(uintptr_t,uintptr_t player,std::uint32_t,const std::uint32_
 static void (*g_smReactionCallback)(uintptr_t,uintptr_t,std::uint32_t,const std::uint32_t*)=&Callback;
 static uintptr_t g_soraActor=0x200000;
 static std::uint32_t g_frameCounter=10;
-static struct { bool hostActive=true; } g_sm;
+static struct { bool hostActive=true;unsigned faults=0; } g_sm;
+// The client's role and the native attach (1/18) and detach (1/102) originals, recorded.
+struct ScriptActorRole { std::uint32_t objectId{};uintptr_t actor{},source{};bool axelHeld{}; };
+static bool SmOwnerReady() noexcept { return true; }
+static bool SmOwnerActorCurrent(const ScriptActorRole&) { return true; }
+using TrapFn=void(*)(std::uint64_t*);
+static struct { uintptr_t original{}; } g_smOwnerTraps[6];
+static unsigned attachCalls=0,detachCalls=0;
+static void NativeAttach(std::uint64_t* args) {
+    ++attachCalls;const auto child=SmDecode(R::BitsOf(args[0]));
+    Put(child+0x6A0,R::BitsOf(args[1]));Put(child+0x6A4,static_cast<std::uint16_t>(R::BitsOf(args[2])));
+    Put(child+0x6A6,static_cast<std::uint16_t>(R::BitsOf(args[3])));Put(child+0x6B0,uintptr_t{});
+}
+static void NativeDetach(std::uint64_t* args) { ++detachCalls;Put(SmDecode(R::BitsOf(args[0]))+0x6A0,std::uint32_t{}); }
 static const char* SmRcConsumeReason(const R::ReactionWindow&,const R::ReactionCompletion&,std::uint32_t,std::uint32_t,
                                      const std::array<R::ReactionSeat,3>&) { return "refused"; }
 
@@ -142,8 +172,10 @@ void Setup(std::uint32_t groups) {
     enemytarget::g.candidateActor={kHostActor,kFriendActor,0};
     enemysync::scope={};enemysync::session=0xA1;enemysync::sentClaims=0;g_sm.hostActive=true;g_frameCounter=10;
     scopeOk=true;roleBeginOk=true;roleBegins.clear();holds.clear();cameras.clear();cameraEmitOk=true;callbacks=0;callbackPlayer=0;downedspike::down=false;
-    g_soraActor=kHostActor;
+    g_soraActor=kHostActor;puppets={kFriendActor,0};abortArmed=true;Put(g_exeBase+enemytarget::RVA_NATIVE_PLAYER,kHostActor);
     Put(kAxel+0x100,uintptr_t{0x400000});Put(uintptr_t{0x400000},std::uint32_t{81});
+    Put(kHostActor+0x100,uintptr_t{0x401000});Put(uintptr_t{0x401000},std::uint32_t{566});
+    Put(kFriendActor+0x100,uintptr_t{0x402000});Put(uintptr_t{0x402000},std::uint32_t{567});
     Put(kAxel+0x5A0,groups);Put(kAxel+0x5A4,std::uint32_t{});Put(kAxel+0x5A8,std::uint32_t{});Put(kAxel+0x5AC,std::uint32_t{});
     Put(kAxel+0xAB8,uintptr_t{0x500000});Put(uintptr_t{0x500004},std::uint32_t{0x00200003});
     const float origin[3]{};auto& position=memory[kAxel+0x1000];position.resize(sizeof(origin));
@@ -171,7 +203,7 @@ R::AxelAct Act(const char* trap,std::uint32_t axel,std::uint32_t player) {
     return SmAxelAct(args,trap);
 }
 void HoldAxel(std::uint32_t parent) {
-    Put(kAxel+0x6A0,parent);Put(kAxel+0x6A4,std::uint16_t{16386});Put(kAxel+0x6A6,std::uint16_t{1});
+    Put(kAxel+0x6A0,parent);Put(kAxel+0x6A4,std::uint16_t{16386});Put(kAxel+0x6A6,std::uint16_t{1});Put(kAxel+0x6B0,uintptr_t{});
 }
 // A friend's Overtaker, completed on the host.
 bool FriendOvertaker() {
@@ -275,6 +307,40 @@ int main() {
         check(Act("attach",kAxelHandle,kObjectHandle)==R::AxelAct::Admitted,"and admitted once it resolves");
     }
     {
+        // Ione's 75233daf: a downed or otherwise ineligible host leaves the candidate table yet stays 1/3's native
+        // result, so the abort knows a player by identity, not by targeting eligibility.
+        const auto query=[](std::uint32_t player) {
+            const std::uint64_t args[1]{R::Tagged(R::kTagAddress,player)};return SmAxelCaptureQuery(args);
+        };
+        const auto refusedOn=[&](std::uint32_t player) {
+            return Act("attach",kAxelHandle,player)==R::AxelAct::Refused && Act("capture",kAxelHandle,player)==R::AxelAct::Refused &&
+                query(player)==R::AxelAct::Refused;
+        };
+        (void)FriendOvertaker();downedspike::down=true;enemytarget::g.candidateActor[0]=0; // RefreshCandidates drops it
+        check(Act("attach",kAxelHandle,kFriendHandle)==R::AxelAct::Admitted && refusedOn(kHostHandle),
+              "control: a downed host is refused while the friend's resolving actor is admitted");
+        Put(kFriendActor+4,kStranger);
+        const auto lost=Player();
+        check(lost==kHostHandle && refusedOn(lost),
+              "a lost friend never routes attach, capture or the capture query onto a downed host");
+        (void)FriendOvertaker();downedspike::down=true;enemytarget::g.candidateActor[0]=0;memory.erase(kFriendActor+4);
+        const auto unread=Player();
+        check(SmAxelExecutorActor()==R::AxelActorState::Unknown && g_axel.executor.slot==1 && unread==kHostHandle &&
+              refusedOn(unread),"nor does an unread friend, whose binding stays");
+        (void)FriendOvertaker();enemytarget::g.candidateActor[0]=0;Put(kFriendActor+4,kStranger);
+        check(refusedOn(Player()),"nor onto a host that left the table for any other reason");
+        g_soraActor=0;
+        check(refusedOn(kHostHandle),"the native player pointer alone names the host");
+        g_soraActor=kHostActor;Put(g_exeBase+enemytarget::RVA_NATIVE_PLAYER,uintptr_t{});
+        check(refusedOn(kHostHandle),"and the canonical actor alone");
+        constexpr uintptr_t kSecond=0x380000,kWeapon=0x390000;constexpr std::uint32_t kSecondHandle=4,kWeaponHandle=5;
+        handles[kSecond]=kSecondHandle;Put(kSecond+4,kSecondHandle);Put(kSecond+0x100,uintptr_t{0x402000});
+        handles[kWeapon]=kWeaponHandle;Put(kWeapon+4,kWeaponHandle);Put(kWeapon+0x100,uintptr_t{0x403000});
+        Put(uintptr_t{0x403000},std::uint32_t{900});puppets[1]=kSecond;
+        check(refusedOn(kSecondHandle),"another friend's puppet off the table is a player too");
+        check(Act("attach",kAxelHandle,kWeaponHandle)==R::AxelAct::Native,"an actor that is no player's stays native");
+    }
+    {
         Setup(1u<<R::kOvertakerGroup);Frame();
         check(!g_axel.executor.command && Act("attach",kAxelHandle,kHostHandle)==R::AxelAct::Refused &&
               Act("capture",kAxelHandle,kFriendHandle)==R::AxelAct::Refused,"with no RC bound, Axel acts on no player");
@@ -309,6 +375,23 @@ int main() {
         check(native && !reads && !vmLookups,"outside Axel II the hooks stay native and read nothing");
     }
 
+    // Ione's 75233daf: with the 1/101 gate refused the abort is unarmed. A friend is offered nothing and its completion
+    // runs and binds nothing, so no native query can follow; the host's own RC still runs.
+    {
+        Setup(1u<<R::kOvertakerGroup);abortArmed=false;Frame();
+        const auto* w=g_axel.windows.Find(R::kOvertaker);
+        check(w && w->slot==0,"unarmed, the nearer friend is offered nothing");
+        auto forged=Claim();forged.ownerSlot=1;forged.requesterConnectionId=0x2222;
+        check(!SmAxelComplete(forged,nullptr) && !g_axel.windows.Find(R::kOvertaker)->consumed && !callbacks &&
+              !g_axel.executor.command && roleBegins.empty(),"a friend's claim on it consumes, runs and binds nothing");
+        check(SmAxelReactionCallback(kAxel,kHostActor,R::kOvertaker,nullptr) && callbacks==1 && callbackPlayer==kHostActor &&
+              g_axel.executor.slot==0,"the host's own press still runs");
+        Setup(1u<<R::kOvertakerGroup);Frame();
+        const auto offered=Claim();abortArmed=false;
+        check(offered.ownerSlot==1 && !SmAxelComplete(offered,nullptr) && !g_axel.windows.Find(R::kOvertaker)->consumed &&
+              !callbacks && !g_axel.executor.command && roleBegins.empty(),
+              "a friend's completion of a window offered while armed runs nothing once unarmed");
+    }
     // The friend's owner role on the host lasts while its executor does.
     {
         (void)FriendOvertaker();
@@ -357,6 +440,32 @@ int main() {
         const bool ran=SmAxelComplete(Claim(),nullptr);
         HoldAxel(kHostHandle);++g_frameCounter;Frame();
         check(ran && g_axel.executor.slot==0 && holds.empty(),"the host's own RC sends no hold");
+    }
+
+    // Ione's 75233daf: the friend's hold of the Axel clone (client op 13/14) is this role's only with its receipt.
+    {
+        Setup(0);g_sm.hostActive=false;attachCalls=0;detachCalls=0;
+        g_smOwnerTraps[4].original=reinterpret_cast<uintptr_t>(&NativeAttach);
+        g_smOwnerTraps[5].original=reinterpret_cast<uintptr_t>(&NativeDetach);
+        const auto parent=[] { std::uint32_t at=0;return ReadHitTrace(kAxel+0x6A0,at)?at:UINT32_MAX; };
+        ScriptActorRole role{81,kFriendActor,kAxel,false};
+        HoldAxel(kFriendHandle); // another activation's matching pair
+        check(!SmAxelApplyHold(role,false) && !detachCalls && parent()==kFriendHandle,
+              "op 14 never detaches a matching pair this role did not make");
+        check(!SmAxelApplyHold(role,true) && !attachCalls && !role.axelHeld && !SmAxelCloneHeld(role),
+              "nor does op 13 take it as its own, or a continuation carry it");
+        Put(kAxel+0x6A0,std::uint32_t{});
+        check(SmAxelApplyHold(role,true) && attachCalls==1 && role.axelHeld && SmAxelCloneHeld(role) && parent()==kFriendHandle,
+              "its own attach records the receipt");
+        check(SmAxelApplyHold(role,true) && attachCalls==1,"a repeated op 13 attaches nothing");
+        check(SmAxelApplyHold(role,false) && detachCalls==1 && !role.axelHeld && !parent(),"its own hold detaches once");
+        check(SmAxelApplyHold(role,false) && detachCalls==1,"a repeated op 14 detaches nothing");
+        role.axelHeld=true;HoldAxel(kHostHandle);
+        check(!SmAxelApplyHold(role,false) && detachCalls==1 && parent()==kHostHandle,"a replaced parent is preserved");
+        HoldAxel(kFriendHandle);Put(kAxel+0x6B0,uintptr_t{0x888});
+        check(!SmAxelApplyHold(role,false) && detachCalls==1,"so is a pair with a VM callback");
+        Put(kAxel+0x6B0,uintptr_t{});g_sm.hostActive=true;
+        check(!SmAxelApplyHold(role,false) && detachCalls==1,"the host never applies a client's hold");
     }
 
     // Cameras: Axel's camera_start_global (1/164) during a friend's RC goes to its owner, and the host skips it.

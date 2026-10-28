@@ -29,7 +29,7 @@ struct ScriptActorRole {
     std::uint32_t commandFrame{},commandMode{};
     bool commandAnnounced{};
     bool captured{},attached{};
-    bool axelHeld{};  // VUH-2913 (client): this role attached the Axel clone (its source) to its actor (SmOwnerApplyAxelHold)
+    bool axelHeld{};  // VUH-2913 (client): this role attached the Axel clone (its source) to its actor (SmAxelApplyHold)
     // A spectator's clone is a visual target, never the role's command actor.
     ScriptOwnerVisual visual{};
     std::uint64_t captureValues[2]{};
@@ -192,10 +192,13 @@ static OwnerTrapSlot g_smOwnerTraps[]{
     {238,0x42D3B0,0x40000001,R::kOwnerCaptureIdObservation,sizeof(R::kOwnerCaptureIdObservation),&SmLifeCaptureId},
 };
 // VUH-2913, optional, outside the core. camera_start_global: refused, Axel's RC cameras play natively as before.
-// obj_motion_is_capture: refused, idle_after_rc reads 1/3's result natively, which is always a live actor.
+// obj_motion_is_capture: refused, the safe abort is unarmed and only the host executes Axel's RCs.
 static OwnerTrapSlot g_smAxelCameraSlot{164,0x42E0D0,0x2,R::kOwnerCameraGlobal,sizeof(R::kOwnerCameraGlobal),&SmOwnerCameraGlobal};
 static OwnerTrapSlot g_smAxelCaptureQuerySlot{101,0x42D360,0x40000001,R::kOwnerCaptureQuery,sizeof(R::kOwnerCaptureQuery),
     &SmOwnerCaptureQuery};
+// R::AxelExecutionAdmitted's abortArmed: every trap that takes 1/3's result is gated, the core's 1/18 and 1/29 and
+// the optional 1/101 (Ione's 75233daf).
+static bool SmOwnerAxelAbortReady() noexcept { return SmOwnerReady() && g_smAxelCaptureQuerySlot.swapped; }
 static bool SmOwnerSwapOptional(OwnerTrapSlot& slot,uintptr_t table) {
     std::uint32_t flags=0;slot.entry=R::EntryRva(table,slot.index);
     slot.swapped=ReadHitTrace(slot.entry,slot.original) && slot.original==g_exeBase+slot.rva &&
@@ -368,39 +371,6 @@ static bool SmOwnerApplyAttachment(ScriptActorRole& role,bool attach) noexcept {
         reinterpret_cast<TrapFn>(g_smOwnerTraps[5].original)(args);
         if(!ReadHitTrace(role.actor+0x6A0,parent) || parent)return false;
         role.attached=false;return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){++g_sm.faults;return false;}
-}
-// VUH-2913: Axel II's pair is the reverse: the Axel clone (the role's source) is the child of the friend's own player
-// (the role's actor) at bone 1, flags 16386, with no callback. It never replaces another parent.
-static bool SmOwnerAxelHeld(const ScriptActorRole& role) {
-    std::uint32_t parent=0;std::uint16_t flags=0,bone=0;uintptr_t callback=0;
-    return role.actor && role.source && ReadHitTrace(role.source+0x6A0,parent) && parent && SmDecode(parent)==role.actor &&
-        ReadHitTrace(role.source+0x6A4,flags) && ReadHitTrace(role.source+0x6A6,bone) && R::AxelAttachPair(flags,bone) &&
-        ReadHitTrace(role.source+0x6B0,callback) && !callback;
-}
-static bool SmOwnerApplyAxelHold(ScriptActorRole& role,bool hold) noexcept {
-    if(!SmOwnerReady() || g_sm.hostActive || role.objectId!=R::kAxelIIObjectId || !SmOwnerActorCurrent(role) ||
-       !role.actor || !role.source)return false;
-    const auto child=SmOwnHandle(role.source),parent=SmOwnHandle(role.actor);
-    if(!child || !parent)return false;
-    std::uint32_t now=0;
-    if(!ReadHitTrace(role.source+0x6A0,now))return false;
-    if(hold && now)return SmOwnerAxelHeld(role); // idempotent; never replace another attachment
-    if(!hold && !now){role.axelHeld=false;return true;}
-    if(!hold && !SmOwnerAxelHeld(role))return false;
-    __try {
-        if(hold) {
-            role.axelHeld=true; // reserve cleanup authority before entry: a fault can leave a native attachment
-            std::uint64_t args[]{R::Tagged(R::kTagAddress,child),R::Tagged(R::kTagAddress,parent),
-                R::Tagged(R::kTagInt,R::kAxelAttachFlags),R::Tagged(R::kTagInt,R::kAxelAttachBone),
-                R::Tagged(R::kTagInt,0),R::Tagged(R::kTagInt,0)};
-            reinterpret_cast<TrapFn>(g_smOwnerTraps[4].original)(args);
-            return SmOwnerAxelHeld(role);
-        }
-        std::uint64_t args[]{R::Tagged(R::kTagAddress,child)};
-        reinterpret_cast<TrapFn>(g_smOwnerTraps[5].original)(args);
-        if(!ReadHitTrace(role.source+0x6A0,now) || now)return false;
-        role.axelHeld=false;return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){++g_sm.faults;return false;}
 }
 static ScriptActorRole SmOwnerVisualActor(const ScriptActorRole& role) {
@@ -948,7 +918,7 @@ static void SmOwnerReleaseHeld(const ScriptActorRole& released,R::ReleaseCleanup
 // on the same branches as before (the coroutine cancel stays where it was). A friend local-seat release then logs.
 static void SmOwnerCleanupPlayer(const ScriptActorRole& released) {
     if(released.axelHeld && SmOwnerReleaseRootCurrent(released)) {
-        auto held=released;(void)SmOwnerApplyAxelHold(held,false); // VUH-2913: only our own hold of the Axel clone
+        auto held=released;(void)SmAxelApplyHold(held,false); // VUH-2913: only our own hold of the Axel clone
     }
     const bool friendLocal=SmOwnerFriendLocal(released);
     R::ReleaseCleanupFacts f{};
@@ -1038,7 +1008,7 @@ static ScriptOwnerContinuation SmOwnerContinueCamera(const ScriptActorRole& role
     uintptr_t capture=0;
     ScriptOwnerContinuation next{role.camera,SmOwnerHasAttachment(role,!g_sm.hostActive),
         role.captured && ReadHitTrace(actor+0x2B0,capture) && capture==source};
-    next.axelHeld=role.axelHeld && SmOwnerAxelHeld(role);
+    next.axelHeld=SmAxelCloneHeld(role);
     if(next.captured && role.haveCapture) {
         next.haveCapture=true;next.captureValues[0]=role.captureValues[0];next.captureValues[1]=role.captureValues[1];
     }
@@ -1855,9 +1825,9 @@ static int SmOwnerApply(const R::Call& call,uintptr_t source) {
         if(operation==13 && role.objectId==R::kAxelIIObjectId) { // VUH-2913: Axel held by this seat's player
             if(source!=role.source || R::TagOf(call.values[0])!=R::kTagInt || R::TagOf(call.values[1])!=R::kTagInt ||
                !R::AxelAttachPair(R::BitsOf(call.values[0]),R::BitsOf(call.values[1])))return 0;
-            return SmOwnerApplyAxelHold(role,true)?1:0;
+            return SmAxelApplyHold(role,true)?1:0;
         }
-        if(operation==14 && role.objectId==R::kAxelIIObjectId)return SmOwnerApplyAxelHold(role,false)?1:0;
+        if(operation==14 && role.objectId==R::kAxelIIObjectId)return SmAxelApplyHold(role,false)?1:0;
         if(operation==13) {
             if(source!=role.source || R::TagOf(call.values[0])!=R::kTagInt || R::BitsOf(call.values[0])!=16386 ||
                R::TagOf(call.values[1])!=R::kTagInt || R::BitsOf(call.values[1])!=5)return 0;
@@ -2153,6 +2123,6 @@ static bool SmOwnerInstall() {
     // VUH-2913: optional too. Refused, a friend's Axel RC camera keeps playing on the host, as before.
     if(!SmOwnerSwapOptional(g_smAxelCameraSlot,table))Log("[axel-rc] camera_start_global hook refused; Axel's RC cameras stay native");
     if(!SmOwnerSwapOptional(g_smAxelCaptureQuerySlot,table))
-        Log("[axel-rc] obj_motion_is_capture hook refused; idle_after_rc reads natively");
+        Log("[axel-rc] obj_motion_is_capture hook refused; the abort is unarmed, friends execute no Axel RC");
     return true;
 }
