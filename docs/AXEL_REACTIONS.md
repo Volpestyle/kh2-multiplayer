@@ -55,16 +55,45 @@ Axel's model collision table (BAR type 0x17, 39 rows) has eight REACTION rows th
 | Command | Collision group | Shape (root bone 16384) | What opens the group |
 |---|---|---|---|
 | 490 Overtaker | 20 | Sphere at the origin, radius 2800 | Range trigger 4 in motions 30A/32A (entries 16, 18, 20, 21, in both motion sets); `atk_prison` re-enables it (1/54) |
-| 443 Clear Light | 21 | Sphere at (666, −430, −150), radius 500, with a group-21 TARGET row | No motion enables group 21. The only related trigger is range 26 (AnmatrCommand 2) with argument 490, at frames 107–172 of `AP12`, the player motion Overtaker plays. OpenKH's table ties trigger 26 to group 21, and `cmd` 443 requires 490: Clear Light is the follow-up offered during Overtaker. This link is inferred, not traced natively. |
+| 443 Clear Light | 21 | Sphere at (666, −430, −150), radius 500, with a group-21 TARGET row | Group 21 is on by the model's default mask. The offer is gated by the command row instead: 443 has flag bit 6 and `Require 490`, so it is offered only while the receiving player's own motion is inside a range-26 trigger with argument 490. That trigger sits at frames 107–172 of `AP12`, the player capture Overtaker plays, in both Sora's and Roxas's sub-motions. |
 | 444 Burst Frontier | 23 (×7), 24 (×3) | A line of radius-200 spheres along −z (−150 to −1444), plus three radius-400 spheres above | Range trigger 4 in 58A (entry 209, group 23) and 59A (entry 210, group 24, frames 0–70). Only Axel II's set has these motions. |
 
-**Collision masks, from the native traps (static):**
-- 1/53 `disable_collision` jumps to `3F1F80`, which sets the group's bit in the second actor mask (`+0x5AC`).
-- 1/54 `reset_collision` jumps to `3F2000`, which clears the bit in both masks (`+0x5A8` and `+0x5AC`).
-- A motion's range-trigger enable is read as setting the first mask while that motion plays. So a group is offered
-  while a motion enables it and the script has not vetoed it.
-- This rule is inferred: the native REACTION test was not pinned. It is the only reading under which Axel I's
-  explicit init veto (below) has any effect.
+**When a collision group is active (native, static):**
+- `3BA550` decides each group. It takes the first answer in this order:
+  1. the script layer at actor `+0x5A8`: an on bit there means active, an off bit (`+0x5AC`) means inactive;
+  2. the motion layer at `+0x5A0`: on, then off (`+0x5A4`);
+  3. the model's default mask, the second word of the collision table header.
+- Each layer is a pair of words, on and off. The helpers are `3F1FA0` set on, `3F1F80` set off, `3F1FE0` and
+  `3F1FC0` test them, and `3F2000` clear both.
+- Script traps write the script layer: 1/52 `enable_collision` sets on, 1/53 `disable_collision` sets off, and
+  1/54 `reset_collision` clears both.
+- Motion triggers write the motion layer through the range-trigger dispatcher `40D810` (jump table `0x40DC98`):
+  trigger 4 sets on and trigger 5 sets off. Trigger 10 (attack hitbox) goes through `3DAFE0`, which sets motion-on
+  only when the script layer has no off bit for the group.
+- Axel's default mask is `0x00200003`: groups 0, 1 and 21. The first header word, 39, is the row count.
+- So a script veto (1/53) beats any motion trigger until 1/54 clears it. Groups 20, 23 and 24 are offered only
+  while a motion enables them. Group 21 is always on, and the command row gates its offer (below).
+- The code that clears the motion layer when a trigger's frame range ends was not pinned. The live trace confirms
+  the windows.
+
+**Follow-up commands (native, static):**
+- Trigger 26 (`40DB0D`) sets bit 21 of the actor's trigger state and writes its argument to actor `+0x638`.
+  Trigger 25 does the same with bit 20.
+- The reaction refresh (`407C2B`) checks commands whose flags have bit 6. It offers one only while the receiving
+  actor has `+0x18C` bit 21 set and `+0x638` equal to the row's `Require` (row `+0x22`).
+- Clear Light (443) has flags `0xB159` (bit 6) and `Require 490`. Thorn's Key Counter (297) has the same shape:
+  `0xB751`, `Require 297`. Overtaker (490) and Burst Frontier (444) have no bit 6 and no requirement.
+
+**Who gets the offer (native, static):**
+- REACTION offers come from the native reaction picker: `408391` calls `407B40` for each candidate, and `4088F0`
+  scores it.
+- The picker chooses only for that game's own canonical player.
+- It never calls the command-register functions ScriptActorOwner hooks (`3B2850` general, `3B25C0` captured). So
+  neither existing routing path sees Axel's offers: Thorn's role windows (minted from those registrations) and the
+  attack-created bindings.
+- On the friend's game, the picker offers against the mirrored clone's own collision rows. A press reaches
+  `SmReactionCallback` with no role or binding. It is refused there as an unpaired callback, because Axel is a
+  mirrored receiver and not a Dusk.
 
 No offer comes from BDX `attack_set_rc` (2/51), `attack_rc_receiver` (2/52), `command_override` (1/165) or
 `target_attack` (1/166): Axel's BDX calls none of them. No offer comes from the spawn groups, the mission scripts
@@ -83,21 +112,52 @@ that canonical player is the host's own Roxas, whoever pressed the RC.
 | 443 Clear Light | `L129` → `L140` | Facing/position set; capture 255 `AP13`; push 4 | Action `rc_clear_light`: the same attach, motion 242 (91A) to its end, then `disable_collision(20)` and `W4560 = 0`, then action `knock_down` | `10` on Axel, then thread `D303` (`magic_start_thread` 2/20). That thread waits, whites the screen out (0/31, 70), resets the camera (1/295) and whites it back in (0/32, 30). | `knock_down`, with no detach in the BDX |
 | 444 Burst Frontier | `L486` → `L531` | Capture 252 `AP10`, then `obj_hook` (1/112) of the player into BDX coroutine `D563`. `D563` steers the player at Axel (1/4, 1/150, 1/89) every frame. It returns when Axel no longer exists, the player's motion ends, or its capture ID is no longer 252. | `idle_after_rc`, which waits on the canonical player's capture (1/101). The callback also checks whether Axel's own motion is 210 (59A). | `camera_watch` (1/207) on Axel; no Event asset | `D563` returns, ending the hook. There is no detach and no camera reset in this branch. |
 
-**Capture motions:**
-- Each capture entry (`AP10`, `AP12` and `AP13`) holds six sub-motions (`0010`–`0012` and `0140`–`0142`), each with
-  four variant slots. Only slot 3 is authored. Thorn's equivalent entries author slot 2.
-- The slot is read as the player model variant (Thorn's player is single-blade Roxas; Axel II's is dual-wield
-  Roxas). That is inferred. If it holds, a Sora seat (VUH-2911's mixed fixtures) has no Axel capture motion.
+**Capture motions (native, static):**
+- 1/29 calls `3C6CC0` on the source's motion controller (Axel, whose set holds the capture). It records the
+  capture ID at the captured actor's `+0x180`.
+- `3C64A0` names the sub-motion `sprintf("%03d0", objentry[+7])` of the captured actor (format at `0x5C5D48`). The
+  captured actor's two weapon children at `+0xD60` take that name plus 1 and plus 2.
+- `3C65E0` binds the first non-empty duplicate (0 to 3) of that name. If none is authored, it clears the actor's
+  motion.
+- Objentry byte 7 is 1 for Sora (`P_EX100` and every form) and 14 for Roxas (`P_EX110`, `P_EX110_BTLF`).
+- What Axel's captures author:
 
-**Attachment:**
-- Native 1/18 decodes its first two arguments into `3D9FE0(actor, parent, flags, bone)`, which writes the parent at
-  actor `+0x6A0` (VUH-2569 attach review).
-- Axel's operands are (Axel, a pseudo-wrapper `L5322` builds around the canonical player, 16386, 1, 0, 0). Read
-  that way, Axel is the child attached to the player at bone 1.
-- That is the reverse of Thorn's qualified pair, where the player is the child of the boss at bone 5. ScriptActorOwner
-  admits only (16386, 5) and has no callback here.
-- The child/parent order rests on the VM keeping the `jal` argument on the stack for the syscall, which was not
-  proven. Confirm it natively before any admission change.
+  | Capture | Sora | Roxas |
+  |---|---|---|
+  | `AP10` (252) | `0010`, `0011`, `0012` | `0140`, `0141`, `0142` |
+  | `AP12` (254) | `0010`, `0011` | `0140`, `0141`, `0142` |
+  | `AP13` (255) | `0010`, `0011` | `0140`, `0141`, `0142` |
+
+- Sora's `AP12` body carries the same trigger-26/490 window as Roxas's. Sora's missing `0012` only clears a second
+  weapon child that Sora doesn't have.
+- So Sora owners are admitted exactly like Roxas owners. An earlier reading of this inventory (that a duplicate
+  slot is a model variant, leaving Sora without captures) was wrong and is withdrawn.
+
+**Attachment (native, static):**
+- Trap 1/18 decodes `[0]` as the child, `[8]` as the parent, `[0x10]` as the flags, `[0x18]` as the bone,
+  `[0x20]` as the callback and `[0x28]` as its data. It calls `3D9FE0(child, parent, flags, bone)`, which writes
+  the parent at the child's `+0x6A0`, the flags at `+0x6A4` and the bone at `+0x6A6`.
+- Syscall arguments are in push order. Only that order yields flags 16386 and bone 1 from the six values below;
+  the reverse would give flags 1 and bone 16386.
+- At both attach sites (`rc_run_up`, `rc_clear_light`), `push.d.sp 0` (Axel) comes before `jal 4, L5322`.
+  `L5322` pops no argument; it returns the `sysobj_player` (1/3) wrapper. That leaves Axel on the stack as the
+  sixth value: (Axel, player, 16386, 1, 0, 0).
+- Every other `L5322` call site in the BDX is balanced the same way: the pushes after the call exactly fill its
+  syscall.
+- So **Axel is the child, attached to the canonical player at bone 1, with no callback**. That is the reverse of
+  Thorn's qualified pair, where the player is the child of the boss at bone 5. While attached, Axel's `+0x6A0` is
+  nonzero, which EnemySync's pose mirror skips.
+- In flags `0x4002`, bit `0x4000` only skips a scale step when the attached matrix is built (`3CCE23`). Bit 2
+  keeps the child's own offsets (`3D9FE0`). Neither flag ends the attachment.
+
+**Release:**
+- No BDX path detaches Axel. Trap 1/102 is the only BDX trap that reaches the native detach `3DA250`, and Axel
+  never calls it.
+- The native detach callers are attached-actor checks (`3DA520`) inside state handlers reached through pointer
+  tables (`3D4E30` in four table slots, `3EF520` in two), teardown paths (`3A7120`, `3A8F30`, `3C2890`,
+  `3C3600`) and re-attach (`3D9FE0` itself).
+- Which state handler ends Overtaker's and Clear Light's attachment was not pinned statically. The trace run
+  logs `+0x6A0` on Axel through both.
 
 **Camera streams:**
 - `00` is 1266 bytes and ends at tick 100 (op 8). Its opcodes are 0 (header), 15, 16, 8, 19, 6, 70 and 49.
@@ -105,8 +165,14 @@ that canonical player is the host's own Roxas, whoever pressed the RC.
 - Both end on the zero terminator, and both have a timeline offset (op 16) of 20; Thorn's were all 0.
 - Op 49 waits for frame 2 and stores 0, the same mode-0 shape as Thorn. Its 0/1 branch reads a global, not the
   command.
-- Op 70 does not occur in Thorn's cameras. Its handler, `2D34A0`, sets event flag bytes `0xB64FA2 = 1` and
-  `0xB64FA3 = 0` (argument 0). It has no input or branch, but what those flags gate was not identified.
+- Op 70 does not occur in Thorn's cameras. Its handler, `2D34A0`, sets `0xB64FA2 = 1` and `0xB64FA3 = 0`
+  (argument 0). The only direct readers are in `2D37B0`, the event-camera start (called from `2CC8B2`). They pass
+  the bytes as three bools to the camera transition setup `1780D0`. The bytes reset at `2CC534` and `2C86E3`.
+  They are a camera blend option, not an input or pause gate.
+- Op 16 (`2D9020`) stores its value at `0xB64FBC`. Its only reader is `2CB66A`, on the camera's end path. That
+  reader converts twice the value to a float and hands it to `3AC5A0`, which writes it to camera state `+0xA0`.
+  It is read as a duration (40 for Axel, 0 for Thorn), not a gate. The end path's wait loop before that read is
+  the same one Thorn's cameras use.
 
 **Gating:**
 - **Phases.** Axel's phase word, at `+24` of his state, has exactly three writes: 0 in `battle_start`, 1 in the
@@ -133,22 +199,25 @@ that canonical player is the host's own Roxas, whoever pressed the RC.
 - **No other source.** Program 87's only spawn group and mission script offer no command, and no player motion
   offers one.
 
-The remaining assumption is the REACTION activity rule above. Even if it were wrong, an Overtaker accepted in
-Axel I would start a missing camera and capture a missing motion. The acceptance therefore takes this static
-absence plus a live ordinary-attack control for Axel I, as the issue allows.
+The group rule above is native: the script veto beats Overtaker's motion enable. Clear Light's `Require 490` also
+needs `AP12`, which Axel I's set lacks. The acceptance takes this static absence plus a live ordinary-attack
+control for Axel I, as the issue allows.
 
-## Open native questions for the build
+## Phase 0 results and what remains
 
-Each of these must be resolved before admitting Axel II's RCs:
-1. The REACTION group activity rule (mask `+0x5A8` set by motion triggers, `+0x5AC` set by veto), from the native
-   reaction refresh (`408520`), so the offer windows above are proven rather than inferred.
-2. The attach operand order (Axel as child of the player at bone 1). Then decide whether ScriptActorOwner admits
-   that reverse pair.
-3. How a callback-free 16386 attachment ends with no `obj_detach`: whether the motion end, the action change or
-   `knock_down` clears `+0x6A0`.
-4. What event flags `0xB64FA2/3` (camera op 70) gate, and the op 16 timeline offset of 20, before admitting the two
-   Axel cameras as finite and input-free.
-5. The capture slot rule, which decides whether a Sora owner must be refused.
-6. Trap coverage. ScriptActorOwner's traps cover 1/3, 1/112, 1/29, 1/157, 1/18, 1/102, 1/14 and 1/238. Axel adds
-   1/164 (`camera_start_global`, which tail-jumps to the same `3DB2F0`), 1/207 (`camera_watch`), 1/295
-   (`camera_reset`) and the screen white-out thread (2/20, then 0/31 and 0/32).
+Phase 0 resolved every static question:
+1. **Group activity rule:** native (`3BA550`), above. Clear Light's follow-up gate is native too (`407C2B`).
+2. **Attach order:** native. Axel is the child of the canonical player at bone 1. ScriptActorOwner gets Axel II's
+   own exact pair rather than widening Thorn's (16386, 5).
+3. **Camera op 70 and op 16:** both camera parameters, not input gates. The Axel cameras stay finite on the same
+   end path as Thorn's.
+4. **Capture slot rule:** native. Sora owners are admitted like Roxas owners.
+
+Still open, and settled by a trace-only live run queued behind VUH-2912's runs:
+- the native handler that clears Axel's `+0x6A0` after Overtaker and after Clear Light;
+- the motion-layer clear at the end of each trigger range, which closes the offer windows.
+
+Trap coverage the build adds:
+- ScriptActorOwner's traps today are 1/3, 1/112, 1/29, 1/157, 1/18, 1/102, 1/14 and 1/238.
+- Axel adds 1/164 (`camera_start_global`, which tail-jumps to the same `3DB2F0` as `obj_camera_start`), 1/207
+  (`camera_watch`), 1/295 (`camera_reset`) and the screen white-out thread (2/20, then 0/31 and 0/32).
