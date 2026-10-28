@@ -43,11 +43,13 @@ static bool Check(bool value,const char* label,const char*& why) { if(!value)why
 namespace downedspike { static bool down=false;static bool LogicallyDowned() { return down; } }
 
 static std::map<uintptr_t,std::vector<unsigned char>> memory;
+static unsigned reads=0,vmLookups=0;
 static std::map<uintptr_t,std::uint32_t> handles;
 template<class T> static void Put(uintptr_t at,const T& value) {
     auto& bytes=memory[at];bytes.resize(sizeof(T));std::memcpy(bytes.data(),&value,sizeof(T));
 }
 static bool ReadHitTraceMemory(uintptr_t at,void* out,std::size_t size) {
+    ++reads;
     const auto it=memory.find(at);
     if(it==memory.end() || it->second.size()<size)return false;
     std::memcpy(out,it->second.data(),size);return true;
@@ -83,6 +85,11 @@ static int SmOwnerActorSeat(uintptr_t actor) {
     for(unsigned i=0;i<3;++i)if(enemytarget::g.candidateActor[i]==actor && actor)
         return i?enemytarget::g.ownerSlot[i]:0;
     return -1;
+}
+// The actor whose script is executing (ScriptActorOwner reads the VM's +0x60), set by the test.
+static uintptr_t vmSource=0x100000;
+static uintptr_t SmOwnerVmSource(std::uint16_t& netId,std::uint32_t& objectId) {
+    ++vmLookups;netId=7;objectId=81;return vmSource;
 }
 static uintptr_t SmDrivenActor(std::uint16_t netId,std::uint32_t objectId) {
     return netId==7 && objectId==81?uintptr_t{0x100000}:0;
@@ -275,6 +282,31 @@ int main() {
         check(Act("attach",kAxelHandle,kFriendHandle)==R::AxelAct::Refused,"an unreadable scope refuses too");
         g_sm.hostActive=false;
         check(Act("attach",kAxelHandle,kFriendHandle)==R::AxelAct::Native,"a client's own traps are not the host's abort");
+    }
+
+    // 1/101 in idle_after_rc reads 1/3's result: inside Axel's script it reads only the bound executor's resolving actor.
+    {
+        const auto query=[](std::uint32_t player,uintptr_t vm) {
+            const std::uint64_t args[1]{R::Tagged(R::kTagAddress,player)};
+            vmSource=vm;const auto act=SmAxelCaptureQuery(args);vmSource=kAxel;return act;
+        };
+        (void)FriendOvertaker();
+        check(query(kFriendHandle,kAxel)==R::AxelAct::Admitted,"Axel's capture query on the friend's actor reads natively");
+        check(query(kHostHandle,kAxel)==R::AxelAct::Refused,"on the host's actor during the friend's RC it answers not captured");
+        check(query(kHostHandle,kHostActor)==R::AxelAct::Native,"another script's query is not Axel's");
+        Put(kFriendActor+4,kStranger);
+        check(query(Player(),kAxel)==R::AxelAct::Refused,"a lost friend's 1/3 result (the host) is never read for Axel");
+        Setup(1u<<R::kOvertakerGroup);Frame();
+        check(query(kHostHandle,kAxel)==R::AxelAct::Refused,"with no RC bound, Axel's query reads no player");
+    }
+    {
+        // Every other encounter: the gates, the camera hook and the query read nothing at all.
+        Setup(1u<<R::kOvertakerGroup);enemysync::scope.roomId=0x15;Frame();
+        reads=0;vmLookups=0;
+        const std::uint64_t two[2]{R::Tagged(R::kTagAddress,kAxelHandle),R::Tagged(R::kTagAddress,kHostHandle)};
+        const bool native=SmAxelAct(two,"attach")==R::AxelAct::Native && SmAxelCaptureQuery(two)==R::AxelAct::Native &&
+            !SmAxelCamera(two);
+        check(native && !reads && !vmLookups,"outside Axel II the hooks stay native and read nothing");
     }
 
     // The friend's owner role on the host lasts while its executor does.
