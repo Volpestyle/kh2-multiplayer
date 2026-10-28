@@ -285,6 +285,12 @@ def marks(name):
     return {"do": "save", "as": name, "expr": "[log_count('', 0), log_count('', 1)]"}
 
 
+# Lead #76 (vuh2912-hp-09): each seat logs the mirror's per-actor stats just inside every window (after its start
+# mark, before its end mark), so the HP ledger's one-brain check has a sample in a window shorter than the 300-frame
+# stats interval. Diagnostics: nothing is judged on it but that check.
+STATS_MARK = {"do": "stats_mark"}
+
+
 def host_claims():
     return f"len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId={AXEL_OBJECT} [^\\n]*nativeOk=1', 0))"
 
@@ -404,6 +410,7 @@ def target_round(name, fighter, reviver, last=False):
                                  f"for k in ('hits', 'claims', 'targets')}} and {selected(fighter)} and {standing()}",
          "message": f"SETUP FAILURE (window), not a targeting result: {name}'s window opened without Axel's selection of "
                     f"the {seat[fighter]}, settled boss HP and both seats standing"},
+        STATS_MARK,
         # The clips run as long as the round can, so the round's hits are on film. They run in the background: in
         # vuh2912-hp-06 the step waited ~70 s past the milestone for its 20 s clips to encode, and Axel downed both
         # idle seats inside the window.
@@ -412,6 +419,7 @@ def target_round(name, fighter, reviver, last=False):
          "sample": {"expr": observe, "everyMs": 500},
          "clips": [{"instance": 0, "seconds": 20, "fps": 30, "name": f"{name}_host", "background": True},
                    {"instance": 1, "seconds": 20, "fps": 30, "name": f"{name}_friend", "background": True}]},
+        STATS_MARK,
         marks(f"m_{name}1"),
         {"do": "assert", "expr": f"saved['{name}']['until']['reached']",
          "message": f"{name}: in 20 s Axel never chose the {seat[fighter]} with the {seat[fighter]} hit and landing damage"},
@@ -476,6 +484,7 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
             {"do": "assert", "expr": standing(),
              "message": "SETUP FAILURE (window), not an HP result: interleaved needs both seats standing"},
             marks("m_interleaved0"),
+            STATS_MARK,
             {"do": "save", "as": "il_base", "expr": f"{{'claims': {host_claims()}, 'bossHp': {boss_hp(0)}}}"},
             # Both fight until a friend claim and a host native hit (an HP drop beyond the claims) both landed. The
             # clips run in the background, as the target rounds' (vuh2912-hp-06).
@@ -483,6 +492,7 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
              "until": f"{host_claims()} > saved['il_base']['claims'] and {boss_hp(0)} < saved['il_base']['bossHp'] - {claim_drop}",
              "clips": [{"instance": 0, "seconds": 12, "fps": 30, "name": "interleaved_host", "background": True},
                        {"instance": 1, "seconds": 12, "fps": 30, "name": "interleaved_friend", "background": True}]},
+            STATS_MARK,
             marks("m_interleaved1"),
             *([] if single else [{"do": "clip_wait", "require": True}]),
         ]
@@ -506,9 +516,11 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
     downing = [
         # A downed seat is no candidate: one down and partner revive per owner, bracketed for the target ledger.
         marks("m_downs0"),
+        STATS_MARK,
         {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000,
          "aside": AXEL_ARENA},
         *([] if downs_only else [{"do": "clip_wait"}]),
+        STATS_MARK,
         marks("m_downs1"),
         {"do": "assert", "expr": "all(saved['owner_downs']['owners'][k] for k in ('0', '1'))",
          "message": "each owner must be downed once and revived by the other seat"},

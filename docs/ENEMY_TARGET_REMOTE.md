@@ -70,6 +70,14 @@ refused=<n> reaction=<kind> reactRequest=<id> reactFrame=<f> reactHooked=<0|1>`.
 entry's kind is 0); `refused` counts those with a request (the actor update `0x3A89A0` calls it every update, with
 request id 0 when there is none). An HP-only write never reaches it. `reaction` is the first applied entry's kind (`+2`), -1 with none; `reactHooked=0` means the hook
 is not installed (its bytes didn't match), so no count can be read as absent. The ledger does not use them yet.
+After those (lead #76, after vuh2912-hp-09 logged `reactions=0 refused=0` on all 14 Axel hits while each hit's
+motion changed): `callsAll=<n> calls=<n> callRequests=<n> callApplied=<n> lastApplied=<frame> lastKind=<kind>
+lastRequest=<id> callRowsEvicted=<n>`. The hook counts every call per actor (`inject/src/ReactionCalls.hpp`, 16
+rows, the least recently called reused); the first four are the calls since the witness armed, on any actor and
+on the victim (with a nonzero or unread request, and applied). `lastApplied`, `lastKind` and `lastRequest` are the
+victim's last applied reaction whenever it came, -1 for none. So `callsAll=0` means the hook never ran in the
+window, `calls=0` with `callsAll>0` that it never ran on the victim, `calls>0 callRequests=0` that it ran without a
+request, and `lastApplied` at or before `hitFrame` that the reaction was applied before the witness armed.
 `tools/scenario/boss_target_ledger.py` joins the line to the hit's scope, the friend's driven mirror
 hit and the boss-target choice. `net_prologue_mansion_axel_hp.json` is the live check (docs/SCENARIOS.md).
 

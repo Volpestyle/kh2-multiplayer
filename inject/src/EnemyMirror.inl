@@ -222,6 +222,11 @@ static void LogStats() {
             g_frameCounter, g_mstats.cullHolds, g_mstats.cullPassed, g_mstats.forceRemoves, g_mstats.forceWaits, g_cullCount);
     for (const auto& d : g_driven) if (d.actor) ActorLine("actor", d);
 }
+// VUH-2912 (lead #76): every driven actor's stats line now, for a scenario runner's mark (StatsMark.hpp), so a
+// window shorter than kStatsInterval still holds a sample. The same line as LogStats' own; nothing else changes.
+void LogActorsNow() {
+    for (const auto& d : g_driven) if (d.actor) ActorLine("actor", d);
+}
 static void MaybeStats() {
     if (g_frameCounter - g_lastStatsFrame < kStatsInterval) return;
     g_lastStatsFrame = g_frameCounter;

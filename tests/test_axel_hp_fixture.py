@@ -106,7 +106,8 @@ class AxelHpFixtureTest(unittest.TestCase):
             fight, end = index(name), index(f"m_{name}1")
             self.assertEqual((STEPS[walk]["instance"], STEPS[fight]["instances"]), (reviver, [fighter]))
             self.assertTrue(walk < measured < base < start < fight, name)
-            self.assertEqual(end, fight + 1, name)  # nothing (a revive wait, a later choice) inside the window after the fight
+            # Nothing (a revive wait, a later choice) inside the window after the fight but its stats mark (lead #76).
+            self.assertEqual((end, STEPS[fight + 1]), (fight + 2, {"do": "stats_mark"}), name)
 
     # vuh2912-hp-04: Axel moved ~400 units after the separation, chose the friend, and never searched again while the
     # host was nearer. The window now opens only on a selection that names the fighter.
@@ -162,7 +163,8 @@ class AxelHpFixtureTest(unittest.TestCase):
             quiet, mark = step(f"{name}_quiet"), index(f"m_{name}0")
             check = STEPS[mark + 1]
             self.assertIn(f"SETUP FAILURE (window), not a targeting result: {name}'s window", check["message"])
-            self.assertEqual(STEPS[mark + 2]["as"], name)  # the round's fight follows at once
+            self.assertEqual(STEPS[mark + 2], {"do": "stats_mark"})  # lead #76: just inside the window
+            self.assertEqual(STEPS[mark + 3]["as"], name)  # then the round's fight at once
             host = [target(1 - fighter), target(fighter), self.SAMPLE.format(2, 445), self.HOST_CLAIM.format(1)]
             friend = [self.CLIENT_CLAIM.format(1)]
             snap = evaluate(quiet["expr"], {0: host, 1: friend}, actors=self.boss(445))
@@ -350,7 +352,8 @@ class AxelHpSplitTest(unittest.TestCase):
         b2 = SPLIT["b2"]
         takeover = max(i for i, s in enumerate(b2) if s["do"] == "wait_until" and "take-over" in s["expr"])
         self.assertFalse(any(s["do"] in ("fight", "walk_to") for s in b2[takeover:]))  # no round: the Hall fights come before
-        self.assertEqual([s.get("as") for s in b2[takeover + 1:takeover + 3]], ["m_downs0", "owner_downs"])
+        self.assertEqual([s.get("as", s["do"]) for s in b2[takeover + 1:takeover + 4]],
+                         ["m_downs0", "stats_mark", "owner_downs"])  # lead #76: the stats mark just inside
         ledger, targets = self.named(b2, "ledger"), self.named(b2, "targets")
         self.assertEqual((ledger["window"], ledger["phases"]),
                          (["m_downs0", "m_downs1"], [{"name": "downs", "from": "m_downs0", "to": "m_downs1"}]))
@@ -366,8 +369,8 @@ class AxelHpSplitTest(unittest.TestCase):
         b2 = SPLIT["b2"]
         at = lambda name: b2.index(self.named(b2, name))  # noqa: E731
         downs, verdict = at("owner_downs"), at("verdict")
-        self.assertEqual(b2[downs + 1].get("as"), "m_downs1")
-        between = b2[downs + 1:verdict]
+        self.assertEqual((b2[downs + 1], b2[downs + 2].get("as")), ({"do": "stats_mark"}, "m_downs1"))
+        between = b2[downs + 2:verdict]
         self.assertFalse([s for s in between if s["do"] in ("wait_until", "clip_wait", "capture", "revive_guard")])
         self.assertEqual([s["do"] for s in between],
                          ["save", "assert", "save", "wait", "save", "hp_ledger", "assert", "assert", "assert",
@@ -375,6 +378,23 @@ class AxelHpSplitTest(unittest.TestCase):
         self.assertEqual([s["do"] for s in b2[verdict + 1:]], ["clip_wait", "capture", "capture"])
         self.assertNotIn("require", b2[verdict + 1])  # owner_downs' films are diagnostics
         assert_background_films(self, b2)
+
+    # Lead #76 (vuh2912-hp-09): the round lasted 3.8 s, under the mirror's 300-frame stats interval, so the HP ledger's
+    # one-brain check found no sample in its window. Every window now asks both seats for the stats line just inside
+    # its marks: after the start mark (and its opening assert) and right before the end mark.
+    def test_every_window_holds_a_stats_mark_just_inside_each_end(self):
+        for key, steps in [("full", FULL), *SPLIT.items()]:
+            names = [s["as"][:-1] for s in steps if s["do"] == "save" and s.get("as", "").startswith("m_")
+                     and s["as"].endswith("0")]
+            self.assertTrue(names, key)
+            for name in names:
+                with self.subTest(key=key, window=name):
+                    at = lambda n: next(i for i, s in enumerate(steps) if s.get("as") == n)  # noqa: E731
+                    start, end = at(f"{name}0"), at(f"{name}1")
+                    opening = start + 1 + (steps[start + 1]["do"] == "assert")
+                    self.assertEqual(steps[opening], {"do": "stats_mark"})
+                    self.assertEqual(steps[end - 1], {"do": "stats_mark"})
+                    self.assertEqual([s for s in steps[start:end] if s["do"] == "stats_mark"], [{"do": "stats_mark"}] * 2)
 
     def test_every_other_split_step_is_the_full_fixtures_own(self):
         for key, steps in SPLIT.items():
