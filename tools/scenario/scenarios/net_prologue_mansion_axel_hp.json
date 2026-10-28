@@ -212,16 +212,6 @@
    "message": "SETUP FAILURE, not a targeting result: friend_target needs both seats standing and the host more than 200 units farther from Axel than the friend after both walks"
   },
   {
-   "do": "save",
-   "as": "friend_target_base",
-   "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=1 ', 0)), 'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0], 'hp': [a['hp'] for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0], 'downs': log_count('[downed] gate intercept', 1)}"
-  },
-  {
-   "do": "save",
-   "as": "m_friend_target0",
-   "expr": "[log_count('', 0), log_count('', 1)]"
-  },
-  {
    "do": "revive_guard",
    "host": 1,
    "friend": 0,
@@ -240,6 +230,31 @@
     ],
     "radius": 450
    }
+  },
+  {
+   "do": "fight",
+   "instances": [
+    1
+   ],
+   "seconds": 15,
+   "reach": 120,
+   "as": "friend_target_select",
+   "until": "(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '1'"
+  },
+  {
+   "do": "assert",
+   "expr": "(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '1'",
+   "message": "SETUP FAILURE (selection), not a targeting result: in 15 s Axel's selection never named the friend before friend_target's window"
+  },
+  {
+   "do": "save",
+   "as": "friend_target_base",
+   "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=1 ', 0)), 'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0], 'hp': [a['hp'] for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0], 'downs': log_count('[downed] gate intercept', 1)}"
+  },
+  {
+   "do": "save",
+   "as": "m_friend_target0",
+   "expr": "[log_count('', 0), log_count('', 1)]"
   },
   {
    "do": "fight",
@@ -336,16 +351,6 @@
    "message": "SETUP FAILURE, not a targeting result: host_target needs both seats standing and the friend more than 200 units farther from Axel than the host after both walks"
   },
   {
-   "do": "save",
-   "as": "host_target_base",
-   "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=0 ', 0)), 'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0], 'hp': [a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'downs': log_count('[downed] gate intercept', 0)}"
-  },
-  {
-   "do": "save",
-   "as": "m_host_target0",
-   "expr": "[log_count('', 0), log_count('', 1)]"
-  },
-  {
    "do": "revive_guard",
    "host": 0,
    "friend": 1,
@@ -364,6 +369,31 @@
     ],
     "radius": 450
    }
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0
+   ],
+   "seconds": 15,
+   "reach": 120,
+   "as": "host_target_select",
+   "until": "(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '0'"
+  },
+  {
+   "do": "assert",
+   "expr": "(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '0'",
+   "message": "SETUP FAILURE (selection), not a targeting result: in 15 s Axel's selection never named the host before host_target's window"
+  },
+  {
+   "do": "save",
+   "as": "host_target_base",
+   "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=0 ', 0)), 'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0], 'hp': [a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'downs': log_count('[downed] gate intercept', 0)}"
+  },
+  {
+   "do": "save",
+   "as": "m_host_target0",
+   "expr": "[log_count('', 0), log_count('', 1)]"
   },
   {
    "do": "fight",

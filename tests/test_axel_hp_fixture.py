@@ -89,6 +89,25 @@ class AxelHpFixtureTest(unittest.TestCase):
             self.assertTrue(walk < measured < base < start < fight, name)
             self.assertEqual(end, fight + 1, name)  # nothing (a revive wait, a later choice) inside the window after the fight
 
+    # vuh2912-hp-04: Axel moved ~400 units after the separation, chose the friend, and never searched again while the
+    # host was nearer. The window now opens only on a selection that names the fighter.
+    def test_each_window_opens_on_axels_selection_of_the_fighter(self):
+        for name, fighter, reviver in ROUNDS:
+            guard = [i for i, s in enumerate(STEPS) if s["do"] == "revive_guard" and s.get("host") == fighter
+                     and s.get("on", True) and i > index(f"{name}_separation")][0]
+            select = index(f"{name}_select")
+            check = index(f"SETUP FAILURE (selection), not a targeting result: in 15 s Axel's selection never named the "
+                          f"{('host', 'friend')[fighter]} before {name}'s window", "message")
+            measured = index(f"SETUP FAILURE, not a targeting result: {name}", "message")
+            self.assertTrue(measured < guard < select < check < index(f"{name}_base") < index(f"m_{name}0"), name)
+            self.assertEqual((STEPS[guard]["friend"], STEPS[select]["instances"]), (reviver, [fighter]))
+            self.assertLessEqual(STEPS[select]["seconds"], 15)
+            self.assertEqual(STEPS[select]["until"], STEPS[check]["expr"])
+            expr = STEPS[check]["expr"]
+            self.assertTrue(evaluate(expr, {0: [target(1 - fighter), target(fighter)]}), name)
+            self.assertFalse(evaluate(expr, {0: [target(fighter), target(1 - fighter)]}), name)  # hp-04: it turned away
+            self.assertFalse(evaluate(expr, {0: []}), name)                                      # never chose at all
+
     def test_each_round_must_reach_its_milestone(self):
         for name, fighter, reviver in ROUNDS:
             reached = step(f"{name}: in 20 s Axel never chose")["expr"]

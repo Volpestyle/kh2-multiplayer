@@ -344,6 +344,7 @@ def separation():
 
 SEPARATION_MARGIN = 200  # beyond the policy's 150-unit hysteresis
 FIGHTER_NEAR = 350      # the fighter's approach stops inside this distance from Axel
+SELECT_SECONDS = 15     # the fighter's bound to draw Axel's selection before its round's window
 # Where the HP fixture's revive guards may step aside (Ione 00c3ac51): Axel II's sealed encounter scope, and a circle
 # inside the positions the seats and Axel reached in runs vuh2912-hp-02/03 (centre (39, -27), up to 602 out).
 AXEL_ARENA = {"roomScope": AXEL, "center": [39, -27], "radius": 450}
@@ -380,11 +381,19 @@ def target_round(name, fighter, reviver):
                                  f"saved['{name}_separation']['{seat[fighter]}'] > {SEPARATION_MARGIN}",
          "message": f"SETUP FAILURE, not a targeting result: {name} needs both seats standing and the {seat[reviver]} more than "
                     f"{SEPARATION_MARGIN} units farther from Axel than the {seat[fighter]} after both walks"},
+        # vuh2912-hp-04: Axel chooses only when his own script searches (at its mode transitions), and he moved ~400
+        # units between the separation and the window, so the friend stayed chosen all round. The fighter fights until
+        # his selection names it, and the window opens on that choice; else the round stops as a SETUP FAILURE.
+        {"do": "revive_guard", "host": fighter, "friend": reviver, "aside": AXEL_ARENA},
+        {"do": "fight", "instances": [fighter], "seconds": SELECT_SECONDS, "reach": 120, "as": f"{name}_select",
+         "until": selected(fighter)},
+        {"do": "assert", "expr": selected(fighter),
+         "message": f"SETUP FAILURE (selection), not a targeting result: in {SELECT_SECONDS} s Axel's selection never "
+                    f"named the {seat[fighter]} before {name}'s window"},
         {"do": "save", "as": f"{name}_base", "expr": f"{{'chosen': {targets(fighter)}, 'claims': {host_claims()}, "
                                                     f"'bossHp': {boss_hp(0)}, 'hp': {canonical_hp(fighter)}, "
                                                     f"'downs': log_count('[downed] gate intercept', {fighter})}}"},
         marks(f"m_{name}0"),
-        {"do": "revive_guard", "host": fighter, "friend": reviver, "aside": AXEL_ARENA},
         # The clips run as long as the round can (the step waits for them), so the round's hits are on film.
         {"do": "fight", "instances": [fighter], "seconds": 20, "reach": 120, "as": name,
          "until": f"{selected(fighter)} and {hit} and {landed}",
