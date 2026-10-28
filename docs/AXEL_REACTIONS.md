@@ -392,14 +392,24 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
 - **Clear Light for a friend.** The host's copy of the friend's actor ticks native range triggers once Axel's 1/29
   binds `AP12` on it, so trigger 26 sets its `+0x18C` bit 21 and `+0x638` (Kit, `b034e8cf`). Bit 21 is a level
   flag cleared every tick, and the order of that tick against the host's chain read is unproven.
-- **Only the camera starts are forwarded.** Axel starts his RC cameras with `camera_start_global` (1/164, `42E0D0`),
-  which tail-jumps to `3DB2F0(Axel, name, 0)`: anchored on Axel, with no target, and no result pushed (flags `0x2`).
-  ScriptActorOwner hooks its slot (`SmOwnerCameraGlobal`, pinned, optional: refused, the host plays it as before).
-  During a friend's Overtaker or Clear Light (its held role) the host skips the start and sends it as the role's
-  op 5 (`AxelCameraForwarded`), with the no-target code `kAxelCameraNone`; the friend replays it on its Axel clone
-  through the existing op-5 path, so its camera retirement receipt is Thorn's. Still on the host and not sent:
-  Burst's `camera_watch` (1/207, `430B80`), Clear Light's white-out thread (2/20 queues D303: 0/31, 0/32) and
-  `camera_reset` (1/295). All of these are global per game, not per actor; their bodies are in Kit's `b034e8cf`.
+- **Owner-only camera (in progress).** Axel's RC camera ops act on the game's one camera and fade state, not on an
+  actor (Kit's `b034e8cf`, `e4a7861e`), so a friend RC's camera sequence goes wholly to its owner or wholly to the
+  host (`AxelCameraStepFor`, custody per executor):
+  - **Who holds it.** The RC's first camera op decides. If it is withheld from the host and sent, the sequence is the
+    owner's, and every later Axel camera op of that RC stays off the host: sent if it can be, dropped otherwise. If
+    that first send fails, the sequence is the host's and plays natively, as before. The host's own RCs never take
+    custody, and no camera op that is not Axel's is ever withheld.
+  - **Starts.** Axel starts his RC cameras with `camera_start_global` (1/164, `42E0D0`), which tail-jumps to
+    `3DB2F0(Axel, name, 0)`: anchored on Axel, no target, no result pushed (flags `0x2`). ScriptActorOwner hooks its
+    slot (`SmOwnerCameraGlobal`, pinned, optional: refused, the host plays it as before). During a friend's Overtaker
+    or Clear Light (its held role) the start goes as the role's op 5 with the no-target code `kAxelCameraNone`; the
+    friend replays it on its Axel clone through the existing op-5 path, so its camera retirement receipt is Thorn's.
+  - **Burst's watch.** `camera_watch` (1/207, `430B80`, pinned, optional) watches Axel from L531, which runs 1/207,
+    then 1/29, then 1/112 (Kit, `e4a7861e`). Inside a friend's callback the watch waits for the callback's end and
+    then goes on the 1/112 hook role as op 17 (`actor_owner_axel_camera`, kind watch). With no role to carry it, it
+    plays natively once the callback returns.
+  - **Not yet:** the friend's replay of op 17, and D303's white-out, `camera_reset` and white-in after Clear Light
+    (0/31, 1/295, 0/32), which are the next two commits.
 - **Axel's own pose on the friend while held.** The host stops publishing Axel's motion while he is parented, so the
   friend's held clone keeps its last mirrored motion.
 - **Host-owned RCs show nothing on the friend's copy of the host.** No role is minted for the host's own executor,

@@ -17,6 +17,11 @@ struct SmAxelState {
     bool unresolvedLogged{}; // once per executor
     bool chainUnread{};      // logged on the change
     int heldSent{-1};        // the friend role's last attachment record: -1 none, 0 detach, 1 attach
+    R::AxelCameraCustody cameraCustody{}; // R::AxelCameraStepFor: whose this RC's camera sequence is
+    bool inFriendCallback{}; // a friend's completion is running the native callback (SmAxelComplete)
+    bool watchPending{};     // Burst's 1/207, waiting for the callback's end (SmAxelFlushWatch)
+    R::AxelCameraStep watchStep{};
+    std::uint64_t watchArgs[1]{};
     // client
     R::AxelOffers offers{};
     struct Identity { std::uint8_t slot{0xFF};std::uint64_t connection{};std::uint32_t epoch{}; };
@@ -40,7 +45,7 @@ static void SmAxelEndExecutor(const char* why) {
         Log("[axel-rc] executor end command=%u owner=%u frames=%u engaged=%u reason=%s",g_axel.executor.command,
             g_axel.executor.slot,g_frameCounter-g_axel.executor.admittedFrame,g_axel.executor.engaged?1u:0u,why);
     g_axel.executor={};g_axel.executorActor=0;g_axel.executorHandle=0;g_axel.unresolvedLogged=false;g_axel.chainUnread=false;
-    g_axel.heldSent=-1;
+    g_axel.heldSent=-1;g_axel.cameraCustody=R::AxelCameraCustody::Undecided;
 }
 // Client: the host's offers and identities belong to the room and session they came in; ScriptMirror's room, load,
 // transition and session resets end them.
@@ -124,6 +129,15 @@ static R::AxelAct SmAxelCaptureQuery(const std::uint64_t* args) {
     std::uint16_t netId=0;std::uint32_t objectId=0;
     return SmAxelActOn(SmOwnerVmSource(netId,objectId),args[0],"capture-query");
 }
+// R::AxelRoleHeld for a ScriptActorOwner role on the host: an Axel II role with no thread, still the bound
+// executor's seat and actor, whose actor no coroutine holds.
+static bool SmAxelRoleHeld(std::uint32_t objectId,std::uint8_t slot,uintptr_t actor,uintptr_t roleThread) {
+    if(!g_sm.hostActive || objectId!=R::kAxelIIObjectId || roleThread || !actor)return false;
+    enemysync::DownedScope scope;uintptr_t thread=0;
+    const bool read=ReadHitTrace(actor+0xD48,thread);
+    return SmOwnerScope(scope) && R::AxelRoleHeld(SmAxelExecutorBound(scope),g_axel.executor.slot,g_axel.executorActor,
+        slot,actor,read,thread);
+}
 // The Axel role's own records in ScriptActorOwner's stream, built only here so that what they carry is what the wire
 // rules admit (R::ValidCall, validScriptCallEntry; tests/AxelReactionAdapterTest.cpp runs them through both).
 static R::Call SmAxelHoldRecord(const ScriptActorRole& role,bool held) {
@@ -136,13 +150,22 @@ static R::Call SmAxelCameraRecord(const ScriptActorRole& role,std::uint32_t four
     call.values[0]=R::Tagged(R::kTagInt,fourcc);call.values[1]=R::Tagged(R::kTagInt,R::kAxelCameraNone);
     return call;
 }
-// Host: the friend executor's current owner role, with no thread (SmOwnerBeginAxelRole), or none.
-static const ScriptActorRole* SmAxelFriendRole(std::uint8_t slot,uintptr_t actor) {
+static R::Call SmAxelCameraOpRecord(const ScriptActorRole& role,R::AxelCameraKind kind,float argument) {
+    auto call=SmOwnerRecord(role,17);
+    const auto k=static_cast<std::uint32_t>(kind);
+    std::uint32_t bits=0;std::memcpy(&bits,&argument,sizeof(bits));
+    call.values[0]=R::Tagged(R::kTagInt,k);call.values[1]=k<=2?R::Tagged(R::kTagInt,0):R::Tagged(R::kTagFloat,bits);
+    return call;
+}
+// Host: the friend executor's current owner role on its actor, or none: its role with no thread while held
+// (SmOwnerBeginAxelRole, SmAxelRoleHeld), or, with anyThread, Burst's coroutine role from its own 1/112 hook too.
+static const ScriptActorRole* SmAxelFriendRole(std::uint8_t slot,uintptr_t actor,bool anyThread=false) {
     enemysync::DownedScope scope;
     if(!slot || slot>=3 || !actor || !SmOwnerScope(scope))return nullptr;
     const auto& role=g_smRoles[slot];
-    return role.resource && role.objectId==R::kAxelIIObjectId && !role.thread && role.actor==actor &&
-        SmOwnerCurrent(role,scope)?&role:nullptr;
+    if(!role.resource || role.objectId!=R::kAxelIIObjectId || role.actor!=actor || !SmOwnerCurrent(role,scope))return nullptr;
+    if(role.thread)return anyThread?&role:nullptr;
+    return SmAxelRoleHeld(R::kAxelIIObjectId,slot,actor,0)?&role:nullptr;
 }
 static bool SmAxelEmitHold(std::uint8_t slot,uintptr_t actor,bool held) {
     const auto* role=SmAxelFriendRole(slot,actor);
@@ -151,6 +174,10 @@ static bool SmAxelEmitHold(std::uint8_t slot,uintptr_t actor,bool held) {
 static bool SmAxelEmitCamera(std::uint8_t slot,uintptr_t actor,std::uint32_t fourcc) {
     const auto* role=SmAxelFriendRole(slot,actor);
     return role && SmEmit(SmAxelCameraRecord(*role,fourcc));
+}
+static bool SmAxelEmitCameraOp(std::uint8_t slot,uintptr_t actor,R::AxelCameraKind kind,float argument) {
+    const auto* role=SmAxelFriendRole(slot,actor,true);
+    return role && SmEmit(SmAxelCameraOpRecord(*role,kind,argument));
 }
 // Host: whether Axel is attached to this actor with his own pair (R::AxelAttachPair): 1 held, 0 not, -1 unread.
 static int SmAxelHeldBy(uintptr_t actor) {
@@ -205,36 +232,74 @@ static bool SmAxelApplyHold(ScriptActorRole& role,bool hold) noexcept {
         role.axelHeld=false;return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){++g_sm.faults;return false;}
 }
-// R::AxelRoleHeld for a ScriptActorOwner role on the host: an Axel II role with no thread, still the bound
-// executor's seat and actor, whose actor no coroutine holds.
-static bool SmAxelRoleHeld(std::uint32_t objectId,std::uint8_t slot,uintptr_t actor,uintptr_t roleThread) {
-    if(!g_sm.hostActive || objectId!=R::kAxelIIObjectId || roleThread || !actor)return false;
-    enemysync::DownedScope scope;uintptr_t thread=0;
-    const bool read=ReadHitTrace(actor+0xD48,thread);
-    return SmOwnerScope(scope) && R::AxelRoleHeld(SmAxelExecutorBound(scope),g_axel.executor.slot,g_axel.executorActor,
-        slot,actor,read,thread);
+// R::AxelCameraStepFor on the host for a camera op whose object is this actor.
+static R::AxelCameraStep SmAxelCameraStep(uintptr_t object) {
+    const bool friendExecutor=g_axel.executor.command && g_axel.executor.slot && g_axel.executor.slot<3 && g_axel.executorActor;
+    return R::AxelCameraStepFor(object && object==g_axel.actor,friendExecutor?g_axel.cameraCustody:R::AxelCameraCustody::Undecided,
+        friendExecutor);
 }
-// Host 1/164 on its copied arguments ([0] the object, [8] the camera name): a start on Axel during a friend's RC
-// goes to its owner instead (R::AxelCameraForwarded). True when the hook must skip the native start. A name that is
-// not a printable fourcc stays native.
-static bool SmAxelCamera(const std::uint64_t* args) {
-    if(!g_sm.hostActive || !args || !SmAxelHostCurrent() || R::TagOf(args[1])!=R::kTagAddress)return false;
-    std::uint32_t ignored=0;
-    const auto slot=g_axel.executor.slot;
-    const bool friendRole=g_axel.executor.command && slot && slot<3 && g_axel.executorActor &&
-        SmAxelRoleHeld(R::kAxelIIObjectId,slot,g_axel.executorActor,0);
-    if(!R::AxelCameraForwarded(SmActorOf(args[0],ignored)==g_axel.actor,friendRole))return false;
-    char text[4]{};std::uint32_t fourcc=0;
-    const auto name=SmDecode(R::BitsOf(args[1]));
+// After an Offer or Withhold step's send. False only for an Offer that did not go: the host plays it, and the rest
+// of the sequence, natively.
+static bool SmAxelCameraSent(R::AxelCameraStep step,bool sent,const char* op,std::uint32_t detail) {
+    if(step==R::AxelCameraStep::Offer) {
+        g_axel.cameraCustody=sent?R::AxelCameraCustody::Owner:R::AxelCameraCustody::Host;
+        if(!sent) {
+            if(SmAxelLogBudget())Log("[axel-rc] camera native %s command=%u owner=%u: not sent, the host keeps the sequence",
+                op,g_axel.executor.command,g_axel.executor.slot);
+            return false;
+        }
+    }
+    if(SmAxelLogBudget())
+        Log("[axel-rc] camera %s %s command=%u owner=%u detail=%X",sent?"forwarded":"dropped",op,g_axel.executor.command,
+            g_axel.executor.slot,detail);
+    return true;
+}
+// A camera name argument as the fourcc 3DB2F0 packs, if it is printable.
+static bool SmAxelCameraName(std::uint64_t arg,std::uint32_t& fourcc) {
+    char text[4]{};fourcc=0;
+    const auto name=R::TagOf(arg)==R::kTagAddress?SmDecode(R::BitsOf(arg)):0;
     if(!name || !ReadHitTraceMemory(name,text,sizeof(text)))return false;
     for(unsigned i=0;i<4 && text[i];++i) {
         if(text[i]<0x20 || text[i]>0x7E)return false;
         fourcc|=static_cast<std::uint32_t>(static_cast<unsigned char>(text[i]))<<(8*i);
     }
-    if(!fourcc || !SmAxelEmitCamera(slot,g_axel.executorActor,fourcc))return false;
-    if(SmAxelLogBudget())
-        Log("[axel-rc] camera forwarded command=%u owner=%u fourcc=%X",g_axel.executor.command,slot,fourcc);
-    return true;
+    return fourcc!=0;
+}
+// Host 1/164 on its copied arguments ([0] the object, [8] the camera name). True when the hook must skip the native
+// start. An offered start whose name is not a printable fourcc, or that cannot be sent, stays native.
+static bool SmAxelCamera(const std::uint64_t* args) {
+    if(!g_sm.hostActive || !args || !SmAxelHostCurrent())return false;
+    std::uint32_t ignored=0,fourcc=0;
+    const auto step=SmAxelCameraStep(SmActorOf(args[0],ignored));
+    if(step==R::AxelCameraStep::Native)return false;
+    const bool sent=SmAxelCameraName(args[1],fourcc) && SmAxelEmitCamera(g_axel.executor.slot,g_axel.executorActor,fourcc);
+    return SmAxelCameraSent(step,sent,"start",fourcc);
+}
+// Host 1/207 camera_watch on its copied argument ([0] the object): Burst's L531 watches Axel. True: the hook skips
+// the native watch. L531 calls it before its 1/112 hooks the player (Kit, e4a7861e), so inside a friend's callback
+// the role it goes on may not exist yet; it then waits for the callback's end (SmAxelFlushWatch).
+static bool SmAxelCameraWatch(const std::uint64_t* args) {
+    if(!g_sm.hostActive || !args || !SmAxelHostCurrent())return false;
+    std::uint32_t ignored=0;
+    const auto step=SmAxelCameraStep(SmActorOf(args[0],ignored));
+    if(step==R::AxelCameraStep::Native)return false;
+    const auto slot=g_axel.executor.slot;
+    if(!SmAxelFriendRole(slot,g_axel.executorActor,true) && g_axel.inFriendCallback && !g_axel.watchPending) {
+        g_axel.watchPending=true;g_axel.watchStep=step;g_axel.watchArgs[0]=args[0];return true;
+    }
+    return SmAxelCameraSent(step,SmAxelEmitCameraOp(slot,g_axel.executorActor,R::AxelCameraKind::Watch,0),"watch",0);
+}
+// After the friend's callback: the waiting watch goes on its role (Burst's hook role), or, if this RC's sequence is
+// not already the owner's and it cannot be sent, plays natively now.
+static void SmAxelFlushWatch() {
+    if(!g_axel.watchPending)return;
+    g_axel.watchPending=false;
+    using Custody=R::AxelCameraCustody;
+    const auto step=g_axel.cameraCustody==Custody::Owner?R::AxelCameraStep::Withhold:
+        g_axel.cameraCustody==Custody::Host?R::AxelCameraStep::Native:g_axel.watchStep;
+    const bool sent=step!=R::AxelCameraStep::Native &&
+        SmAxelEmitCameraOp(g_axel.executor.slot,g_axel.executorActor,R::AxelCameraKind::Watch,0);
+    if(step==R::AxelCameraStep::Native || !SmAxelCameraSent(step,sent,"watch",0))SmOwnerCameraWatchNative(g_axel.watchArgs);
 }
 static void SmAxelExecutorTick(const enemysync::DownedScope& scope) {
     if(!g_axel.executor.command)return;
@@ -422,7 +487,10 @@ static bool SmAxelComplete(const enemysync::ScriptReactionCompletionRecord& clai
     if(SmAxelLogBudget())
         Log("[axel-rc] complete source=%u resource=%u occurrence=%llu command=%u owner=%u host-press=%u",
             claim.netId,claim.resource,claim.occurrence,command,claim.ownerSlot,nativeTarget?1u:0u);
+    g_axel.inFriendCallback=claim.ownerSlot!=0;
     g_smReactionCallback(receiver,player,command,nativeTarget?nativeTarget:fallback);
+    g_axel.inFriendCallback=false;
+    SmAxelFlushWatch();
     return true;
 }
 // Either seat's native callback for Axel II. Handled (true) whenever the receiver is Axel II and the command is

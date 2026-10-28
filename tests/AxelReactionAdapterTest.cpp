@@ -10,6 +10,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <vector>
 #ifdef _MSC_VER
@@ -157,6 +158,16 @@ static std::vector<Hold> Holds() {
     }
     return out;
 }
+struct CameraOp { std::uint8_t slot{};uintptr_t thread{};std::uint32_t kind{},argument{};bool floatArgument{}; };
+static std::vector<CameraOp> CameraOps() {
+    std::vector<CameraOp> out;
+    for(const auto& c:emitted) {
+        const auto* role=RoleOf(c);
+        if(R::kTraps[c.trap].table==255 && R::kTraps[c.trap].index==17 && role)
+            out.push_back({role->slot,role->thread,R::BitsOf(c.values[0]),R::BitsOf(c.values[1]),R::TagOf(c.values[1])==R::kTagFloat});
+    }
+    return out;
+}
 static std::vector<Camera> Cameras() {
     std::vector<Camera> out;
     for(const auto& c:emitted) {
@@ -183,9 +194,14 @@ static bool SmOwnerBeginAxelRole(std::uint8_t slot,uintptr_t actor,uintptr_t sou
 static unsigned callbacks=0;
 static uintptr_t callbackPlayer=0;
 static std::size_t rolesAtCallback=0;
+static std::function<void()> duringCallback; // the callback's own traps, as L531 runs them
 static void Callback(uintptr_t,uintptr_t player,std::uint32_t,const std::uint32_t*) {
     ++callbacks;callbackPlayer=player;rolesAtCallback=roleBegins.size();
+    if(duringCallback)duringCallback();
 }
+// The native camera_watch a deferred watch falls back to, recorded.
+static unsigned nativeWatches=0;
+static void SmOwnerCameraWatchNative(const std::uint64_t*) { ++nativeWatches; }
 static void (*g_smReactionCallback)(uintptr_t,uintptr_t,std::uint32_t,const std::uint32_t*)=&Callback;
 static uintptr_t g_soraActor=0x200000;
 static std::uint32_t g_frameCounter=10;
@@ -220,7 +236,7 @@ void Setup(std::uint32_t groups) {
     g_axel={};memory.clear();handles={{kAxel,kAxelHandle},{kHostActor,kHostHandle},{kFriendActor,kFriendHandle}};
     enemytarget::g.candidateActor={kHostActor,kFriendActor,0};
     enemysync::scope={};enemysync::session=0xA1;enemysync::sentClaims=0;g_sm.hostActive=true;g_frameCounter=10;
-    scopeOk=true;roleBeginOk=true;roleBegins.clear();g_smRoles={};roleCurrent=true;emitted.clear();emitOk=true;callbacks=0;callbackPlayer=0;downedspike::down=false;
+    scopeOk=true;roleBeginOk=true;roleBegins.clear();g_smRoles={};roleCurrent=true;emitted.clear();emitOk=true;duringCallback=nullptr;nativeWatches=0;callbacks=0;callbackPlayer=0;downedspike::down=false;
     g_soraActor=kHostActor;puppets={kFriendActor,0};abortArmed=true;Put(g_exeBase+enemytarget::RVA_NATIVE_PLAYER,kHostActor);
     Put(kAxel+0x100,uintptr_t{0x400000});Put(uintptr_t{0x400000},std::uint32_t{81});
     Put(kHostActor+0x100,uintptr_t{0x401000});Put(uintptr_t{0x401000},std::uint32_t{566});
@@ -530,17 +546,98 @@ int main() {
               "a friend's Overtaker camera on Axel goes to the friend with no target, and the host skips it");
         const auto sent=Cameras().size();
         check(!start(kHostHandle) && Cameras().size()==sent,"another object's camera stays native");
-        Put(kName,std::uint32_t{0x0130});
-        check(!start(kAxelHandle) && Cameras().size()==sent,"a name that is not a printable fourcc stays native");
-        Put(kName,std::uint32_t{0x3130});emitOk=false;
+        // Each case below is a fresh RC: the first op decides its custody.
+        const auto fresh=[&] { (void)FriendOvertaker();handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3030}); };
+        fresh();Put(kName,std::uint32_t{0x0130});
+        check(!start(kAxelHandle) && Cameras().empty(),"a name that is not a printable fourcc stays native");
+        fresh();emitOk=false;
         check(!start(kAxelHandle),"if the record cannot be sent, the host plays it natively");
-        emitOk=true;Put(kFriendActor+0xD48,uintptr_t{0x777});
+        fresh();Put(kFriendActor+0xD48,uintptr_t{0x777});
         check(!start(kAxelHandle),"without the friend's held role (Burst's hook role, or none) it stays native");
         g_sm.hostActive=false;
         check(!start(kAxelHandle),"a client's own starts stay native");
         Setup(1u<<R::kOvertakerGroup);g_seats[1].living=false;Frame();handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3030});
         const bool ran=SmAxelComplete(Claim(),nullptr);
         check(ran && !start(kAxelHandle) && Cameras().empty(),"the host's own RC camera plays on the host");
+    }
+
+    // Camera custody (R::AxelCameraStepFor): a friend RC's camera sequence goes wholly to its owner or wholly to the host.
+    {
+        constexpr uintptr_t kName=0x700000;constexpr std::uint32_t kNameHandle=0x70;
+        const auto start=[&](std::uint32_t object) {
+            const std::uint64_t args[2]{R::Tagged(R::kTagAddress,object),R::Tagged(R::kTagAddress,kNameHandle)};
+            return SmAxelCamera(args);
+        };
+        const auto watch=[](std::uint32_t object) {
+            const std::uint64_t args[1]{R::Tagged(R::kTagAddress,object)};return SmAxelCameraWatch(args);
+        };
+        const auto named=[&] { handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3030}); };
+        (void)FriendOvertaker();named();
+        check(start(kAxelHandle) && g_axel.cameraCustody==R::AxelCameraCustody::Owner,
+              "a friend's first camera op that is sent makes the sequence its owner's");
+        emitOk=false;const auto sent=Cameras().size();
+        check(start(kAxelHandle) && Cameras().size()==sent,"a later op of that RC stays off the host even when it cannot be sent");
+        emitOk=true;
+        check(!start(kHostHandle) && !watch(kHostHandle) && Cameras().size()==sent && CameraOps().empty(),
+              "the host's own unrelated camera ops stay native while the owner holds custody");
+        (void)FriendOvertaker();named();emitOk=false;
+        check(!start(kAxelHandle) && g_axel.cameraCustody==R::AxelCameraCustody::Host,
+              "a first op that cannot be sent plays on the host, and the sequence is the host's");
+        emitOk=true;
+        check(!start(kAxelHandle) && !watch(kAxelHandle) && Cameras().empty() && CameraOps().empty(),
+              "so the rest of that RC's sequence plays on the host too: never split");
+        g_frameCounter+=R::kAxelExecutorLeaseFrames;Frame();
+        check(!g_axel.executor.command && g_axel.cameraCustody==R::AxelCameraCustody::Undecided,"custody ends with its executor");
+        Setup(1u<<R::kOvertakerGroup);g_seats[1].living=false;Frame();named();
+        const bool ran=SmAxelComplete(Claim(),nullptr);
+        check(ran && !start(kAxelHandle) && !watch(kAxelHandle) && Cameras().empty() && CameraOps().empty(),
+              "the host's own RC never takes custody");
+    }
+    {
+        // Burst's L531 runs 1/207, then 1/29, then 1/112 (Kit, e4a7861e): its watch waits for the hook role.
+        const auto watch=[](std::uint32_t object) {
+            const std::uint64_t args[1]{R::Tagged(R::kTagAddress,object)};return SmAxelCameraWatch(args);
+        };
+        const auto hookRole=[] {
+            auto& role=g_smRoles[1];role={};role.resource=0x80000077u;role.objectId=81;role.netId=7;role.slot=1;
+            role.actor=kFriendActor;role.source=kAxel;role.thread=0x900;role.epoch=enemysync::scope.epoch;
+        };
+        bool deferred=false;
+        Setup(1u<<R::kBurstFrontierGroupA);Frame();
+        duringCallback=[&] { deferred=watch(kAxelHandle) && CameraOps().empty();hookRole(); };
+        const bool ran=SmAxelComplete(Claim(R::kBurstFrontier),nullptr);
+        const auto ops=CameraOps();
+        check(ran && deferred && ops.size()==1 && ops[0].slot==1 && ops[0].thread==0x900 &&
+              ops[0].kind==static_cast<std::uint32_t>(R::AxelCameraKind::Watch) && !ops[0].argument && !nativeWatches &&
+              g_axel.cameraCustody==R::AxelCameraCustody::Owner,
+              "a friend's Burst watch is held through its callback and goes on the hook role, and the host skips it");
+        Setup(1u<<R::kBurstFrontierGroupA);Frame();
+        duringCallback=[&] { deferred=watch(kAxelHandle); };
+        check(SmAxelComplete(Claim(R::kBurstFrontier),nullptr) && deferred && CameraOps().empty() && nativeWatches==1 &&
+              g_axel.cameraCustody==R::AxelCameraCustody::Host,
+              "with no hook role to carry it, it plays natively once the callback returns");
+        duringCallback=nullptr;
+        Setup(1u<<R::kBurstFrontierGroupA);Frame();(void)SmAxelComplete(Claim(R::kBurstFrontier),nullptr);hookRole();
+        check(watch(kAxelHandle) && CameraOps().size()==1 && !nativeWatches,"outside the callback it goes at once on a current role");
+        Setup(1u<<R::kBurstFrontierGroupA);g_seats[1].living=false;Frame();
+        duringCallback=[&] { deferred=watch(kAxelHandle); };
+        check(SmAxelComplete(Claim(R::kBurstFrontier),nullptr) && !deferred && CameraOps().empty() && !nativeWatches,
+              "the host's own Burst watches natively");
+        duringCallback=nullptr;
+        Setup(1u<<R::kBurstFrontierGroupA);enemysync::scope.roomId=0x15;Frame();reads=0;vmLookups=0;
+        check(!watch(kAxelHandle) && !reads && !vmLookups,"outside Axel II the watch hook reads nothing");
+    }
+    {
+        // Every op-17 kind the custody path can build passes both of the real wire rules.
+        ScriptActorRole role{81,kFriendActor,kAxel,false};role.resource=0x80000009u;role.netId=7;role.slot=1;role.thread=0x900;
+        const auto before=wireRefused;emitted.clear();emitOk=true;
+        const bool all=SmEmit(SmAxelCameraOpRecord(role,R::AxelCameraKind::Watch,0)) &&
+            SmEmit(SmAxelCameraOpRecord(role,R::AxelCameraKind::Reset,0)) &&
+            SmEmit(SmAxelCameraOpRecord(role,R::AxelCameraKind::WhiteOut,70.0f)) &&
+            SmEmit(SmAxelCameraOpRecord(role,R::AxelCameraKind::WhiteIn,30.0f));
+        check(all && wireRefused==before && emitted.size()==4 && R::TagOf(emitted[2].values[1])==R::kTagFloat &&
+              R::FloatOf(emitted[2].values[1])==70.0f && R::TagOf(emitted[1].values[1])==R::kTagInt,
+              "watch, reset, white-out and white-in records pass the client's and the codec's rules");
     }
 
     // The friend's side: the host's offer, its prompt proof and its press, which claims and runs nothing locally.

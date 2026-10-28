@@ -363,7 +363,23 @@ inline bool AxelAttachPair(std::uint32_t flags,std::uint32_t bone) noexcept {
 // 1/164 hook skips it and sends it to the owner as the role's camera record (op 5). Its target code is "none"
 // (kAxelCameraNone) beside op 5's 0 (the role's actor) and 1 (the source). The trap has no result bit, so a skipped
 // call leaves the BDX stack as it was.
+// Axel's other RC camera traps act on the game's one camera and fade state, not on an actor (Kit's b034e8cf,
+// e4a7861e): Burst's camera_watch (1/207), and D303's white-out, camera_reset and white-in (0/31, 1/295, 0/32) after
+// Clear Light. So a friend RC's camera sequence goes wholly to its owner or wholly to the host, never split: custody.
+// The RC's first camera op (its 1/164, or Burst's 1/207) decides it: withheld from the host and sent to the owner,
+// the sequence is the owner's; if that send fails, it is the host's and the host plays all of it natively, as before.
+// Once it is the owner's, no camera op of that RC runs on the host: it is sent if it can be and dropped otherwise (the
+// owner's retirement cleans up). Only Axel's own ops are ever withheld; any other camera op on the host stays native.
 inline constexpr std::uint32_t kAxelCameraNone=2;
+enum class AxelCameraCustody : std::uint8_t { Undecided, Owner, Host };
+enum class AxelCameraStep : std::uint8_t { Native, Offer, Withhold };
+// Offer: send it; if it goes, custody is the owner's, and if not, the host's (it runs natively). Withhold: never on
+// the host.
+inline AxelCameraStep AxelCameraStepFor(bool axelSource,AxelCameraCustody custody,bool friendExecutor) noexcept {
+    if(!axelSource || custody==AxelCameraCustody::Host)return AxelCameraStep::Native;
+    if(custody==AxelCameraCustody::Owner)return AxelCameraStep::Withhold;
+    return friendExecutor?AxelCameraStep::Offer:AxelCameraStep::Native;
+}
 // A friend RC's global camera op on the wire (255/17): Watch (1/207) and Reset (1/295) carry int 0, WhiteOut (0/31)
 // and WhiteIn (0/32) the fade's own positive float argument.
 enum class AxelCameraKind : std::uint32_t { Watch=1, Reset=2, WhiteOut=3, WhiteIn=4 };
@@ -371,7 +387,6 @@ inline bool AxelCameraOpValid(std::uint32_t kind,bool argFloat,std::uint32_t arg
     if(kind<1 || kind>4)return false;
     return kind<=2?!argFloat && !argBits:argFloat && arg>0;
 }
-inline bool AxelCameraForwarded(bool axelSource,bool friendRole) noexcept { return axelSource && friendRole; }
 // Which RCs begin that role at completion: Overtaker and Clear Light. Burst Frontier hooks the player into its steering
 // coroutine (1/112), and ScriptActorOwner's hook mints the role, adopting the capture issued just before it.
 inline bool AxelRoleAtCompletion(std::uint16_t command) noexcept {

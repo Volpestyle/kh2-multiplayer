@@ -180,6 +180,7 @@ struct OwnerTrapSlot {
 };
 static void __fastcall SmOwnerCameraGlobal(std::uint64_t*);
 static void __fastcall SmOwnerCaptureQuery(std::uint64_t*);
+static void __fastcall SmOwnerCameraWatch(std::uint64_t*);
 static constexpr std::size_t kSmOwnerCoreTrapCount=6;
 static OwnerTrapSlot g_smOwnerTraps[]{
     {3,0x42B230,0x40000000,R::kOwnerPlayer,sizeof(R::kOwnerPlayer),&SmOwnerPlayer},
@@ -196,6 +197,8 @@ static OwnerTrapSlot g_smOwnerTraps[]{
 static OwnerTrapSlot g_smAxelCameraSlot{164,0x42E0D0,0x2,R::kOwnerCameraGlobal,sizeof(R::kOwnerCameraGlobal),&SmOwnerCameraGlobal};
 static OwnerTrapSlot g_smAxelCaptureQuerySlot{101,0x42D360,0x40000001,R::kOwnerCaptureQuery,sizeof(R::kOwnerCaptureQuery),
     &SmOwnerCaptureQuery};
+// camera_watch: refused, Burst's watch plays natively as before (R::AxelCameraStepFor's fallback).
+static OwnerTrapSlot g_smAxelWatchSlot{207,0x430B80,0x1,R::kOwnerCameraWatch,sizeof(R::kOwnerCameraWatch),&SmOwnerCameraWatch};
 // R::AxelExecutionAdmitted's abortArmed: every trap that takes 1/3's result is gated, the core's 1/18 and 1/29 and
 // the optional 1/101 (Ione's 75233daf).
 static bool SmOwnerAxelAbortReady() noexcept { return SmOwnerReady() && g_smAxelCaptureQuerySlot.swapped; }
@@ -1175,6 +1178,18 @@ static void __fastcall SmOwnerCameraGlobal(std::uint64_t* args) {
     if(SmGameThread() && SmCopyArgs(args,before,2) && SmAxelCamera(before))return;
     reinterpret_cast<TrapFn>(g_smAxelCameraSlot.original)(args);
 }
+// Host only decides (SmAxelCameraWatch); flags 0x1, so a skipped watch pushes nothing.
+static void __fastcall SmOwnerCameraWatch(std::uint64_t* args) {
+    std::uint64_t before[1]{};
+    if(SmGameThread() && SmCopyArgs(args,before,1) && SmAxelCameraWatch(before))return;
+    reinterpret_cast<TrapFn>(g_smAxelWatchSlot.original)(args);
+}
+// The native watch a deferred Burst watch falls back to (SmAxelFlushWatch), on a copy of its argument.
+static void SmOwnerCameraWatchNative(const std::uint64_t* args) {
+    std::uint64_t copy[1]{args[0]};
+    if(!g_smAxelWatchSlot.original)return;
+    __try { reinterpret_cast<TrapFn>(g_smAxelWatchSlot.original)(copy); } __except(EXCEPTION_EXECUTE_HANDLER){++g_sm.faults;}
+}
 static void __fastcall SmOwnerCapture(std::uint64_t* args) {
     SmOwnerResidueInvalidate(); // VUH-2580: our replays call the original, never this detour
     std::uint64_t before[4]{};const bool copied=SmCopyArgs(args,before,4);
@@ -2028,6 +2043,7 @@ static void SmOwnerShutdown() {
     g_smOwnerInstalled.store(false,std::memory_order_release);
     SmOwnerRestoreSlot(g_smAxelCameraSlot);
     SmOwnerRestoreSlot(g_smAxelCaptureQuerySlot);
+    SmOwnerRestoreSlot(g_smAxelWatchSlot);
     for(auto& slot:g_smOwnerTraps)if(slot.swapped) {
         const auto previous=InterlockedCompareExchangePointer(reinterpret_cast<PVOID volatile*>(slot.entry),
             reinterpret_cast<void*>(slot.original),reinterpret_cast<void*>(slot.detour));
@@ -2105,5 +2121,6 @@ static bool SmOwnerInstall() {
     if(!SmOwnerSwapOptional(g_smAxelCameraSlot,table))Log("[axel-rc] camera_start_global hook refused; Axel's RC cameras stay native");
     if(!SmOwnerSwapOptional(g_smAxelCaptureQuerySlot,table))
         Log("[axel-rc] obj_motion_is_capture hook refused; the abort is unarmed, friends execute no Axel RC");
+    if(!SmOwnerSwapOptional(g_smAxelWatchSlot,table))Log("[axel-rc] camera_watch hook refused; Burst's watch stays native");
     return true;
 }

@@ -476,8 +476,16 @@ int main() {
               !R::AxelRoleHeld(true,1,0x300,1,0x400,true,0),"not once the executor ends, or for another seat or actor");
         check(!R::AxelRoleHeld(true,1,0x300,1,0x300,false,0) && !R::AxelRoleHeld(true,1,0x300,1,0x300,true,0x777),
               "nor with the actor's coroutine word unread or held");
-        check(R::AxelCameraForwarded(true,true) && !R::AxelCameraForwarded(false,true) && !R::AxelCameraForwarded(true,false),
-              "only Axel's camera start, during a friend's role, is forwarded");
+        using Step=R::AxelCameraStep;using Custody=R::AxelCameraCustody;
+        check(R::AxelCameraStepFor(true,Custody::Undecided,true)==Step::Offer,
+              "a friend RC's first Axel camera op is offered to its owner");
+        check(R::AxelCameraStepFor(true,Custody::Owner,true)==Step::Withhold && R::AxelCameraStepFor(true,Custody::Owner,false)==Step::Withhold,
+              "once the sequence is the owner's, every Axel camera op of that RC is withheld from the host");
+        check(R::AxelCameraStepFor(true,Custody::Host,true)==Step::Native,
+              "once its first op could not be sent, the whole sequence plays on the host: never split");
+        check(R::AxelCameraStepFor(true,Custody::Undecided,false)==Step::Native,"the host's own RC, or none, plays natively");
+        check(R::AxelCameraStepFor(false,Custody::Owner,true)==Step::Native && R::AxelCameraStepFor(false,Custody::Undecided,true)==Step::Native,
+              "anything not Axel's stays native, whoever holds custody");
         check(R::kAxelCameraNone==2,"the no-target code sits beside op 5's actor (0) and source (1)");
     }
 

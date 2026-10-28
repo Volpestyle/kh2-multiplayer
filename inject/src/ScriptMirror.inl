@@ -91,6 +91,7 @@ static int SmAxelHeldBy(uintptr_t);
 static bool SmAxelRoleHeld(std::uint32_t,std::uint8_t,uintptr_t,uintptr_t);
 static bool SmAxelCamera(const std::uint64_t*);
 static R::AxelAct SmAxelCaptureQuery(const std::uint64_t*);
+static bool SmAxelCameraWatch(const std::uint64_t*);
 static void SmAxelClientReset();
 struct ScriptActorRole;
 static bool SmAxelCloneHeld(const ScriptActorRole&);
