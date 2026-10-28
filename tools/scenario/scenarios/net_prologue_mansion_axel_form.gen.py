@@ -550,10 +550,11 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
         marks("m_downs0"),
         STATS_MARK,
         # vuh2912-hp-08 (lead #72): Axel hit the reviver 14 times in 26 s and broke every hold. Each forced down waits,
-        # at most 20 s and labelled, until Axel is 500 units from both seats: just over the 90th percentile (479) of how
-        # far he travelled in the second before each of his 96 hits on a seat in hp-05, hp-07 and hp-08 (max 591).
+        # at most 20 s and labelled, until every living enemy is 500 units from both seats' canonical players: just
+        # over the 90th percentile (479) of how far Axel travelled in the second before each of his 96 hits on a seat
+        # in hp-05, hp-07 and hp-08 (max 591). Lead #82: through killWhen, owner_downs' one mechanism (VUH-2931).
         {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000,
-         "aside": AXEL_ARENA, "clearOf": {"distance": 500, "maxMs": 20000}},
+         "aside": AXEL_ARENA, "killWhen": "enemy_clear(500)", "killWhenMs": 20000},
         *([] if downs_only else [{"do": "clip_wait"}]),
         STATS_MARK,
         marks("m_downs1"),

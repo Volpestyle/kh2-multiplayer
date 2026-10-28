@@ -678,10 +678,8 @@
     ],
     "radius": 450
    },
-   "clearOf": {
-    "distance": 500,
-    "maxMs": 20000
-   }
+   "killWhen": "enemy_clear(500)",
+   "killWhenMs": 20000
   },
   {
    "do": "clip_wait"

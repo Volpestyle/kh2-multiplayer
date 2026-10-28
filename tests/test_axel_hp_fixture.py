@@ -384,7 +384,9 @@ class AxelHpSplitTest(unittest.TestCase):
     # he travelled in the second before each of his 96 hits on a seat in hp-05, hp-07 and hp-08 (max 591).
     def test_owner_downs_waits_for_axel_to_clear_both_seats_before_each_forced_down(self):
         for steps in (SPLIT["b2"], FULL):
-            self.assertEqual(self.named(steps, "owner_downs")["clearOf"], {"distance": 500, "maxMs": 20000})
+            step = self.named(steps, "owner_downs")
+            self.assertEqual((step["killWhen"], step["killWhenMs"]), ("enemy_clear(500)", 20000))
+            self.assertNotIn("clearOf", step)
 
     # Lead #76 (vuh2912-hp-09): the round lasted 3.8 s, under the mirror's 300-frame stats interval, so the HP ledger's
     # one-brain check found no sample in its window. Every window now asks both seats for the stats line just inside

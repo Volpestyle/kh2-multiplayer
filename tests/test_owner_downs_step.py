@@ -24,7 +24,7 @@ class Rig:
     """Log counts per seat; `script` maps a simulated second to callbacks; a Kill downs its seat (Ok) and the
     other seat's guard revives it `revive` seconds later unless that seat is down too."""
 
-    def __init__(self, script=None, revive=3.0, kill_result="Ok", clearance=None):
+    def __init__(self, script=None, revive=3.0, kill_result="Ok"):
         self.t, self.counts, self.script = 0.0, {(i, n): 0 for i in (0, 1) for n in (DOWN, UP, FULL)}, dict(script or {})
         self.revive, self.kill_result, self.kills, self.clips, self.guards = revive, kill_result, [], [], []
         self.pending = []  # (time, seat) revives
@@ -86,6 +86,7 @@ class Rig:
 
     def run(self, evaluate=None, **step):
         ctx = SimpleNamespace(check_all=lambda: None, saved={}, sleep=self.sleep, eval=evaluate or (lambda text: True))
+        self.ctx = ctx
         try:
             return RUN.step_owner_downs(ctx, {"owners": [1, 0], **step}, _count=lambda i, n: self.counts.get((i, n), 0),
                                         _kill=self.kill, _guard=self.guard, _clip=self.clips.append,
@@ -458,6 +459,55 @@ class OwnerDownsTest(unittest.TestCase):
         self.assertEqual(RUN.downed_view([("down", "E"), ("full", "game-over-request")])["fulls"],
                          [{"path": "game-over-request", "afterOpenDown": True}])
 
+    # Lead #82: B2's clearance (Ione 0b4cdc89) on killWhen, owner_downs' one mechanism. Each fails on main's killWhen.
+    def test_a_wait_past_killwhenms_kills_labelled_timeout_with_reads_capped_to_it(self):
+        rig = Rig()  # a predicate that would answer true only after 30 s
+        result, _, error = rig.run(evaluate=self.slow_rpc(rig, 30.0, True), killWhen="slow", killWhenMs=20000)
+        self.assertIsNone(error)
+        first = next(e for e in result["events"] if "kill" in e)
+        self.assertEqual(first["when"], {"result": "timeout", "waitedS": 20.0})  # due at 1.5, read cut off at 21.5
+        self.assertEqual(rig.kills[0], (21.5, 1))
+        # The second forced down (due at 26.0: revive at 24.5 plus the gap) waits its own full bound.
+        second = [e for e in result["events"] if "kill" in e][1]
+        self.assertEqual((second["when"], rig.kills[1]), ({"result": "timeout", "waitedS": 20.0}, (46.0, 0)))
+
+    def test_a_true_predicate_labels_its_kill(self):
+        rig = Rig()
+        clear = lambda text: rig.t >= 3.0  # noqa: E731 (due at 1.5, clear from 3.0)
+        result, _, error = rig.run(evaluate=clear, killWhen="clear", killWhenMs=20000)
+        self.assertIsNone(error)
+        first = next(e for e in result["events"] if "kill" in e)
+        self.assertEqual(first["when"], {"result": "true", "waitedS": 1.5})
+
+    def test_the_label_carries_enemy_clears_measurement(self):
+        rig = Rig()
+        def measured(text):
+            rig.ctx.last_clearance = 650.25
+            return True
+        result, _, error = rig.run(evaluate=measured, killWhen="enemy_clear(500)")
+        self.assertIsNone(error)
+        self.assertEqual(next(e for e in result["events"] if "kill" in e)["when"]["nearest"], 650.2)
+
+    def test_a_natural_down_during_a_killwhen_read_forces_nothing(self):
+        rig = Rig()
+        def read(text):  # Axel downs seat 1 while the predicate reads
+            if not rig.counts[(1, DOWN)]:
+                rig.down(1)
+            return True
+        result, _, error = rig.run(evaluate=read, killWhen="clear")
+        self.assertIsNone(error)
+        self.assertEqual(result["owners"]["1"], {"kind": "natural", "seat": 1})
+        self.assertEqual([seat for _, seat in rig.kills], [0])  # main's killWhen also Killed seat 1, already down
+        self.assertGreater(rig.kills[0][0], 1.5 + 3.0)
+
+    def test_the_validator_checks_kill_when_ms(self):
+        boot, downs = {"do": "boot"}, {"do": "owner_downs", "owners": [1, 0]}
+        RUN.validate_scenario({"steps": [boot, {**downs, "killWhen": "enemy_clear(500)", "killWhenMs": 20000}]})
+        for bad in ({**downs, "killWhenMs": 20000}, {**downs, "killWhen": "True", "killWhenMs": 0},
+                    {**downs, "killWhen": "True", "killWhenMs": 1.5}):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "killWhenMs must be a positive integer"):
+                RUN.validate_scenario({"steps": [boot, bad]})
+
     def test_the_validator_checks_full_party_and_skip_if(self):
         boot = {"do": "boot"}
         downs = {"do": "owner_downs", "owners": [1, 0]}
@@ -488,6 +538,36 @@ class OwnerDownsTest(unittest.TestCase):
         rig = Rig(kill_result="InEvent")
         _, _, error = rig.run()
         self.assertIn("returned InEvent", str(error))
+
+
+class EnemyClearTest(unittest.TestCase):
+    """Lead #82: `enemy_clear(distance)`, the killWhen helper for B2, over enemy_clearance (unproven is false)."""
+
+    AXEL = [{"objectType": 3, "name": "B_EX110", "hp": 449, "position": {"x": 0.0, "z": 0.0}}]
+    SCOPE = (2, 20, 0, 137, 137, 137)
+
+    def helper(self, *positions):
+        seats = [{"player": 0xA000 + i, "playerPos": at, "pos": (5000.0, 0.0, 0.0), "roomScope": self.SCOPE}
+                 for i, at in enumerate(positions)]
+        games = [SimpleNamespace(state=lambda s=s: dict(s)) for s in seats]
+        stub = SimpleNamespace(actor=None, actors=lambda index: self.AXEL, saved={}, pilot_games=lambda: games)
+        return stub, RUN.Context.namespace(stub)["enemy_clear"]
+
+    def test_clear_only_when_every_seat_is_far_enough(self):
+        stub, clear = self.helper((600.0, 0.0, 0.0), (0.0, 0.0, 700.0))
+        self.assertTrue(clear(500))
+        self.assertEqual(stub.last_clearance, 600.0)
+        self.assertFalse(clear(650))
+
+    def test_the_canonical_player_decides_not_the_camera(self):
+        stub, clear = self.helper((100.0, 0.0, 0.0), (0.0, 0.0, 900.0))  # both cameras 5000 away
+        self.assertFalse(clear(500))
+        self.assertEqual(stub.last_clearance, 100.0)
+
+    def test_an_unproven_position_is_not_clear(self):
+        stub, clear = self.helper((900.0, 0.0, 0.0), None)
+        self.assertFalse(clear(500))
+        self.assertIsNone(stub.last_clearance)
 
 
 class ClearanceTest(unittest.TestCase):

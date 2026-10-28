@@ -365,6 +365,12 @@ class Context:
         def dist(a, b) -> float:
             return math.dist(a, b)
 
+        def enemy_clear(distance: float) -> bool:
+            """VUH-2912 (lead #82): every living enemy in the host's game at least `distance` (XZ) from both seats'
+            canonical players (enemy_clearance); unproven is false. The measurement is kept in `last_clearance`."""
+            self.last_clearance = enemy_clearance(self, self.pilot_games())
+            return self.last_clearance is not None and self.last_clearance >= distance
+
         def runtime_log(index: int = 0) -> str:
             path = self.run_dir / f"runtime_{index}.log"
             return path.read_text(errors="replace") if path.exists() else ""
@@ -405,7 +411,8 @@ class Context:
             return json.loads(out.stdout.strip().splitlines()[-1])
 
         return {"peek": peek, "peek_at": peek_at, "pos": pos, "room": room, "enemies": enemies, "enemy_hps": enemy_hps, "actor": self.actor,
-                "actors": self.actors, "log_count": log_count, "dist": dist, "saved": self.saved,
+                "actors": self.actors, "log_count": log_count, "dist": dist, "enemy_clear": enemy_clear,
+                "saved": self.saved,
                 "puppet_error": puppet_error, "bridge": bridge, "runtime_log": runtime_log, "jitter_stats": jitter_stats,
                 "len": len, "abs": abs, "min": min, "max": max, "any": any, "all": all,
                 "location": location, "log_matches": log_matches, "mission": mission,
@@ -415,6 +422,15 @@ class Context:
                     [(LOGS / f"kh2coop_inject_{self.inst(i).pid}.log").read_text(errors="replace") for i in (0, 1)],
                     downed, marker, wave_object),
                 "exists": lambda path: (ROOT / path).exists()}
+
+    def pilot_games(self) -> list:
+        """The route pilot's read-only Game for each seat (enemy_clearance's canonical player), opened once."""
+        if not getattr(self, "_pilot_games", None):
+            spec = _importlib_util.spec_from_file_location("kh2coop_route_pilot", PILOT)
+            pilot = _importlib_util.module_from_spec(spec)
+            spec.loader.exec_module(pilot)  # read-only state helpers only
+            self._pilot_games = [pilot.Game(self.inst(i).pid) for i in (0, 1)]
+        return self._pilot_games
 
     def eval(self, expr: str):
         # Helpers go in globals: comprehensions inside an expression only see globals.
@@ -2377,7 +2393,11 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     before reviving) is an expression that must also be true before each forced Kill; an expression that cannot be
     evaluated yet (a load between samples) is false. Its kh2ctl reads are capped to the step's remaining
     `timeoutMs` (rpc_deadline), and the deadline is checked again before a Kill. It only defers a Kill: natural
-    downs count as before, and `timeoutMs` still bounds the step. `fullParty: "continue"` (VUH-2931, the Sora host's
+    downs count as before, and `timeoutMs` still bounds the step. `killWhenMs` (VUH-2912, lead #82: B2's clearance
+    on this one mechanism) bounds each due Kill's wait: its reads are capped to the end of that wait as well, and past
+    it the Kill goes anyway. A Kill that waited on killWhen carries `when` {result: true|timeout, waitedS, and
+    `nearest` when the expression measured enemy_clear}. A down, revive or full-party down that arrives during a
+    killWhen read issues no Kill; the step recounts first. `fullParty: "continue"` (VUH-2931, the Sora host's
     natural full-party down in runs vuh2931-sora-01/02) makes that one path a pass instead of a harness failure, only
     with proof that both seats were down before the request (Ione 313a3a5d). Each poll reads the friend's log, then
     the host's: a seat is down while its latest down line follows its latest revive line. A witness is a poll with
@@ -2424,17 +2444,23 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     guard = _guard or (lambda downed, reviver: ReviveGuard(ctx, downed, reviver, step.get("holdMs"), step.get("aside")))
     clip = _clip or film
     now, sleep = _now or time.monotonic, _sleep or ctx.sleep
-    when_expr = step.get("killWhen")
+    when_expr, when_ms = step.get("killWhen"), step.get("killWhenMs")
+    waiting = None  # when the current due Kill began waiting on killWhen
 
     def evaluate_when() -> bool:
+        bound = deadline if when_ms is None else min(waiting + when_ms / 1000, deadline)
         try:
-            with rpc_deadline(deadline, now):  # its reads end within the step's budget
+            with rpc_deadline(bound, now):  # its reads end within the wait's bound and the step's budget
                 return bool(ctx.eval(when_expr))
         except Exception:  # a load or menu between samples, or no budget left
             return False
 
-    ready = _when or (evaluate_when if when_expr else (lambda: True))
+    ready = _when or (evaluate_when if when_expr else None)
     deferred = 0
+
+    def tallies() -> tuple:
+        """Every down, revive and full-party count now, to see whether any arrived during a killWhen read."""
+        return tuple(count(i, needle) for i in (0, 1) for needle in (DOWNED_DOWN, DOWNED_REVIVED)) + (count(0, DOWNED_FULL),)
     base = {i: (count(i, DOWNED_DOWN), count(i, DOWNED_REVIVED)) for i in (0, 1)}
     full = count(0, DOWNED_FULL)
     continue_full, full_bound = step.get("fullParty") == "continue", step.get("fullPartyMs", 10000) / 1000
@@ -2527,12 +2553,27 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
             open_forced = [s for s in forced if owed.get(s) is None]
             pending = [o for o in owners if owed[o] is None and o not in forced]
             due = not down_now and not open_forced and pending and now() - last_revive >= step.get("gapMs", 1500) / 1000
-            if due and not ready():
-                deferred += 1
-            elif due and now() < deadline:  # killWhen may have spent the rest of the budget
+            when = None
+            if not due:
+                waiting = None  # a downing or revive since: the next due Kill waits on its own bound
+            elif ready:
+                waiting = now() if waiting is None else waiting
+                before, ctx.last_clearance = tallies(), None
+                held = ready()
+                if tallies() != before:
+                    due = False  # a down, revive or full-party down came during the read: recount first
+                elif held or (when_ms is not None and now() - waiting >= when_ms / 1000):
+                    when = {"result": "true" if held else "timeout", "waitedS": round(now() - waiting, 1)}
+                    nearest = getattr(ctx, "last_clearance", None)
+                    if nearest is not None:
+                        when["nearest"] = round(min(nearest, 1e6), 1)
+                else:
+                    deferred += 1
+                    due = False
+            if due and now() < deadline:  # killWhen may have spent the rest of the budget
                 o = pending[0]
                 result = kill(o)
-                events.append({"seat": o, "kill": result, "atS": round(now() - start, 1)})
+                events.append({"seat": o, "kill": result, "atS": round(now() - start, 1), **({"when": when} if when else {})})
                 if result == "Ok":
                     forced[o] = downs[o] + 1
                 elif result != "WrongState":  # WrongState: already down, its natural downing is counted
@@ -6691,6 +6732,9 @@ def validate_scenario(scenario: dict) -> None:
             compile(step["until"], f"<{prefix} fight until>", "eval")
         if kind == "owner_downs" and "killWhen" in step:
             compile(step["killWhen"], f"<{prefix} owner_downs killWhen>", "eval")
+        if kind == "owner_downs" and "killWhenMs" in step and \
+                ("killWhen" not in step or type(step["killWhenMs"]) is not int or step["killWhenMs"] <= 0):
+            raise ValueError(f"{prefix}: owner_downs killWhenMs must be a positive integer, with killWhen")
         if kind == "owner_downs" and step.get("fullParty", "continue") != "continue":
             raise ValueError(f'{prefix}: owner_downs fullParty may only be "continue"')
         if kind == "owner_downs" and "fullPartyMs" in step and \
