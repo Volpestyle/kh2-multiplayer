@@ -1,7 +1,8 @@
 // Included inside ScriptMirror after ScriptActorOwner. VUH-2913: Axel II's collision-offered reaction commands
 // (AxelReaction.hpp, docs/AXEL_REACTIONS.md). The host mints one owner per offer while host Axel II is live; each
 // seat's press, the host's own included, acts only on a live window of its own seat; sysobj_player inside Axel's
-// script resolves to the seat that ran the RC. Native state is only read here, except the original callback.
+// script resolves to the seat that ran the RC. Slice 1 parks friend execution (R::AxelExecutionAdmitted): only the
+// host seat wins an offer, and a friend claim is refused. Native state is only read here, except the original callback.
 struct SmAxelState {
     // host
     uintptr_t actor{};
@@ -12,6 +13,7 @@ struct SmAxelState {
     uintptr_t executorActor{};
     std::uint32_t executorHandle{};
     bool unresolvedLogged{}; // once per executor
+    bool chainUnread{};      // logged on the change
     // client
     R::AxelOffers offers{};
     struct Identity { std::uint8_t slot{0xFF};std::uint64_t connection{};std::uint32_t epoch{}; };
@@ -34,7 +36,7 @@ static void SmAxelEndExecutor(const char* why) {
     if(g_axel.executor.command && SmAxelLogBudget())
         Log("[axel-rc] executor end command=%u owner=%u frames=%u engaged=%u reason=%s",g_axel.executor.command,
             g_axel.executor.slot,g_frameCounter-g_axel.executor.admittedFrame,g_axel.executor.engaged?1u:0u,why);
-    g_axel.executor={};g_axel.executorActor=0;g_axel.executorHandle=0;g_axel.unresolvedLogged=false;
+    g_axel.executor={};g_axel.executorActor=0;g_axel.executorHandle=0;g_axel.unresolvedLogged=false;g_axel.chainUnread=false;
 }
 // Client: the host's offers and identities belong to the room and session they came in; ScriptMirror's room, load,
 // transition and session resets end them.
@@ -84,14 +86,11 @@ static void SmAxelExecutorTick(const enemysync::DownedScope& scope) {
         Log("[axel-rc] executor engaged command=%u owner=%u attached=%u captured=%u",g_axel.executor.command,
             g_axel.executor.slot,contact.attached?1u:0u,contact.captured?1u:0u);
 }
-static bool SmAxelMasks(R::AxelGroupMasks& m) noexcept {
-    m={};uintptr_t collision=0;
-    if(!ReadHitTrace(g_axel.actor+0x5A0,m.motionOn) || !ReadHitTrace(g_axel.actor+0x5A4,m.motionOff) ||
-       !ReadHitTrace(g_axel.actor+0x5A8,m.scriptOn) || !ReadHitTrace(g_axel.actor+0x5AC,m.scriptOff) ||
-       !ReadHitTrace(g_axel.actor+0xAB8,collision))return false;
-    m.collision=collision && ReadHitTrace(collision+4,m.defaults);
-    return true;
-}
+// The native side of R::AxelReadMasks and R::AxelReadChain.
+struct SmAxelReader {
+    template<class T> bool operator()(uintptr_t address,T& value) const { return ReadHitTrace(address,value); }
+};
+static uintptr_t SmAxelDecode(std::uint32_t handle) noexcept { return SmDecode(handle); }
 static bool SmAxelEmit(const R::ReactionWindow& w) {
     R::Call identity{};identity.netId=g_axel.netId;identity.objectId=R::kAxelIIObjectId;
     identity.effect=R::AxelResource(w.command);identity.trap=static_cast<std::uint8_t>(R::FindTrap(255,12));
@@ -121,16 +120,21 @@ static void SmAxelFrame(const enemysync::DownedScope& scope) {
     R::AxelGroupMasks masks{};float xyz[3]{},yaw=0;
     const auto entity=actor+offsets::actor::ENTITY_TRANSFORM;
     R::AxelFrameFacts facts{};
-    facts.observed=SmAxelMasks(masks) && ReadHitTraceMemory(entity+offsets::entity::POS_X,xyz,sizeof(xyz)) &&
-        ReadHitTrace(entity+offsets::entity::ROT_Y,yaw);
-    const auto seats=SmOwnerLivingSeats(scope);
+    facts.observed=R::AxelReadMasks(SmAxelReader{},actor,masks) &&
+        ReadHitTraceMemory(entity+offsets::entity::POS_X,xyz,sizeof(xyz)) && ReadHitTrace(entity+offsets::entity::ROT_Y,yaw);
+    const auto seats=R::AxelOfferSeats(SmOwnerLivingSeats(scope)); // friend execution is parked
     if(facts.observed) {
         const R::ReactionPoint origin{xyz[0],xyz[1],xyz[2]};
         R::AxelExecutorFacts chain{};
-        if(SmAxelExecutorBound(scope) && SmAxelExecutorResolves()) {
+        if(SmAxelExecutorBound(scope) && g_axel.executorActor) {
             chain.current=true;chain.command=g_axel.executor.command;chain.slot=g_axel.executor.slot;
-            if(!ReadHitTrace(g_axel.executorActor+0x638,chain.followup) || !ReadHitTrace(g_axel.executorActor+0x18C,chain.flags))
-                chain.current=false;
+        }
+        facts.known[1]=R::AxelReadChain(SmAxelReader{},SmAxelDecode,g_axel.executorActor,g_axel.executorHandle,chain);
+        if(!facts.known[1]!=g_axel.chainUnread) {
+            g_axel.chainUnread=!facts.known[1];
+            if(SmAxelLogBudget())
+                Log("[axel-rc] chain %s command=%u owner=%u frame=%u",g_axel.chainUnread?"unread: Clear Light withheld":"read",
+                    g_axel.executor.command,g_axel.executor.slot,g_frameCounter);
         }
         const bool overtaker=R::AxelGroupActive(masks,R::kOvertakerGroup);
         const bool burst=R::AxelGroupActive(masks,R::kBurstFrontierGroupA) || R::AxelGroupActive(masks,R::kBurstFrontierGroupB);
@@ -232,14 +236,15 @@ static bool SmAxelComplete(const enemysync::ScriptReactionCompletionRecord& clai
        !D::Check(g_axel.windows.ObservationCurrent(g_frameCounter),"observation-current",why) ||
        !D::Check(SmOwnerScope(scope),"owner-scope",why) || !D::Check(scope.localSlot==0,"local-host-seat",why) ||
        !D::Check(R::AxelResourceFor(claim.resource,claim.objectId,command) && command==claim.command,"axel-resource",why) ||
-       !D::Check(claim.netId==g_axel.netId,"axel-source",why))return refused();
+       !D::Check(claim.netId==g_axel.netId,"axel-source",why) ||
+       !D::Check(R::AxelExecutionAdmitted(claim.ownerSlot),"friend-execution-parked",why))return refused();
     auto* window=g_axel.windows.Find(command);
     if(!window){why="window-missing";return refused();}
-    const auto seats=SmOwnerLivingSeats(scope);
+    const auto seats=R::AxelOfferSeats(SmOwnerLivingSeats(scope));
     const auto before=*window;
     const R::ReactionCompletion completion{claim.occurrence,claim.requesterConnectionId,claim.epoch,claim.netId,
         claim.command,claim.ownerSlot};
-    if(!R::ConsumeReaction(*window,completion,scope.epoch,g_frameCounter,seats)) {
+    if(!R::AxelConsume(*window,completion,scope.epoch,g_frameCounter,seats)) {
         why=SmRcConsumeReason(before,completion,scope.epoch,g_frameCounter,seats);return refused();
     }
     const auto player=SmOwnerSeatActor(claim.ownerSlot);

@@ -1,6 +1,8 @@
 // VUH-2913: Axel II's collision-offered reaction commands. Pure rules only (AxelReaction.hpp).
 #include "AxelReaction.hpp"
 #include <cstdio>
+#include <map>
+#include <utility>
 
 namespace R = kh2coop::inject::scriptmirror::rules;
 namespace {
@@ -9,6 +11,20 @@ void check(bool ok,const char* label) {
     std::printf("%s: %s\n",ok?"PASS":"FAIL",label);
     if(!ok)++errors;
 }
+// Simulated native memory for R::AxelReadMasks and R::AxelReadChain: unmapped words read as zero; one address fails.
+struct Memory {
+    std::map<std::uintptr_t,std::uint64_t> words;
+    std::uintptr_t fail{};
+    template<class T> bool operator()(std::uintptr_t address,T& value) const {
+        if(fail && address==fail)return false;
+        const auto it=words.find(address);
+        value=static_cast<T>(it==words.end()?0:it->second);
+        return true;
+    }
+};
+constexpr std::uintptr_t kAxelActor=0x10000,kAxelHeader=0x20000,kSeatActor=0x30000;
+constexpr std::uint32_t kSeatHandle=0x123;
+std::uintptr_t Decode(std::uint32_t handle) { return handle==kSeatHandle?kSeatActor:0; }
 constexpr std::uint64_t kHost=0x1111,kFriend=0x2222;
 std::array<R::ReactionSeat,3> Seats(R::ReactionPoint host,R::ReactionPoint friendSeat) {
     return {{{kHost,host,true,true,true},{kFriend,friendSeat,true,true,true},{}}};
@@ -133,6 +149,92 @@ int main() {
         w.Reset();
         check(!w.ObservationCurrent(65),"a reset forgets the observation");
     }
+    {
+        // Ione's probe (694ad7cd): the actual mask reads fail at the collision header's default mask, then recover,
+        // with no native activation edge. Overtaker must stay occurrence 1.
+        Memory mem;
+        mem.words={{kAxelActor+R::kAxelCollision,kAxelHeader},{kAxelHeader+R::kAxelCollisionDefaults,0x00200003u},
+                   {kAxelActor+R::kAxelScriptOn,1u<<R::kOvertakerGroup}};
+        R::AxelGroupMasks m{};
+        check(R::AxelReadMasks(mem,kAxelActor,m) && m.collision && R::AxelGroupActive(m,R::kOvertakerGroup) &&
+              R::AxelGroupActive(m,21),"Axel's masks read: Overtaker's group opened by script, group 21 by default");
+        bool everyField=true;
+        for(const auto field:{R::kAxelMotionOn,R::kAxelMotionOff,R::kAxelScriptOn,R::kAxelScriptOff,R::kAxelCollision}) {
+            mem.fail=kAxelActor+field;everyField=everyField && !R::AxelReadMasks(mem,kAxelActor,m);
+        }
+        mem.fail=kAxelHeader+R::kAxelCollisionDefaults;
+        check(everyField && !R::AxelReadMasks(mem,kAxelActor,m),
+              "any unread mask word, the collision header's default mask included, is an unread observation");
+        mem.fail=0;mem.words[kAxelActor+R::kAxelCollision]=0;
+        check(R::AxelReadMasks(mem,kAxelActor,m) && !m.collision,"only a collision pointer read as zero is no collision data");
+        mem.words[kAxelActor+R::kAxelCollision]=kAxelHeader;
+
+        R::AxelWindows w;const auto s=R::AxelOfferSeats(Seats({100,0,600},{100,0,1100}));
+        const R::ReactionPoint origin{100,0,100};
+        const auto frame=[&](std::uint32_t at) {
+            R::AxelFrameFacts f{};R::AxelGroupMasks masks{};
+            f.observed=R::AxelReadMasks(mem,kAxelActor,masks);
+            if(f.observed) {
+                const bool on=R::AxelGroupActive(masks,R::kOvertakerGroup);
+                f.active={on,false,false};f.winners={on?R::AxelFamilyWinner(R::kOvertakerSpheres,masks,origin,0,s):-1,-1,-1};
+            }
+            (void)w.Frame(f,kSource,kEpoch,at,s);
+            const auto* o=w.Find(R::kOvertaker);
+            return o?o->occurrence:std::uint64_t{0};
+        };
+        const auto opening=frame(90);
+        mem.fail=kAxelHeader+R::kAxelCollisionDefaults;
+        const auto during=frame(91);
+        check(opening && during==opening && w.Find(R::kOvertaker)->consumed,
+              "a failed collision-header read withholds Overtaker's window instead of ending it");
+        mem.fail=0;
+        check(frame(92)==opening && w.Find(R::kOvertaker)->consumed,
+              "recovery keeps the same occurrence, consumed: the activation is not minted again");
+        mem.words[kAxelActor+R::kAxelScriptOn]=0;
+        check(frame(93)==0 && frame(94)==0,"a read that shows group 20 closed ends it");
+        mem.words[kAxelActor+R::kAxelScriptOn]=1u<<R::kOvertakerGroup;
+        check(frame(95)>opening,"and the next activation is a new occurrence");
+    }
+    {
+        // Ione's probe (694ad7cd): Clear Light's chain fields fail on the executor's actor, then recover, with no
+        // native activation edge. Clear Light must keep its occurrence.
+        Memory mem;
+        mem.words={{kSeatActor+R::kAxelHandleWord,kSeatHandle},{kSeatActor+R::kAxelFollowup,R::kOvertaker},
+                   {kSeatActor+R::kAxelFlags,1u<<21}};
+        R::AxelWindows w;const auto s=R::AxelOfferSeats(Seats({100,0,600},{100,0,1100}));
+        std::uint32_t at=100;
+        const auto frame=[&]() {
+            R::AxelExecutorFacts chain{true,R::kOvertaker,0,0,0};
+            R::AxelFrameFacts f{};f.observed=true;
+            f.known[1]=R::AxelReadChain(mem,Decode,kSeatActor,kSeatHandle,chain);
+            const int owner=R::AxelChainOwner(chain);
+            f.active={false,owner>=0,false};f.winners={-1,owner,-1};
+            (void)w.Frame(f,kSource,kEpoch,at++,s);
+            const auto* c=w.Find(R::kClearLight);
+            return c?c->occurrence:std::uint64_t{0};
+        };
+        const auto opening=frame();
+        check(opening!=0,"the host's Overtaker inside AP12's trigger-26 window offers Clear Light");
+        const std::pair<std::uintptr_t,const char*> fields[]{
+            {R::kAxelFollowup,"an unread +0x638 withholds Clear Light, and recovery keeps its occurrence"},
+            {R::kAxelFlags,"an unread +0x18C withholds Clear Light, and recovery keeps its occurrence"},
+            {R::kAxelHandleWord,"an unread handle word withholds Clear Light, and recovery keeps its occurrence"}};
+        for(const auto& [field,label]:fields) {
+            mem.fail=kSeatActor+field;
+            const auto during=frame();
+            const auto* held=w.Find(R::kClearLight);
+            const bool withheld=held && held->consumed;
+            mem.fail=0;
+            check(during==opening && withheld && frame()==opening,label);
+        }
+        mem.words[kSeatActor+R::kAxelFlags]=0;
+        check(frame()==0,"a read that shows trigger 26's bit cleared ends Clear Light");
+        mem.words[kSeatActor+R::kAxelFlags]=1u<<21;
+        const auto next=frame();
+        check(next>opening,"and the next trigger-26 window is a new occurrence");
+        mem.words[kSeatActor+R::kAxelHandleWord]=0x456;
+        check(frame()==0,"a handle word read and naming another actor is a gone executor: Clear Light ends");
+    }
 
     // Clear Light follows the Overtaker its owner is playing (407C2B).
     R::AxelExecutorFacts chain{true,R::kOvertaker,1,490,1u<<21};
@@ -250,6 +352,31 @@ int main() {
           "inside one, 1/3 names the executor's own actor, downed or not (no eligibility test)");
     check(R::AxelPlayerRouteFor(true,false)==R::AxelPlayerRoute::Unresolved,
           "if that actor is gone, no other seat is chosen in its place");
+    {
+        // Ione's probe (694ad7cd): seat 1's Overtaker consumed, then its actor lost before contact, made 1/3 name the
+        // host. Slice 1 parks friend execution, so no friend RC is ever consumed or run.
+        check(R::AxelExecutionAdmitted(0) && !R::AxelExecutionAdmitted(1) && !R::AxelExecutionAdmitted(2),
+              "only the host seat may execute an Axel RC in slice 1");
+        auto s=R::AxelOfferSeats(Seats({100,0,4100},{100,0,600}));
+        check(R::AxelFamilyWinner(R::kOvertakerSpheres,overtakerOn,axel,0,s)==-1,
+              "a friend inside Overtaker's sphere is offered nothing");
+        s=R::AxelOfferSeats(Seats({100,0,1100},{100,0,600}));
+        check(R::AxelFamilyWinner(R::kOvertakerSpheres,overtakerOn,axel,0,s)==0,
+              "the host inside it still wins, with the friend nearer");
+        const auto raw=Seats({100,0,600},{100,0,1100});
+        R::AxelWindows w;
+        (void)w.Tick(0,true,1,kSource,kEpoch,80,raw);
+        auto* friendWindow=w.Find(R::kOvertaker);
+        check(friendWindow && !R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kFriend),kEpoch,81,raw) &&
+              !friendWindow->consumed,"a friend's claim, even on a window naming it, is refused before anything is consumed");
+        (void)w.Tick(2,true,0,kSource,kEpoch,82,raw);
+        auto* hostWindow=w.Find(R::kBurstFrontier);
+        check(hostWindow && R::AxelConsume(*hostWindow,Claim(*hostWindow,0,kHost),kEpoch,83,raw) &&
+              !R::AxelConsume(*hostWindow,Claim(*hostWindow,0,kHost),kEpoch,84,raw),"the host's own claim consumes once");
+        R::AxelWindows chained;R::AxelFrameFacts f{};f.observed=true;f.active={false,true,false};f.winners={-1,1,-1};
+        check(chained.Frame(f,kSource,kEpoch,85,R::AxelOfferSeats(raw))==0u && !chained.Find(R::kClearLight),
+              "no friend window opens through Clear Light's chain either");
+    }
 
     // Routing identity.
     std::uint16_t command=0;

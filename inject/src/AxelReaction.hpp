@@ -55,6 +55,21 @@ inline bool AxelGroupActive(const AxelGroupMasks& m,unsigned group) noexcept {
     return (m.defaults&bit)!=0;
 }
 inline constexpr unsigned kOvertakerGroup=20,kBurstFrontierGroupA=23,kBurstFrontierGroupB=24;
+inline constexpr std::uintptr_t kAxelMotionOn=0x5A0,kAxelMotionOff=0x5A4,kAxelScriptOn=0x5A8,kAxelScriptOff=0x5AC,
+    kAxelCollision=0xAB8,kAxelCollisionDefaults=4;
+// The reads behind AxelGroupMasks, through read(address, value&). False when any of them fails, the collision
+// header's default mask included: an unread mask is unknown, never "no active group". Only a collision pointer read
+// as zero is an actor without collision data.
+template<class Read>
+bool AxelReadMasks(const Read& read,std::uintptr_t actor,AxelGroupMasks& m) noexcept {
+    m={};std::uintptr_t collision=0;
+    if(!read(actor+kAxelMotionOn,m.motionOn) || !read(actor+kAxelMotionOff,m.motionOff) ||
+       !read(actor+kAxelScriptOn,m.scriptOn) || !read(actor+kAxelScriptOff,m.scriptOff) ||
+       !read(actor+kAxelCollision,collision))return false;
+    if(collision && !read(collision+kAxelCollisionDefaults,m.defaults))return false;
+    m.collision=collision!=0;
+    return true;
+}
 
 // REACTION rows on the root (bone 16384), actor-local, each with its collision group. Local -z is Axel's forward
 // (his forward attack rows, group 8 at z=-228); ROT_Y=atan2(vx,vz), so world forward is (sin, cos).
@@ -110,6 +125,19 @@ inline int AxelChainOwner(const AxelExecutorFacts& e) noexcept {
     return e.current && e.command==kOvertaker && e.slot<3 && e.followup==kOvertaker && ((e.flags>>21)&1u) ?
         static_cast<int>(e.slot) : -1;
 }
+inline constexpr std::uintptr_t kAxelHandleWord=4,kAxelFollowup=0x638,kAxelFlags=0x18C;
+// Fills a bound executor's chain facts (e.current set by the caller) from its actor, through read(address, value&)
+// and decode(handle). False when they could not be read (the actor's handle word or either follow-up field): Clear
+// Light's offer is then unknown, not ended. A handle read and no longer naming that actor is a gone actor: no chain.
+template<class Read,class Decode>
+bool AxelReadChain(const Read& read,const Decode& decode,std::uintptr_t actor,std::uint32_t handle,
+                   AxelExecutorFacts& e) noexcept {
+    if(!e.current)return true;
+    std::uint32_t now=0;
+    if(!read(actor+kAxelHandleWord,now))return false;
+    if(!handle || now!=handle || decode(now)!=actor){e.current=false;return true;}
+    return read(actor+kAxelFollowup,e.followup) && read(actor+kAxelFlags,e.flags);
+}
 
 // Host: one window per command. A window opens once per activation for the seat that wins it then, keeps that
 // owner while the offer stays active, and is consumed at most once. Only the next activation opens a new
@@ -119,18 +147,20 @@ inline constexpr std::uint32_t kAxelClientWindowFrames=180;
 // A claim is admitted only on the frame of a successful observation or the one after it (a claim can be handled
 // before that frame's mint runs).
 inline constexpr std::uint32_t kAxelObservationFrames=1;
-// One host frame's facts: whether Axel's masks and transform were read, and per command whether its offer is up
-// and which seat won it.
+// One host frame's facts: whether Axel's masks and transform were read, and per command whether its own facts were
+// read (Clear Light's chain), whether its offer is up and which seat won it.
 struct AxelFrameFacts {
     bool observed{};
+    std::array<bool,3> known{true,true,true};
     std::array<bool,3> active{};
     std::array<int,3> winners{-1,-1,-1};
 };
 class AxelWindows {
 public:
-    // The whole host frame. An observation that fails withholds every open window: it is no longer claimable, but
-    // its occurrence stays as a tombstone, so the same activation never mints a second one when reads recover; only
-    // an observed end of the offer clears it. Returns the indices opened this frame as bits.
+    // The whole host frame. An observation that fails withholds every open window, and a command whose own facts
+    // were not read withholds its own: it is no longer claimable, but its occurrence stays as a tombstone, so the
+    // same activation never mints a second one when reads recover; only an observed end of the offer clears it.
+    // Returns the indices opened this frame as bits.
     unsigned Frame(const AxelFrameFacts& f,std::uint16_t source,std::uint32_t epoch,std::uint32_t frame,
                    const std::array<ReactionSeat,3>& seats) noexcept {
         if(!f.observed) {
@@ -140,7 +170,10 @@ public:
         }
         observed_=true;observedFrame_=frame;
         unsigned opened=0;
-        for(unsigned i=0;i<windows_.size();++i)if(Tick(i,f.active[i],f.winners[i],source,epoch,frame,seats))opened|=1u<<i;
+        for(unsigned i=0;i<windows_.size();++i) {
+            if(!f.known[i]){if(windows_[i].occurrence)windows_[i].consumed=true;continue;}
+            if(Tick(i,f.active[i],f.winners[i],source,epoch,frame,seats))opened|=1u<<i;
+        }
         return opened;
     }
     bool ObservationCurrent(std::uint32_t frame) const noexcept {
@@ -219,6 +252,25 @@ inline AxelPress AxelPressDecision(const ReactionWindow* w,std::uint16_t command
     return localSlot==0?AxelPress::Execute:AxelPress::Claim;
 }
 
+// Slice 1 parks friend execution. A friend's RC needs a safe abort for an executor actor lost mid-RC: 1/3 must then
+// name nobody, and trap 1/18 faults on a null parent at 42C576. That abort comes with slice D. Until then the host
+// offers Axel's RCs to its own seat only, as the native picker did, and refuses any friend claim before consuming
+// anything, so the only executor is the host seat.
+inline constexpr bool kAxelFriendExecution=false;
+inline bool AxelExecutionAdmitted(std::uint8_t ownerSlot) noexcept {
+    return ownerSlot==0 || (kAxelFriendExecution && ownerSlot<3);
+}
+// The seats that may win an Axel offer: those that may execute it.
+inline std::array<ReactionSeat,3> AxelOfferSeats(std::array<ReactionSeat,3> seats) noexcept {
+    for(unsigned i=0;i<seats.size();++i)if(!AxelExecutionAdmitted(static_cast<std::uint8_t>(i)))seats[i]={};
+    return seats;
+}
+// The host's consumption of an Axel window: ConsumeReaction, for an owner admitted to execute.
+inline bool AxelConsume(ReactionWindow& w,const ReactionCompletion& c,std::uint32_t epoch,std::uint32_t frame,
+                        const std::array<ReactionSeat,3>& seats) noexcept {
+    return AxelExecutionAdmitted(c.slot) && ConsumeReaction(w,c,epoch,frame,AxelOfferSeats(seats));
+}
+
 // The RC's executor: the seat, and the actor on the host, that ran it. It is bound to that actor, not to the seat's
 // eligibility: a downed seat, or one that left the eligible table, still owns the RC its actor is in. It ends only
 // on a confirmed release (Axel's attachment to and capture by that actor both seen, then both read and gone), a new
@@ -247,7 +299,9 @@ inline bool AxelExecutorContinues(AxelExecutor& e,const AxelContact& c) noexcept
 // sysobj_player (1/3) inside Axel's script. With no RC bound, the caller's own choice. With one bound, the
 // executor's own actor, whatever its seat's state. If that actor no longer resolves, there is no owner to name:
 // Unresolved, never another seat chosen in its place. 1/3 must still name a live actor (trap 1/18 at 42C576 reads
-// the parent it resolves without a null check), so the adapter keeps the native result and says so.
+// the parent it resolves without a null check), so the adapter keeps the native result and says so. That result is
+// the host's own canonical player, which is the executor's seat only because friend execution is parked
+// (AxelExecutionAdmitted); slice D replaces this with the abort.
 enum class AxelPlayerRoute : std::uint8_t { Choice, Executor, Unresolved };
 inline AxelPlayerRoute AxelPlayerRouteFor(bool executorBound,bool executorActorResolves) noexcept {
     if(!executorBound)return AxelPlayerRoute::Choice;

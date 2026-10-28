@@ -226,6 +226,15 @@ Trap coverage the build adds:
 
 Rules: `inject/src/AxelReaction.hpp`. Runtime: `inject/src/AxelReactions.inl`. Tests: `tests/AxelReactionTest.cpp`.
 
+**Friend execution is parked in slice 1.** A friend's RC needs a safe abort for when its executor's actor is
+lost mid-RC (see sysobj_player below), and that abort comes with slice D. Until then:
+- only the host seat can win an offer (`AxelOfferSeats`), as with the native picker;
+- the host refuses any friend claim before consuming anything (`AxelExecutionAdmitted`; `complete refused
+  reason=friend-execution-parked`);
+- the only executor is therefore the host seat.
+
+The owner rules below are kept as written, and slice D turns friend execution on together with the abort.
+
 **How an offer gets its owner:**
 - **Host mint.** While host Axel II is live in 02/14 btl137 (and only then), the host reads his collision masks
   through the `3BA550` rule each frame. For each family:
@@ -237,9 +246,13 @@ Rules: `inject/src/AxelReaction.hpp`. Runtime: `inject/src/AxelReactions.inl`. T
 - **One window per activation.** It keeps its owner while the offer is up, is consumed at most once, and only the
   next activation opens a new occurrence.
 - **A failed observation withholds.** If Axel's masks or transform can't be read in a frame, every open window
-  stops being claimable. Its occurrence stays as a tombstone, so reads recovering while the same activation is up
-  mint nothing new; only an observed end of the offer clears it. The host consumes a claim only on the frame of a
-  successful observation or the frame after it.
+  stops being claimable. A failed read of the collision header's default mask counts. Only a collision pointer
+  read as zero means no collision data.
+  - Likewise, if Clear Light's chain can't be read, its window alone is withheld. That covers the executor actor's
+    handle word, `+0x638` or `+0x18C`.
+  - A withheld occurrence stays as a tombstone, so reads recovering while the same activation is up mint nothing
+    new. Only an observed end of the offer clears it.
+  - The host consumes a claim only on the frame of a successful observation or the frame after it.
 - **Wire.** Windows travel as reaction identity and offer records, with resource `0xFFFF0000|command` on Axel's
   netId. Owner roles stop minting below that band.
 - **Client receipts.** The friend orders offers per command within one authority: the host session, its epoch and
@@ -253,8 +266,9 @@ Rules: `inject/src/AxelReaction.hpp`. Runtime: `inject/src/AxelReactions.inl`. T
   command, on the Axel actor the native target names (`{Axel, 0, collision object, -1}`, built by `3BEE00`).
 - **Host press.** `SmReactionCallback` gives every Axel II callback to the Axel path. It executes only on a seat-0
   window, so a host press against a seat-1 window is refused and logged, and never runs with the host's Roxas.
-- **Friend press.** On its own window it consumes locally and sends the completion claim. The host consumes that
-  occurrence once and runs the callback with the friend's actor on the host.
+- **Friend press (slice D).** On its own window it consumes locally and sends the completion claim. The host then
+  consumes that occurrence once and runs the callback with the friend's actor on the host. While friend execution
+  is parked, no window names the friend, so it sees no Axel II prompt, and the host refuses any claim it sends.
 
 **sysobj_player (1/3):** inside Axel's script, while an RC is bound, 1/3 names the executor's own actor on the
 host, instead of the nearest seat. So `rc_run_up`, `rc_clear_light` and `idle_after_rc` attach to and wait on the
@@ -267,17 +281,28 @@ seat that pressed.
 - **If the executor's actor no longer resolves** (its seat's actor on the host is gone mid-RC), no other seat is
   chosen in its place: 1/3 keeps the native result and logs `[axel-rc] player unresolved`. 1/3 must still name a
   live actor. Trap 1/18 resolves the parent handle at `42C571` and reads `[rax+4]` at `42C576` without a null
-  check, so naming no actor would fault at Axel's attach. Cancelling the RC itself is not in slice 1.
+  check, so naming no actor would fault at Axel's attach.
+  - With friend execution parked, the executor is always the host seat, and the native result is the host's own
+    canonical player.
+  - For a friend executor, that native result would be the wrong actor (Ione's probe, VUH-2913 comment
+    `694ad7cd`). This is why friend execution waits for slice D's RC abort.
 
-**Logs:** `[axel-rc] offer`, `offer end`, `observation failed`, `client offer`, `local completion`, `complete`,
-`complete refused`, `press refused`, `executor engaged`, `executor end` and `player unresolved`, 256 lines per
-session.
+**Logs:** `[axel-rc] offer`, `offer end`, `observation failed`, `chain unread`/`chain read`, `client offer`,
+`local completion`, `complete`, `complete refused`, `press refused`, `executor engaged`, `executor end` and
+`player unresolved`, 256 lines per session.
 
-**Tests:** `kh2coop_axel_reaction_test` covers the pure rules, including the encounter gate
-(`AxelHostFrameAdmitted`) and the per-frame step (`AxelWindows::Frame`) the adapter calls. It does not exercise
-the adapter's native reads or wiring.
+**Tests:** `kh2coop_axel_reaction_test` covers:
+- the pure rules, including the encounter gate (`AxelHostFrameAdmitted`), the parked friend execution
+  (`AxelExecutionAdmitted`, `AxelOfferSeats`, `AxelConsume`) and the per-frame step (`AxelWindows::Frame`) the
+  adapter calls;
+- the adapter's mask and chain reads (`AxelReadMasks`, `AxelReadChain`), against simulated memory with a failure
+  at each field.
+
+The rest of the adapter's wiring is not exercised.
 
 **Known limits after slice 1:**
+- **The friend has no Axel II RC.** Friend execution is parked until slice D's abort (above). Only the host can
+  run Overtaker, Clear Light or Burst Frontier, and only from inside the family's spheres.
 - **Prompt gating is by proof, not by native suppression code.**
   - A seat without a live host window has its Axel prompt hidden by the existing cache gate. This holds for the
     friend, and for the host while the friend owns the offer.
