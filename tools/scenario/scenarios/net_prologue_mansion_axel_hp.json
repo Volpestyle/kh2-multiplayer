@@ -210,7 +210,7 @@
    "seconds": 20,
    "reach": 120,
    "as": "friend_target",
-   "until": "len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=1 ', 0)) > saved['friend_target_base']['chosen'] and ([a['hp'] for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0] < saved['friend_target_base']['hp'] or log_count('[downed] gate intercept', 1) > saved['friend_target_base']['downs']) and len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)) > saved['friend_target_base']['claims']",
+   "until": "(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '1' and ([a['hp'] for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0] < saved['friend_target_base']['hp'] or log_count('[downed] gate intercept', 1) > saved['friend_target_base']['downs']) and len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)) > saved['friend_target_base']['claims']",
    "sample": {
     "expr": "{'axel': [(a['position']['x'], a['position']['z'], a.get('motionId')) for a in actors(0) if a['name'] == 'B_EX110'], 'host': [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'clone': [(a['position']['x'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0]}",
     "everyMs": 500
@@ -295,7 +295,7 @@
    "seconds": 20,
    "reach": 120,
    "as": "host_target",
-   "until": "len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=0 ', 0)) > saved['host_target_base']['chosen'] and ([a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0] < saved['host_target_base']['hp'] or log_count('[downed] gate intercept', 0) > saved['host_target_base']['downs']) and ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0] < saved['host_target_base']['bossHp']",
+   "until": "(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '0' and ([a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0] < saved['host_target_base']['hp'] or log_count('[downed] gate intercept', 0) > saved['host_target_base']['downs']) and ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0] < saved['host_target_base']['bossHp']",
    "sample": {
     "expr": "{'axel': [(a['position']['x'], a['position']['z'], a.get('motionId')) for a in actors(0) if a['name'] == 'B_EX110'], 'host': [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'clone': [(a['position']['x'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0]}",
     "everyMs": 500

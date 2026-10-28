@@ -217,9 +217,10 @@ static void LogBossTarget(int index, uintptr_t enemy, uintptr_t objentry, int k,
     g.bossValid[index] = valid;
     float x = 0, z = 0;
     ReadXZ(enemy, x, z);
-    Log("[enemy-target] boss-target frame=%u enemy=%llX objectId=%u target=%d owner=%u mode=%u valid=%u changed=%u at=%.0f,%.0f",
+    // tickMs: GetTickCount64, one clock for every process on the PC, so a fixture can order this against the other seat.
+    Log("[enemy-target] boss-target frame=%u enemy=%llX objectId=%u target=%d owner=%u mode=%u valid=%u changed=%u at=%.0f,%.0f tickMs=%llu",
         g_frameCounter, U(enemy), objectId, k, unsigned(g.ownerSlot[k]), mode, unsigned(valid), changed ? 1u : 0u,
-        double(x), double(z));
+        double(x), double(z), static_cast<unsigned long long>(GetTickCount64()));
 }
 
 static void __fastcall SearchDetour(std::uint32_t* stack) {

@@ -213,7 +213,9 @@ How it works (all in `DownedSpike.inl`, behind `KH2COOP_DOWNED_SPIKE=1`):
 - **Intercept before death.** In the `0x3D2EB0` funnel (`StatDelta`), a lethal stat-0 delta on the
   local player (the native player pointer, in or out of an event) is clamped to leave **engine HP 1**.
   The death handler never runs, and the dead bit stays clear. A new episode starts and the player plays
-  the death motion `0x36`. The log reads `[downed] gate intercept mode=4 logical=1 ...`.
+  the death motion `0x36`. The log reads `[downed] gate intercept mode=4 logical=1 ...`. Every intercept and
+  `revive returned` line ends with `tickMs=` (GetTickCount64), so fixtures on one PC can order it against the
+  other seat's log (VUH-2912).
 - **While downed.**
   - No stat-0 change lands: damage, a Cure or an item is skipped.
   - An HP orb, which heals outside the funnel, is put back to 1 through the funnel.

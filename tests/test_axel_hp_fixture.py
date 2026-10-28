@@ -106,8 +106,14 @@ class AxelHpFixtureTest(unittest.TestCase):
             actors = {fighter: [me], 0: [me, boss] if fighter == 0 else [boss]}
             peeks = {0: HOST, 1: HOST}
             self.assertTrue(evaluate(until, logs, saved, actors, peeks=peeks), name)
+            # Logged on change only: a choice held from the walk, before the baseline, is still the selection.
+            saved[f"{name}_base"]["chosen"] = 1
+            self.assertTrue(evaluate(until, logs, saved, actors, peeks=peeks), name)
+            self.assertFalse(evaluate(until, {0: [target(fighter), target(1 - fighter), *logs[0][1:]]}, saved, actors,
+                                      peeks=peeks), name)  # then Axel turned to the other seat
             logs[0][0] = target(1 - fighter)  # Axel chose the other seat
             self.assertFalse(evaluate(until, logs, saved, actors, peeks=peeks), name)
+            self.assertFalse(evaluate(until, {0: logs[0][1:]}, saved, actors, peeks=peeks), name)  # no choice logged
 
     def test_each_round_is_filmed_for_its_whole_length(self):
         for name, fighter, reviver in ROUNDS:

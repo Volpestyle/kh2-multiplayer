@@ -55,13 +55,14 @@ halfword addresses after the 16-byte header.
 | `attack_new` (2/10, five sites) | script-created attacks | Hazards and fire: VUH-2914. |
 
 The host logs `[enemy-target] boss-target frame=... objectId=81 target=<k> owner=<slot> mode=<m> valid=<mask>
-changed=<0|1> at=<x>,<z>` (own budget, 256) whenever a search-target boss changes its chosen candidate, back to
+changed=<0|1> at=<x>,<z> tickMs=<GetTickCount64>` (own budget, 256) whenever a search-target boss changes its chosen candidate, back to
 the host's player included, or the set of candidates changes (`valid` bit k: candidate k, 0 the host). The
 rewrite log above prints only clone wins, within a 64-line budget shared with every mob.
-With `KH2COOP_TRACE_HITS=1`, each seat also logs `[hitwitness] seq=<hittrace seq> ... motion=<before>-><after>
-ignoreHit=<before>-><after>` four frames after a boss's applied hit lowered its own canonical player's HP (reads
-only, 64 lines). A native hit leaves the reaction motion and the ignore-hit timer (`+0xD70`) running; an HP-only
-write leaves neither. `tools/scenario/boss_target_ledger.py` joins it to the hit's scope, the friend's driven mirror
+With `KH2COOP_TRACE_HITS=1`, each seat also logs `[hitwitness] seq=<hittrace seq> hitFrame=<f> hitTickMs=<t> ...
+motion=<before>-><after> ignoreHit=<before>-><after> reads=<mask>` four frames after a boss's applied hit lowered its
+own canonical player's HP (reads only, 64 lines). A native hit leaves the reaction motion and the ignore-hit timer
+(`+0xD70`) running; an HP-only write leaves neither. `reads` has bits 1, 2, 4 and 8 for the motion and timer reads
+before the hit and then; a failed read leaves its field at 0xFFFFFFFF or -1.0, and the ledger requires all four. `tools/scenario/boss_target_ledger.py` joins it to the hit's scope, the friend's driven mirror
 hit and the boss-target choice. `net_prologue_mansion_axel_hp.json` is the live check (docs/SCENARIOS.md).
 
 ### Dusks hit the friend natively (VUH-2466)
