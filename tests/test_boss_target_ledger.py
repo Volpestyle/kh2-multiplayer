@@ -6,6 +6,7 @@ against that ledger (BOSS_TARGET_LEDGER) to show the false passes they reproduce
 """
 import importlib.util
 import os
+import re
 from pathlib import Path
 import unittest
 
@@ -37,10 +38,10 @@ def choice(target, owner, valid, t, changed=1, frame=1):
             f"valid={valid} changed={changed} at=0,0{stamp(t)}")
 
 
-def witness(seq, victim, t, motion=(0, 101), ignore=(0.0, 30.0), reads=15, same=1, frame=900, atkp=12):
+def witness(seq, victim, t, motion=(0, 101), ignore=(0.0, 30.0), reads=15, same=1, frame=900, atkp=12, delay=4):
     tick = "" if LEGACY else f" hitTickMs={t}"
     mask = "" if LEGACY else f" reads={reads}"
-    return (f"[hitwitness] seq={seq} hitFrame={frame}{tick} frame={frame + 4} attacker={COPY} victim={victim} atkp={atkp} "
+    return (f"[hitwitness] seq={seq} hitFrame={frame}{tick} frame={frame + delay} attacker={COPY} victim={victim} atkp={atkp} "
             f"hp=22->16 motion={motion[0]}->{motion[1]} ignoreHit={ignore[0]:.1f}->{ignore[1]:.1f}{mask} same={same}")
 
 
@@ -231,6 +232,75 @@ class BossTargetLedgerTest(unittest.TestCase):
         self.fails("no reaction/i-frames", friend_witness=witness(7, FRIEND_ME, 1500, ignore=(0.0, 0.0)) + chr(10) + late)
         self.fails("no reaction/i-frames",
                    friend_witness=witness(7, FRIEND_ME, 1500, motion=(5, 5), ignore=(0.0, 0.0)) + chr(10) + lethal)
+
+    # Ione 5fb4a767: Axel II's hits on a player never run the ignore-hit timer. A fresh entry into his pinned damage
+    # motions stands in for it, as damage-motion evidence.
+    def test_an_axel_hit_into_a_damage_motion_qualifies_without_the_timer(self):
+        for before in (0, 1, 2, 151):
+            for after in (10, 11, 12, 13, 16, 18):
+                with self.subTest(motion=(before, after)):
+                    v = run(friend_witness=witness(7, FRIEND_ME, 1500, motion=(before, after), ignore=(0.0, 0.0)),
+                            host_witness=witness(8, HOST_ME, 4050, motion=(before, after), ignore=(0.0, 0.0)))
+                    self.assertTrue(v["pass"], v["problems"])
+                    self.assertEqual([r["qualified"][0]["kind"] for r in v["rounds"]], ["damageMotion"] * 2)
+
+    def test_an_hp_only_hit_is_no_damage_motion(self):
+        for motion in ((0, 0), (2, 2), (151, 151)):
+            self.fails("no fresh damage motion: ", friend_witness=witness(7, FRIEND_ME, 1500, motion=motion, ignore=(0.0, 0.0)))
+            self.fails("no fresh damage motion: ", host_witness=witness(8, HOST_ME, 4050, motion=motion, ignore=(0.0, 0.0)))
+
+    def test_a_hit_held_in_a_damage_motion_is_no_fresh_reaction(self):
+        # Ione's example: a proved reaction leaves the seat in 18; an HP-only hit 25 frames later reads 18->18.
+        for motion in ((18, 18), (11, 10), (16, 16), (10, 11), (13, 12)):
+            with self.subTest(motion=motion):
+                self.fails("held from damage motion", host_witness=witness(8, HOST_ME, 4050, motion=motion, ignore=(0.0, 0.0)))
+                self.fails("held from damage motion",
+                           friend_witness=witness(7, FRIEND_ME, 1500, motion=motion, ignore=(0.0, 0.0)))
+
+    def test_an_unrelated_motion_is_no_damage_motion(self):
+        # An attack, damage motions Axel's witnessed hits never showed (14 DAMAGE_AIR_FRONT, 20 DAMAGE_TORNADO_FRONT),
+        # an extended motion, idle.
+        for after in (14, 20, 101, 151, 0):
+            self.fails(f"{after} is not a damage motion",
+                       host_witness=witness(8, HOST_ME, 4050, motion=(2, after), ignore=(0.0, 0.0)))
+
+    def test_a_late_witness_is_no_damage_motion(self):
+        for delay in (5, 8, 60):
+            self.fails(f"read {delay} frames after the hit",
+                       friend_witness=witness(7, FRIEND_ME, 1500, motion=(0, 10), ignore=(0.0, 0.0), delay=delay))
+
+    def test_a_damage_motion_on_an_unread_or_replaced_victim_fails(self):
+        fresh = dict(motion=(0, 10), ignore=(0.0, 0.0))
+        self.fails("witness reads failed", host_witness=witness(8, HOST_ME, 4050, **{**fresh, "motion": (SENTINEL, 10)}))
+        if not LEGACY:
+            for reads in (15 - 1, 15 - 4, 15 - 8):
+                self.fails("witness reads failed", host_witness=witness(8, HOST_ME, 4050, reads=reads, **fresh))
+        self.fails("another victim", host_witness=witness(8, HOST_ME, 4050, same=0, **fresh))
+        self.fails("another victim", friend_witness=witness(7, HOST_ME, 1500, **fresh))  # not this seat's player
+
+    def test_a_damage_motion_needs_the_selection(self):
+        fresh = dict(motion=(0, 10), ignore=(0.0, 0.0))
+        self.fails("not after the boss chose this seat", away_before_hit=True,
+                   friend_witness=witness(7, FRIEND_ME, 1500, **fresh))
+        self.fails("not after the boss chose this seat", host_choice_after_hit=True,
+                   host_witness=witness(8, HOST_ME, 4050, **fresh))
+        self.fails("mirror hit not on a driven host motion", mirror=mirror_hit(driven=0),
+                   friend_witness=witness(7, FRIEND_ME, 1500, **fresh))
+
+    def test_damage_motions_are_pinned_for_axel_ii_only(self):
+        hook = (ROOT / "inject/src/EntityHook.cpp").read_text(encoding="utf-8")
+        enemy = (ROOT / "common/include/kh2coop/EnemyClass.hpp").read_text(encoding="utf-8")
+        self.assertEqual(targets.WITNESS_FRAMES, int(re.search(r"kWitnessFrames = (\d+);", hook)[1]))
+        self.assertEqual(targets.AXEL_II, int(re.search(r"AxelII = (\d+);", enemy)[1]))
+        self.assertEqual(targets.DAMAGE_MOTIONS, {targets.AXEL_II: frozenset({10, 11, 12, 13, 16, 18})})
+        pinned = targets.DAMAGE_MOTIONS
+        targets.DAMAGE_MOTIONS = {}  # another boss: no damage-motion clause
+        try:
+            v = run(host_witness=witness(8, HOST_ME, 4050, motion=(0, 10), ignore=(0.0, 0.0)))
+        finally:
+            targets.DAMAGE_MOTIONS = pinned
+        self.assertFalse(v["pass"])
+        self.assertTrue(any("no reaction/i-frames" in p and "damage motion" not in p for p in v["problems"]), v["problems"])
 
     def test_a_friend_hit_not_on_the_driven_host_motion_fails(self):
         self.fails("mirror hit not on a driven host motion", mirror=mirror_hit(driven=0))

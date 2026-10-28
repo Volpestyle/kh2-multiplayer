@@ -3571,10 +3571,14 @@ Kills take `require: false`, so a seat Axel already downed refuses with `WrongSt
   - Axel's selection names that seat at the round's start or inside it. Lines are logged on change only, so a choice
     held from the walk counts; the fight's `until` reads the selection in force the same way.
   - Inside the round, that seat took a native hit from its copy of the boss while the selection named it.
-  - The hit has its `[hitwitness]` with every read made: a changed motion and a running ignore-hit timer. For a hit
-    that downed the seat, that seat's own gate intercept on that frame stands instead. It is reported as `downing`:
-    lethal-hit evidence, not an i-frame test, so a run whose qualifying hits are all `downing` leaves nonlethal
-    reaction and i-frames unproven.
+  - The hit has its `[hitwitness]` with every read made: a changed motion and a running ignore-hit timer. Axel's hits
+    on a player never run that timer (hp-09, hp-10). For Axel II only (Ione 5fb4a767), a witness read four frames after
+    the hit whose motion entered his pinned damage set {10, 11, 12, 13, 16, 18} from outside it stands instead. It is
+    reported as `damageMotion`: damage-motion evidence, not an i-frame test. A hit that lands while the seat is already
+    in a damage motion (18->18, 11->10) is not a fresh reaction and does not qualify, however recent the last one; the
+    HP ledger still counts it. For a hit that downed the seat, that seat's own gate intercept on that frame stands
+    instead. It is reported as `downing`: lethal-hit evidence, not an i-frame test, so a run whose qualifying hits are
+    all `damageMotion` or `downing` leaves i-frames unproven.
   - On the friend, the hit also has its `[enemy-mirror] hit` on a driven host motion.
 
   Separately, no boss-target line may choose a candidate whose valid bit is clear. A boss-target line definitely

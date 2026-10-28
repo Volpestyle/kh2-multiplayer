@@ -20,9 +20,13 @@ lines, must name that seat. Within the seat's own lines its canonical player mus
 its copy of the pinned boss:
 - a complete hittrace scope (the HP ledger's rules) with victim class LocalAvatar, action Native and HP lost;
 - its witness: all four reads made (reads=15, no 0xFFFFFFFF motion), the same victim still canonical, a changed
-  motion (the reaction) and a running ignore-hit timer. Or, for a hit that downed the seat (on PC1's 5-HP seats
-  every Axel hit does), a changed motion and that seat's own `[downed] gate intercept` for the same actor within two
-  frames: lethal-hit evidence, reported as `downing`, which does not test i-frames;
+  motion (the reaction) and a running ignore-hit timer. For Axel II only (Ione 5fb4a767: his hits on a player never
+  run the timer), a witness read on its own frame (hitFrame + 4) whose motion entered the pinned damage set from
+  outside it stands instead, reported as `damageMotion`: damage-motion evidence, not an i-frame test. A hit landing
+  while the seat is already in a damage motion (18->18, 11->10) does not qualify, however recent its last reaction;
+  the HP ledger still counts it. Or, for a hit that downed the seat (on PC1's 5-HP seats every Axel hit does), a
+  changed motion and that seat's own `[downed] gate intercept` for the same actor within two frames: lethal-hit
+  evidence, reported as `downing`, which does not test i-frames;
 - on the friend, its `[enemy-mirror] hit` line on the same frame, victim and atkp from the bound boss copy with
   driven=1 and an attack motion the mirror entered mid-run (runStart < setFrame <= frame, setMotion == motion): the
   host's motion, not a carried local one;
@@ -63,6 +67,13 @@ WITNESS = re.compile(r"\[hitwitness\] seq=(?P<seq>\d+) hitFrame=(?P<hitFrame>\d+
                      r"hp=(?P<hp0>-?\d+)->(?P<hp1>-?\d+) motion=(?P<m0>\d+)->(?P<m1>\d+) "
                      r"ignoreHit=(?P<i0>-?[\d.]+)->(?P<i1>-?[\d.]+) reads=(?P<reads>\d+) same=(?P<same>\d)")
 ALL_READS, UNREAD_MOTION = 15, str(0xFFFFFFFF)  # motion and ignore-hit timer, before and after; the failed-read value
+WITNESS_FRAMES = 4  # inject/src/EntityHook.cpp kWitnessFrames: the witness reads the motion this many frames after the hit
+AXEL_II = 81  # common/include/kh2coop/EnemyClass.hpp AxelII (B_EX110)
+# The damage motions a boss's hit puts a player in, pinned per boss. Axel II: OpenKh.Kh2/MotionSet.cs (OpenKH/OpenKh
+# b67a7434) DAMAGE_S_FRONT_HIGH 10, DAMAGE_S_FRONT_LOW 11, DAMAGE_S_BACK_HIGH 12, DAMAGE_S_BACK_LOW 13,
+# DAMAGE_BLOW_FRONT 16 and DAMAGE_BLOW_BACK 18: the reactions his witnessed hits on players showed (hp-09 and hp-10;
+# 12 in five earlier Axel HP runs on 2026-10-28).
+DAMAGE_MOTIONS = {AXEL_II: frozenset({10, 11, 12, 13, 16, 18})}
 MIRROR_HIT = re.compile(r"\[enemy-mirror\] hit frame=(?P<frame>\d+) netId=(?P<netId>\d+) actor=(?P<actor>[0-9A-F]+) "
                         r"driven=(?P<driven>-?\d+) runStart=(?P<runStart>\d+) runFrames=\d+ motion=(?P<motion>\d+) time=\S+ "
                         r"setMotion=(?P<setMotion>-?\d+) setFrame=(?P<setFrame>\d+) cursor=\S+ atkp=(?P<atkp>\d+) "
@@ -121,6 +132,18 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
     downings = {seat: [d.groupdict() for text in lines[seat] for d in [DOWNING.search(text)] if d] for seat in (0, 1)}
     mirror_hits = [{**h.groupdict(), "line": n} for n, text in enumerate(lines[1]) for h in [MIRROR_HIT.search(text)] if h]
     copy = {0: boss.get("hostActor"), 1: boss.get("friendActor")}
+    damage = DAMAGE_MOTIONS.get(objectId, frozenset())
+
+    def damage_motion(w: dict) -> str | None:
+        """Why the witness shows no fresh entry into the boss's damage motions, or None."""
+        m0, m1 = int(w["m0"]), int(w["m1"])
+        if m1 not in damage:
+            return f"{m1} is not a damage motion"
+        if m0 in damage:
+            return f"held from damage motion {m0}"
+        if int(w["frame"]) - int(w["hitFrame"]) != WITNESS_FRAMES:
+            return f"read {int(w['frame']) - int(w['hitFrame'])} frames after the hit, not {WITNESS_FRAMES}"
+        return None
 
     def qualify(seat: int, e: dict) -> str | None:
         """Why this native hit on the seat does not qualify, or None."""
@@ -133,9 +156,16 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
             return "witness is for another victim or the player changed"
         downing = any(same_actor(d["actor"], w["victim"]) and 0 <= int(d["frame"]) - int(w["hitFrame"]) <= 2
                       for d in downings[seat])
-        if w["m1"] == w["m0"] or (float(w["i1"]) <= 0 and not downing):
-            return f"no reaction/i-frames (motion {w['m0']}->{w['m1']}, ignoreHit {w['i0']}->{w['i1']})"
-        e["kind"] = "reaction" if float(w["i1"]) > 0 else "downing"
+        fresh = damage_motion(w) if damage else "no damage motions pinned"
+        if w["m1"] != w["m0"] and float(w["i1"]) > 0:
+            e["kind"] = "reaction"
+        elif fresh is None:
+            e["kind"] = "damageMotion"
+        elif w["m1"] != w["m0"] and downing:
+            e["kind"] = "downing"
+        else:
+            return (f"no reaction/i-frames (motion {w['m0']}->{w['m1']}, ignoreHit {w['i0']}->{w['i1']})"
+                    + (f"; no fresh damage motion: {fresh}" if damage else ""))
         if seat == 1:
             hit = [h for h in mirror_hits if h["frame"] == w["hitFrame"] and same_actor(h["victim"], w["victim"]) and
                    same_actor(h["actor"], copy[1]) and h["atkp"] == w["atkp"]]

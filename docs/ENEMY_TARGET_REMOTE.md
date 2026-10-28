@@ -61,7 +61,10 @@ rewrite log above prints only clone wins, within a 64-line budget shared with ev
 With `KH2COOP_TRACE_HITS=1`, each seat also logs `[hitwitness] seq=<hittrace seq> hitFrame=<f> hitTickMs=<t> ...
 motion=<before>-><after> ignoreHit=<before>-><after> reads=<mask>` four frames after a boss's applied hit lowered its
 own canonical player's HP (reads only, 64 lines). A native hit leaves the reaction motion and the ignore-hit timer
-(`+0xD70`) running; an HP-only write leaves neither. `reads` has bits 1, 2, 4 and 8 for the motion and timer reads
+(`+0xD70`) running; an HP-only write leaves neither. Axel II's hits on a player are the exception: across hp-09 and
+hp-10 (25 hits) the timer read 0 throughout, and the reaction shows only as the motion. The target ledger accepts, for
+Axel II alone, a motion that entered his damage set (10, 11, 12, 13, 16, 18) from outside it on the witness's own frame
+(`damageMotion`); a hit landing mid-reaction (already in that set) is no fresh reaction (Ione 5fb4a767). `reads` has bits 1, 2, 4 and 8 for the motion and timer reads
 before the hit and then; a failed read leaves its field at 0xFFFFFFFF or -1.0, and the ledger requires all four.
 The line then adds the victim's reactions until it is logged (VUH-2912, the same trace setting): `reactions=<n>
 refused=<n> reaction=<kind> reactRequest=<id> reactFrame=<f> reactHooked=<0|1>`. They come from a read-only hook on
