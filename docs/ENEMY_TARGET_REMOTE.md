@@ -75,10 +75,13 @@ motion changed): `callsAll=<n> calls=<n> callRequests=<n> callApplied=<n> callId
 preArm=none|found|unavailable preArmKind=<kind> preArmRequest=<id>` (`inject/src/ReactionCalls.hpp`). Each witness
 counts the calls while it is pending, and no history outlives it (Ione 10d8b494). `callsAll` counts calls on any
 actor. `calls`, `callRequests` (a nonzero or unread request) and `callApplied` count calls on the victim. They read
--1 unless `callIdentity=ok` and `same=1`. The inject has no native incarnation id, so the victim is its pointer
-plus its objentry pointer (`+0x918`), with the canonical-player bookends at arm and log. A call at that pointer
-with another or an unread objentry gives `changed`, and an objentry unread at arm gives `unread`. A reuse by an
-actor of the same kind within the 4-frame window is not detected. `preArm` looks back only into `hitFrame`, at the
+-1 unless `callIdentity=ok`. The inject has no native incarnation id, so the victim is its pointer plus its
+objentry pointer (`+0x918`), with the canonical-player bookends at arm and log. `changed` means a call at that
+pointer carried another or an unread objentry, or, at the final bookend, the pointer was no longer the canonical
+player or its objentry had changed (Ione e33b049c). `unread` means the objentry was unread at arm or at log. An
+earlier `changed` or `unread` is never restored. NOTE: a reuse by an actor of the same kind within the 4-frame
+window is not detected. These fields are diagnostic only, never reaction or targeting acceptance proof; that would
+need a verified allocation or lifetime generation. `preArm` looks back only into `hitFrame`, at the
 last 16 applied calls. `found` means the victim's reaction was applied in the hit's frame before the witness
 armed, with its kind and request. `unavailable` means the victim's objentry was unread, that frame applied more
 than 16 reactions, or another or unread objentry applied one at the victim's pointer. So `callsAll=0` means the

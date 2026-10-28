@@ -59,6 +59,34 @@ int main() {
         rc::Count(w, kVictim, kSora, 0, false);  // a later call with the armed identity does not restore it
         CHECK(!rc::Available(w));
     }
+    // Ione (e33b049c) final bookend: the victim's objentry replaced or unread, or its pointer no longer the canonical
+    // player, after the last reaction call (or with none at all) makes its counts unavailable when the witness logs.
+    for (int calls : {0, 1}) {
+        struct Case { bool canonical; std::uintptr_t now; rc::Identity want; };
+        for (const Case k : {Case {true, kShadow, rc::Identity::Changed}, Case {true, 0, rc::Identity::Unread},
+                             Case {false, kSora, rc::Identity::Changed}, Case {true, kSora, rc::Identity::Ok}}) {
+            rc::Window w = rc::Arm(kVictim, kSora);
+            for (int i = 0; i < calls; ++i) rc::Count(w, kVictim, kSora, 0, false);
+            rc::Close(w, k.canonical, k.now);
+            CHECK(w.state == k.want);
+            CHECK(rc::Available(w) == (k.want == rc::Identity::Ok));
+            CHECK(w.calls == static_cast<std::uint32_t>(calls));
+        }
+    }
+    // An earlier unavailable state stays, whatever the final read says.
+    {
+        rc::Window changed = rc::Arm(kVictim, kSora);
+        rc::Count(changed, kVictim, kShadow, 0, false);
+        rc::Close(changed, true, kSora);
+        CHECK(changed.state == rc::Identity::Changed && !rc::Available(changed));
+        rc::Window unread = rc::Arm(kVictim, 0);
+        rc::Close(unread, true, kSora);
+        CHECK(unread.state == rc::Identity::Unread && !rc::Available(unread));
+        rc::Window lost = rc::Arm(kVictim, kSora);
+        rc::Close(lost, true, 0);
+        rc::Close(lost, true, kSora);  // a second read cannot restore it
+        CHECK(lost.state == rc::Identity::Unread);
+    }
     // A victim whose identity was unread at arm has no available counts.
     {
         rc::Window w = rc::Arm(kVictim, 0);

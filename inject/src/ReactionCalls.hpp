@@ -8,8 +8,10 @@
 // actor, so the victim is its pointer plus its objentry pointer (actor+0x918), read when the witness arms and on
 // every call at that pointer, with the canonical-player bookends EntityHook checks at arm and log. A call at the
 // victim's pointer with another or an unread identity, or a victim identity unread at arm, makes the window's
-// victim counts unavailable rather than zero. A reuse by an actor of the same kind inside the 4-frame window is not
-// detected. The pre-arm lookback covers only the hit's own frame, from a ring of the last kRecent applied calls; a
+// victim counts unavailable rather than zero, and so does a victim that is no longer the canonical player or whose
+// objentry changed or went unread by the time the witness logs (Close). NOTE (Ione e33b049c): a reuse by an actor of
+// the same kind inside the 4-frame window is not detected, so these fields are diagnostic only and never
+// reaction or targeting acceptance proof; that would need a verified allocation/lifetime generation. The pre-arm lookback covers only the hit's own frame, from a ring of the last kRecent applied calls; a
 // frame that applied more than the ring holds makes it unavailable.
 #include <cstdint>
 
@@ -44,6 +46,16 @@ inline void Count(Window& w, std::uintptr_t actor, std::uintptr_t identity, std:
     ++w.calls;
     if (request != 0) ++w.requests;
     if (applied) ++w.applied;
+}
+
+// The final bookend, when the witness logs (Ione e33b049c): `canonical` is whether the victim's pointer is still the
+// canonical player and `identity` its objentry read now (0 unread). An identity lost after the last call never
+// reaches Count, so a pointer no longer canonical or an objentry changed gives Changed, and an objentry unread gives
+// Unread. An earlier unavailable state stays.
+inline void Close(Window& w, bool canonical, std::uintptr_t identity) noexcept {
+    if (w.state != Identity::Ok) return;
+    if (!canonical || (identity && identity != w.identity)) w.state = Identity::Changed;
+    else if (!identity) w.state = Identity::Unread;
 }
 
 inline bool Available(const Window& w) noexcept { return w.state == Identity::Ok; }
