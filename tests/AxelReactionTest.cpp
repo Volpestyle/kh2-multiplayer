@@ -487,6 +487,16 @@ int main() {
         check(R::AxelCameraStepFor(false,Custody::Owner,true)==Step::Native && R::AxelCameraStepFor(false,Custody::Undecided,true)==Step::Native,
               "anything not Axel's stays native, whoever holds custody");
         check(R::kAxelCameraNone==2,"the no-target code sits beside op 5's actor (0) and source (1)");
+        check(R::AxelFadeAdopted(true,Custody::Owner,true,303,0x720) && !R::AxelFadeAdopted(false,Custody::Owner,true,303,0x720) &&
+              !R::AxelFadeAdopted(true,Custody::Host,true,303,0x720) && !R::AxelFadeAdopted(true,Custody::Undecided,true,303,0x720) &&
+              !R::AxelFadeAdopted(true,Custody::Owner,false,303,0x720) && !R::AxelFadeAdopted(true,Custody::Owner,true,304,0x720) &&
+              !R::AxelFadeAdopted(true,Custody::Owner,true,303,0),
+              "only Axel's own D303, queued in a friend's callback under the owner's custody, is adopted");
+        const R::AxelFadeCustody fade{0x720,0x100,0x300,1,5,700};
+        check(R::AxelFadeOurs(fade,0x720,0x100,5,700) && !R::AxelFadeOurs(fade,0x721,0x100,5,700) &&
+              !R::AxelFadeOurs(fade,0x720,0x200,5,700) && !R::AxelFadeOurs(fade,0x720,0x100,6,700) &&
+              !R::AxelFadeOurs(fade,0x720,0x100,5,701) && !R::AxelFadeOurs({},0,0,5,700),
+              "a fade or reset is D303's only on its thread, with Axel as the source, in its epoch and lease");
     }
 
     // Routing identity.

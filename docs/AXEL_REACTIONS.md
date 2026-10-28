@@ -408,8 +408,20 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
     then 1/29, then 1/112 (Kit, `e4a7861e`). Inside a friend's callback the watch waits for the callback's end and
     then goes on the 1/112 hook role as op 17 (`actor_owner_axel_camera`, kind watch). With no role to carry it, it
     plays natively once the callback returns.
-  - **Not yet:** the friend's replay of op 17, and D303's white-out, `camera_reset` and white-in after Clear Light
-    (0/31, 1/295, 0/32), which are the next two commits.
+  - **Clear Light's D303.** L140 queues D303 with 2/20 (label 303). D303 waits 110, whites out (0/31, 70), waits 70,
+    then runs `camera_reset` (1/295) and whites in (0/32, 30), on the global frame time (Kit, `e4a7861e`).
+    - **Adoption.** Under the owner's custody only, the host adopts it at its 2/20 (`AxelFadeAdopted`): the list
+      node's first word, which the runner makes the current thread (`0x2A25048`) while D303 runs, with Axel as its
+      VM's source (`*(0x2A250B0)+0x60`). Both are read raw, so the adoption holds after Axel dies; his death doesn't
+      stop D303.
+    - **Its three ops.** They are recognized by that thread and source (`AxelFadeOurs`), so no other script's fade
+      or reset is ever taken from the host. They go to the owner as op 17 while its role is current, and are dropped
+      once it isn't.
+    - **The end.** White-in ends the adoption; so do a new epoch and, if 3C5440 kills the thread early,
+      `kAxelFadeLeaseFrames` (600).
+    - **Hooks.** All four slots are pinned and optional. The fades and the reset install first and 2/20 only if they
+      are in; if any is refused, nothing is adopted and D303 plays on the host as before.
+  - **Not yet:** the friend's replay of op 17, which is the next commit.
 - **Axel's own pose on the friend while held.** The host stops publishing Axel's motion while he is parented, so the
   friend's held clone keeps its last mirrored motion.
 - **Host-owned RCs show nothing on the friend's copy of the host.** No role is minted for the host's own executor,

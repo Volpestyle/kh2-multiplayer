@@ -181,6 +181,10 @@ struct OwnerTrapSlot {
 static void __fastcall SmOwnerCameraGlobal(std::uint64_t*);
 static void __fastcall SmOwnerCaptureQuery(std::uint64_t*);
 static void __fastcall SmOwnerCameraWatch(std::uint64_t*);
+static void __fastcall SmOwnerThreadStart(std::uint64_t*);
+static void __fastcall SmOwnerWhiteOut(std::uint64_t*);
+static void __fastcall SmOwnerWhiteIn(std::uint64_t*);
+static void __fastcall SmOwnerCameraReset(std::uint64_t*);
 static constexpr std::size_t kSmOwnerCoreTrapCount=6;
 static OwnerTrapSlot g_smOwnerTraps[]{
     {3,0x42B230,0x40000000,R::kOwnerPlayer,sizeof(R::kOwnerPlayer),&SmOwnerPlayer},
@@ -199,6 +203,12 @@ static OwnerTrapSlot g_smAxelCaptureQuerySlot{101,0x42D360,0x40000001,R::kOwnerC
     &SmOwnerCaptureQuery};
 // camera_watch: refused, Burst's watch plays natively as before (R::AxelCameraStepFor's fallback).
 static OwnerTrapSlot g_smAxelWatchSlot{207,0x430B80,0x1,R::kOwnerCameraWatch,sizeof(R::kOwnerCameraWatch),&SmOwnerCameraWatch};
+// D303 (R::AxelFadeAdopted): 2/20 magic_start_thread, 0/31 white-out, 0/32 white-in and 1/295 camera_reset. Any one
+// refused: none of D303 is adopted, and Clear Light's white-out and reset play on the host as before.
+static OwnerTrapSlot g_smAxelThreadSlot{20,0x432CD0,0x40000002,R::kOwnerThreadStart,sizeof(R::kOwnerThreadStart),&SmOwnerThreadStart};
+static OwnerTrapSlot g_smAxelWhiteOutSlot{31,0x41DD70,0x1,R::kOwnerWhiteOut,sizeof(R::kOwnerWhiteOut),&SmOwnerWhiteOut};
+static OwnerTrapSlot g_smAxelWhiteInSlot{32,0x41DDB0,0x1,R::kOwnerWhiteIn,sizeof(R::kOwnerWhiteIn),&SmOwnerWhiteIn};
+static OwnerTrapSlot g_smAxelResetSlot{295,0x430B60,0x0,R::kOwnerCameraReset,sizeof(R::kOwnerCameraReset),&SmOwnerCameraReset};
 // R::AxelExecutionAdmitted's abortArmed: every trap that takes 1/3's result is gated, the core's 1/18 and 1/29 and
 // the optional 1/101 (Ione's 75233daf).
 static bool SmOwnerAxelAbortReady() noexcept { return SmOwnerReady() && g_smAxelCaptureQuerySlot.swapped; }
@@ -1184,6 +1194,28 @@ static void __fastcall SmOwnerCameraWatch(std::uint64_t* args) {
     if(SmGameThread() && SmCopyArgs(args,before,1) && SmAxelCameraWatch(before))return;
     reinterpret_cast<TrapFn>(g_smAxelWatchSlot.original)(args);
 }
+// 2/20 always runs natively; afterwards, inside a friend's callback, SmAxelThreadStarted may adopt D303.
+static void __fastcall SmOwnerThreadStart(std::uint64_t* args) {
+    std::uint64_t before[2]{},after[1]{};
+    const bool watched=SmGameThread() && SmAxelThreadWatched() && SmCopyArgs(args,before,2);
+    reinterpret_cast<TrapFn>(g_smAxelThreadSlot.original)(args);
+    if(watched && SmCopyArgs(args,after,1))SmAxelThreadStarted(before,after);
+}
+// D303's own ops are withheld (SmAxelFade); the slots have no result bit, so a skipped call pushes nothing.
+static void __fastcall SmOwnerWhiteOut(std::uint64_t* args) {
+    std::uint64_t before[1]{};
+    if(SmGameThread() && SmAxelFadePending() && SmCopyArgs(args,before,1) && SmAxelFade(R::AxelCameraKind::WhiteOut,before))return;
+    reinterpret_cast<TrapFn>(g_smAxelWhiteOutSlot.original)(args);
+}
+static void __fastcall SmOwnerWhiteIn(std::uint64_t* args) {
+    std::uint64_t before[1]{};
+    if(SmGameThread() && SmAxelFadePending() && SmCopyArgs(args,before,1) && SmAxelFade(R::AxelCameraKind::WhiteIn,before))return;
+    reinterpret_cast<TrapFn>(g_smAxelWhiteInSlot.original)(args);
+}
+static void __fastcall SmOwnerCameraReset(std::uint64_t* args) {
+    if(SmGameThread() && SmAxelFadePending() && SmAxelFade(R::AxelCameraKind::Reset,nullptr))return;
+    reinterpret_cast<TrapFn>(g_smAxelResetSlot.original)(args);
+}
 // The native watch a deferred Burst watch falls back to (SmAxelFlushWatch), on a copy of its argument.
 static void SmOwnerCameraWatchNative(const std::uint64_t* args) {
     std::uint64_t copy[1]{args[0]};
@@ -2044,6 +2076,10 @@ static void SmOwnerShutdown() {
     SmOwnerRestoreSlot(g_smAxelCameraSlot);
     SmOwnerRestoreSlot(g_smAxelCaptureQuerySlot);
     SmOwnerRestoreSlot(g_smAxelWatchSlot);
+    SmOwnerRestoreSlot(g_smAxelThreadSlot);
+    SmOwnerRestoreSlot(g_smAxelWhiteOutSlot);
+    SmOwnerRestoreSlot(g_smAxelWhiteInSlot);
+    SmOwnerRestoreSlot(g_smAxelResetSlot);
     for(auto& slot:g_smOwnerTraps)if(slot.swapped) {
         const auto previous=InterlockedCompareExchangePointer(reinterpret_cast<PVOID volatile*>(slot.entry),
             reinterpret_cast<void*>(slot.original),reinterpret_cast<void*>(slot.detour));
@@ -2122,5 +2158,12 @@ static bool SmOwnerInstall() {
     if(!SmOwnerSwapOptional(g_smAxelCaptureQuerySlot,table))
         Log("[axel-rc] obj_motion_is_capture hook refused; the abort is unarmed, friends execute no Axel RC");
     if(!SmOwnerSwapOptional(g_smAxelWatchSlot,table))Log("[axel-rc] camera_watch hook refused; Burst's watch stays native");
+    // D303 needs all four: the fades and the reset are hooked first, and 2/20 (which adopts D303) only if they are in.
+    uintptr_t bank0=0,bank2=0;
+    const bool fades=ReadHitTrace(g_exeBase+R::kTrapTables,bank0) && bank0 &&
+        SmOwnerSwapOptional(g_smAxelWhiteOutSlot,bank0) && SmOwnerSwapOptional(g_smAxelWhiteInSlot,bank0) &&
+        SmOwnerSwapOptional(g_smAxelResetSlot,table);
+    if(!fades || !ReadHitTrace(g_exeBase+R::kTrapTables+16,bank2) || !bank2 || !SmOwnerSwapOptional(g_smAxelThreadSlot,bank2))
+        Log("[axel-rc] D303 hooks refused fades=%u; Clear Light's white-out and reset stay native",fades?1u:0u);
     return true;
 }

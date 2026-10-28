@@ -22,6 +22,7 @@ struct SmAxelState {
     bool watchPending{};     // Burst's 1/207, waiting for the callback's end (SmAxelFlushWatch)
     R::AxelCameraStep watchStep{};
     std::uint64_t watchArgs[1]{};
+    R::AxelFadeCustody fade{}; // D303 under a friend's custody; it outlives its executor and Axel himself
     // client
     R::AxelOffers offers{};
     struct Identity { std::uint8_t slot{0xFF};std::uint64_t connection{};std::uint32_t epoch{}; };
@@ -300,6 +301,46 @@ static void SmAxelFlushWatch() {
     const bool sent=step!=R::AxelCameraStep::Native &&
         SmAxelEmitCameraOp(g_axel.executor.slot,g_axel.executorActor,R::AxelCameraKind::Watch,0);
     if(step==R::AxelCameraStep::Native || !SmAxelCameraSent(step,sent,"watch",0))SmOwnerCameraWatchNative(g_axel.watchArgs);
+}
+// D303 (R::AxelFadeAdopted, R::AxelFadeOurs). The running VM thread and its program's source actor are read raw, with
+// no liveness or family check: D303 keeps Axel's after he dies.
+static constexpr uintptr_t kSmAxelCurrentThread=0x2A25048,kSmAxelVm=0x2A250B0;
+static uintptr_t SmAxelVmSource() {
+    uintptr_t vm=0,actor=0;
+    return ReadHitTrace(g_exeBase+kSmAxelVm,vm) && vm && ReadHitTrace(vm+0x60,actor)?actor:0;
+}
+// Whether the 2/20 hook must look at this call: only inside a friend's callback. Nothing is read otherwise.
+static bool SmAxelThreadWatched() noexcept { return g_sm.hostActive && g_axel.inFriendCallback; }
+// Host 2/20, after its native call: [0] the label before it, the node handle after it.
+static void SmAxelThreadStarted(const std::uint64_t* before,const std::uint64_t* after) {
+    if(!SmAxelThreadWatched() || !before || !after || R::BitsOf(before[0])!=R::kAxelWhiteOutThread)return;
+    uintptr_t thread=0;enemysync::DownedScope scope;
+    const auto node=R::TagOf(after[0])==R::kTagAddress?SmDecode(R::BitsOf(after[0])):0;
+    if(!node || !ReadHitTrace(node,thread))thread=0;
+    const bool axel=SmAxelHostCurrent() && SmAxelVmSource()==g_axel.actor;
+    if(!R::AxelFadeAdopted(true,g_axel.cameraCustody,axel,R::BitsOf(before[0]),thread) || !SmOwnerScope(scope))return;
+    g_axel.fade={thread,g_axel.actor,g_axel.executorActor,g_axel.executor.slot,scope.epoch,g_frameCounter+R::kAxelFadeLeaseFrames};
+    if(SmAxelLogBudget())Log("[axel-rc] camera adopted D303 command=%u owner=%u",g_axel.executor.command,g_axel.executor.slot);
+}
+// Whether the fade and reset hooks must look at this call: only while a D303 is adopted.
+static bool SmAxelFadePending() noexcept { return g_sm.hostActive && g_axel.fade.thread; }
+// Host 0/31, 0/32 and 1/295 (args: the fade's float, or none): one of the adopted D303's ops goes to its owner, or
+// is dropped, and never runs on the host. True: the hook skips it.
+static bool SmAxelFade(R::AxelCameraKind kind,const std::uint64_t* args) {
+    if(!SmAxelFadePending())return false;
+    enemysync::DownedScope scope;uintptr_t thread=0;
+    if(!SmOwnerScope(scope) || !ReadHitTrace(g_exeBase+kSmAxelCurrentThread,thread))return false;
+    if(scope.epoch!=g_axel.fade.epoch || static_cast<std::int32_t>(g_axel.fade.until-g_frameCounter)<0) {
+        if(SmAxelLogBudget())Log("[axel-rc] camera D303 expired owner=%u",g_axel.fade.slot);
+        g_axel.fade={};return false;
+    }
+    if(!R::AxelFadeOurs(g_axel.fade,thread,SmAxelVmSource(),scope.epoch,g_frameCounter))return false;
+    const float argument=kind==R::AxelCameraKind::Reset || !args?0.0f:R::FloatOf(args[0]);
+    const bool sent=SmAxelEmitCameraOp(g_axel.fade.slot,g_axel.fade.actor,kind,argument);
+    if(SmAxelLogBudget())Log("[axel-rc] camera %s D303 kind=%u owner=%u",sent?"forwarded":"dropped",
+        static_cast<unsigned>(kind),g_axel.fade.slot);
+    if(kind==R::AxelCameraKind::WhiteIn)g_axel.fade={};
+    return true;
 }
 static void SmAxelExecutorTick(const enemysync::DownedScope& scope) {
     if(!g_axel.executor.command)return;

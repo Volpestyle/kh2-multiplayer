@@ -627,6 +627,75 @@ int main() {
         Setup(1u<<R::kBurstFrontierGroupA);enemysync::scope.roomId=0x15;Frame();reads=0;vmLookups=0;
         check(!watch(kAxelHandle) && !reads && !vmLookups,"outside Axel II the watch hook reads nothing");
     }
+    // D303 under the owner's custody (R::AxelFadeAdopted, R::AxelFadeOurs): adopted at its 2/20, known by its thread
+    // and Axel as its VM's source.
+    {
+        constexpr uintptr_t kName=0x700000,kNode=0x710000,kThread=0x720000,kVm=0x730000,kOther=0x740000;
+        constexpr std::uint32_t kNameHandle=0x70,kNodeHandle=0x71;
+        using Kind=R::AxelCameraKind;
+        std::uint32_t label=303;
+        const auto running=[&](uintptr_t thread,uintptr_t source) {
+            Put(g_exeBase+0x2A25048,thread);Put(g_exeBase+0x2A250B0,kVm);Put(kVm+0x60,source);
+        };
+        const auto queue=[&] { // L140: the start "10", then 2/20 queues D303 and returns its node's handle
+            const std::uint64_t start[2]{R::Tagged(R::kTagAddress,kAxelHandle),R::Tagged(R::kTagAddress,kNameHandle)};
+            (void)SmAxelCamera(start);
+            const std::uint64_t before[2]{R::Tagged(R::kTagInt,label),R::Tagged(R::kTagAddress,kAxelHandle)};
+            const std::uint64_t after[1]{R::Tagged(R::kTagAddress,kNodeHandle)};
+            if(SmAxelThreadWatched())SmAxelThreadStarted(before,after);
+        };
+        const auto fade=[](Kind kind,float value) {
+            std::uint32_t bits=0;std::memcpy(&bits,&value,sizeof(bits));
+            const std::uint64_t args[1]{R::Tagged(R::kTagFloat,bits)};
+            return SmAxelFadePending() && SmAxelFade(kind,args);
+        };
+        const auto friendClearLight=[&](std::uint32_t groups=1u<<R::kOvertakerGroup) {
+            Setup(groups);Frame();
+            handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});handles[kNode]=kNodeHandle;Put(kNode,kThread);
+            running(kOther,kAxel);duringCallback=queue;
+            const bool ran=SmAxelComplete(Claim(),nullptr);duringCallback=nullptr;
+            return ran;
+        };
+        check(friendClearLight() && g_axel.fade.thread==kThread && g_axel.fade.slot==1,
+              "under the owner's custody the host adopts D303 at its 2/20");
+        running(kThread,kAxel);
+        const bool out=fade(Kind::WhiteOut,70.0f),reset=SmAxelFade(Kind::Reset,nullptr),in=fade(Kind::WhiteIn,30.0f);
+        const auto ops=CameraOps();
+        check(out && reset && in && ops.size()==3 && ops[0].kind==3 && ops[1].kind==2 && ops[2].kind==4 &&
+              ops[0].floatArgument && ops[0].slot==1 && !g_axel.fade.thread,
+              "its white-out, reset and white-in go to the owner in order, none on the host, and white-in ends it");
+        check(!fade(Kind::WhiteOut,70.0f),"after its white-in, that thread's fades are native again");
+        (void)friendClearLight();
+        running(kOther,kAxel);
+        check(!fade(Kind::WhiteOut,40.0f) && !SmAxelFade(Kind::Reset,nullptr),
+              "while D303 is pending, the host's own fade or reset on any other thread stays native");
+        running(kThread,kHostActor);
+        check(!fade(Kind::WhiteOut,70.0f) && g_axel.fade.thread,"and so does one on that thread with another source");
+        running(kThread,kAxel);roleCurrent=false;const auto sent=CameraOps().size();
+        check(fade(Kind::WhiteOut,70.0f) && CameraOps().size()==sent,
+              "once the owner's role has ended its ops are dropped, never shown on the host");
+        roleCurrent=true;SmAxelHostReset();
+        check(!g_axel.actor && fade(Kind::WhiteIn,30.0f),"D303 stays the owner's after the host's Axel is gone");
+        (void)friendClearLight();running(kThread,kAxel);g_frameCounter+=R::kAxelFadeLeaseFrames+1;
+        check(!fade(Kind::WhiteOut,70.0f) && !g_axel.fade.thread,"a D303 that never whites in expires at its lease");
+        (void)friendClearLight();running(kThread,kAxel);++enemysync::scope.epoch;
+        check(!fade(Kind::WhiteOut,70.0f) && !g_axel.fade.thread,"and with its epoch");
+        Setup(1u<<R::kOvertakerGroup);Frame();
+        handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});handles[kNode]=kNodeHandle;Put(kNode,kThread);
+        running(kOther,kAxel);duringCallback=queue;emitOk=false;
+        (void)SmAxelComplete(Claim(),nullptr);duringCallback=nullptr;emitOk=true;
+        check(g_axel.cameraCustody==R::AxelCameraCustody::Host && !g_axel.fade.thread,
+              "a sequence that stayed the host's adopts nothing, so D303 plays on the host");
+        label=304;(void)friendClearLight();label=303;
+        check(!g_axel.fade.thread,"no other thread is adopted");
+        Setup(1u<<R::kOvertakerGroup);g_seats[1].living=false;Frame();
+        handles[kNode]=kNodeHandle;Put(kNode,kThread);running(kOther,kAxel);duringCallback=queue;
+        (void)SmAxelComplete(Claim(),nullptr);duringCallback=nullptr;
+        check(!g_axel.fade.thread,"nor any from the host's own RC");
+        Setup(1u<<R::kOvertakerGroup);Frame();reads=0;
+        check(!SmAxelThreadWatched() && !SmAxelFadePending() && !SmAxelFade(Kind::WhiteOut,nullptr) && !reads,
+              "with nothing adopted and no friend callback running, the 2/20, fade and reset hooks read nothing");
+    }
     {
         // Every op-17 kind the custody path can build passes both of the real wire rules.
         ScriptActorRole role{81,kFriendActor,kAxel,false};role.resource=0x80000009u;role.netId=7;role.slot=1;role.thread=0x900;

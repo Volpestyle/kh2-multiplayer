@@ -387,6 +387,28 @@ inline bool AxelCameraOpValid(std::uint32_t kind,bool argFloat,std::uint32_t arg
     if(kind<1 || kind>4)return false;
     return kind<=2?!argFloat && !argBits:argFloat && arg>0;
 }
+// D303 (Kit, e4a7861e): Clear Light's L140 queues it with 2/20 (label 303, Axel as its argument). It waits 110, whites
+// out (0/31, 70), waits 70, then resets the camera (1/295) and whites in (0/32, 30), on the global frame time; Axel's
+// death does not stop it. Under the owner's custody (only), the host adopts that thread at its 2/20: the list node's
+// first word, which the runner makes the current thread (0x2A25048) while D303 runs, with Axel as its VM's source
+// (0x2A250B0 +0x60, copied at creation). Its three ops are recognized by both, so no other script's fade or reset is
+// ever taken from the host, and they go to the owner or are dropped. White-in ends it; so do a new epoch and, if the
+// thread dies early (3C5440), kAxelFadeLeaseFrames.
+inline constexpr std::uint32_t kAxelWhiteOutThread=303,kAxelFadeLeaseFrames=600;
+struct AxelFadeCustody {
+    std::uintptr_t thread{},axel{},actor{};
+    std::uint8_t slot{0xFF};
+    std::uint32_t epoch{},until{};
+};
+inline bool AxelFadeAdopted(bool friendCallback,AxelCameraCustody custody,bool axelSource,std::uint32_t label,
+                            std::uintptr_t thread) noexcept {
+    return friendCallback && custody==AxelCameraCustody::Owner && axelSource && label==kAxelWhiteOutThread && thread;
+}
+inline bool AxelFadeOurs(const AxelFadeCustody& f,std::uintptr_t thread,std::uintptr_t vmSource,std::uint32_t epoch,
+                         std::uint32_t frame) noexcept {
+    return f.thread && thread==f.thread && f.axel && vmSource==f.axel && f.epoch==epoch &&
+        static_cast<std::int32_t>(f.until-frame)>=0;
+}
 // Which RCs begin that role at completion: Overtaker and Clear Light. Burst Frontier hooks the player into its steering
 // coroutine (1/112), and ScriptActorOwner's hook mints the role, adopting the capture issued just before it.
 inline bool AxelRoleAtCompletion(std::uint16_t command) noexcept {
