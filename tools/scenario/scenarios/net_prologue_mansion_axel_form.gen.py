@@ -401,7 +401,20 @@ def target_round(name, fighter, reviver):
     ]
 
 
-def hp_steps():
+# The ledger phases each fixture round asks of hp_ledger (the downs window, judged alone in B2, asks nothing).
+HP_PHASES = {
+    "friend_target": {"host": False, "friend": True, "hitOnFriend": True, "cloneZero": True},
+    "host_target": {"host": True, "friend": False, "hitOnHost": True},
+    "interleaved": {"host": True, "friend": True},
+    "downs": {},
+}
+HP_ROUNDS = {"friend_target": (1, 0), "host_target": (0, 1)}  # name -> (fighter, reviver)
+
+
+def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=True):
+    """The HP fixture's steps: the target `rounds` in order, then `interleaved`, then the `downs`. Every included
+    window is judged by the ledgers. Without a fighting window (B2) the hp_ledger judges the downs window alone,
+    after it, and pins the boss lifetime the target ledger needs."""
     # A boss hit (either way) or an Axel claim anywhere before the seat's release line. The friend anchors on its
     # own release, which follows the host's admitted release.
     boss_touch = "\\[hit\\] [^\\n]*(?:attacker=B_EX110 |victim=B_EX110@)"
@@ -412,8 +425,10 @@ def hp_steps():
     claim_drop = (f"sum(int(r['b']) - int(r['a']) for r in log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId={AXEL_OBJECT} "
                   f"[^\\n]*beforeHp=(?P<b>\\d+) afterHp=(?P<a>\\d+) nativeOk=1', 0)[saved['il_base']['claims']:])")
     living = "[[(a['hp'], a.get('maxHp')) for a in actors(i) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] for i in (0, 1)]"
-    ledger_marks = ["m_friend_target0", "m_friend_target1", "m_host_target0", "m_host_target1", "m_interleaved0", "m_interleaved1"]
-    return [
+    fought = [*rounds, *(["interleaved"] if interleaved else [])]
+    judged = fought or ["downs"]
+    ledger_marks = [f"m_{name}{k}" for name in judged for k in (0, 1)]
+    opening = [
         *arrival([HP_ENV, HP_ENV]),
         {"do": "wait_until", "expr": f"log_count('{RELEASED_AXEL}', 0) > 0 and log_count('{RELEASED_AXEL}', 1) > 0",
          "timeoutMs": 60000, "pollMs": 100},
@@ -424,27 +439,27 @@ def hp_steps():
         {"do": "assert", "expr": "all(len(seat) == 1 for seat in saved['boss_start'])", "message": "each seat must hold exactly one living Axel"},
         {"do": "wait_until", "expr": f"len(log_matches(r'\\[enemy-mirror\\] take-over frame=\\d+ netId=\\d+ .*?objectId={AXEL_OBJECT}', 1)) > 0",
          "timeoutMs": 20000, "pollMs": 250},
-        *target_round("friend_target", 1, 0),
-        *target_round("host_target", 0, 1),
-        marks("m_interleaved0"),
-        {"do": "save", "as": "il_base", "expr": f"{{'claims': {host_claims()}, 'bossHp': {boss_hp(0)}}}"},
-        # Both fight until a friend claim and a host native hit (an HP drop beyond the claims) both landed.
-        {"do": "fight", "instances": [0, 1], "seconds": 10, "reach": 120, "as": "interleaved",
-         "until": f"{host_claims()} > saved['il_base']['claims'] and {boss_hp(0)} < saved['il_base']['bossHp'] - {claim_drop}",
-         "clips": [{"instance": 0, "seconds": 12, "fps": 30, "name": "interleaved_host"},
-                   {"instance": 1, "seconds": 12, "fps": 30, "name": "interleaved_friend"}]},
-        marks("m_interleaved1"),
+    ]
+    fighting = [step for name in rounds for step in target_round(name, *HP_ROUNDS[name])]
+    if interleaved:
+        fighting += [
+            marks("m_interleaved0"),
+            {"do": "save", "as": "il_base", "expr": f"{{'claims': {host_claims()}, 'bossHp': {boss_hp(0)}}}"},
+            # Both fight until a friend claim and a host native hit (an HP drop beyond the claims) both landed.
+            {"do": "fight", "instances": [0, 1], "seconds": 10, "reach": 120, "as": "interleaved",
+             "until": f"{host_claims()} > saved['il_base']['claims'] and {boss_hp(0)} < saved['il_base']['bossHp'] - {claim_drop}",
+             "clips": [{"instance": 0, "seconds": 12, "fps": 30, "name": "interleaved_host"},
+                       {"instance": 1, "seconds": 12, "fps": 30, "name": "interleaved_friend"}]},
+            marks("m_interleaved1"),
+        ]
+    settle = [
         {"do": "wait", "ms": 4000},
         {"do": "save", "as": "boss_settled", "expr": living},
         {"do": "capture", "instance": 0, "name": "settled_host"},
         {"do": "capture", "instance": 1, "name": "settled_friend"},
         {"do": "hp_ledger", "objectId": AXEL_OBJECT, "program": 137, "marks": ledger_marks, "as": "ledger", "require": False,
-         "window": ["m_friend_target0", "m_interleaved1"], "phases": [
-             {"name": "friend_target", "from": "m_friend_target0", "to": "m_friend_target1", "host": False, "friend": True,
-              "hitOnFriend": True, "cloneZero": True},
-             {"name": "host_target", "from": "m_host_target0", "to": "m_host_target1", "host": True, "friend": False,
-              "hitOnHost": True},
-             {"name": "interleaved", "from": "m_interleaved0", "to": "m_interleaved1", "host": True, "friend": True}]},
+         "window": [ledger_marks[0], ledger_marks[-1]],
+         "phases": [{"name": name, "from": f"m_{name}0", "to": f"m_{name}1", **HP_PHASES[name]} for name in judged]},
         {"do": "assert", "expr": "len(saved['boss_settled'][0]) == 1 and saved['boss_settled'][0] == saved['boss_settled'][1]",
          "message": "after delivery settles both seats must show one living Axel with the host's HP and max HP"},
         {"do": "assert", "expr": "saved['ledger']['pass']", "message": "the boss HP ledger must join every Axel HP change to exactly one hit"},
@@ -452,6 +467,8 @@ def hp_steps():
         {"do": "assert", "expr": "log_count('[enemy-target] forward ', 0) == 0 and log_count('[enemy-target] remote-hit ', 1) == 0 "
                                  "and log_count('[enemy-target] veto ', 1) == 0",
          "message": "the boss's hits on the friend must stay native on the friend: no forwarded RemoteHit or vetoed local hit"},
+    ]
+    downing = [
         # A downed seat is no candidate: one down and partner revive per owner, bracketed for the target ledger.
         marks("m_downs0"),
         {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000,
@@ -462,16 +479,30 @@ def hp_steps():
          "message": "each owner must be downed once and revived by the other seat"},
         {"do": "save", "as": "boss_targets",
          "expr": f"[m['l'] for m in log_matches(r'(?P<l>\\[enemy-target\\] boss-target [^\\n]*objectId={AXEL_OBJECT} [^\\n]*)', 0)]"},
+    ] if downs else []
+    judging = [
         {"do": "target_ledger", "objectId": AXEL_OBJECT, "ledger": "ledger", "as": "targets", "require": False,
-         "rounds": [{"name": "friend_target", "from": "m_friend_target0", "to": "m_friend_target1", "seat": 1},
-                    {"name": "host_target", "from": "m_host_target0", "to": "m_host_target1", "seat": 0}],
-         "downs": {"from": "m_downs0", "to": "m_downs1"}},
+         "rounds": [{"name": name, "from": f"m_{name}0", "to": f"m_{name}1", "seat": HP_ROUNDS[name][0]} for name in rounds],
+         **({"downs": {"from": "m_downs0", "to": "m_downs1"}} if downs else {})},
         {"do": "assert", "expr": "saved['targets']['pass']",
          "message": "Axel must choose each round's seat before its witnessed native hit, never choose an ineligible "
                     "candidate, and drop each downed seat from its candidates"},
         {"do": "coop_verdict", "as": "verdict", "require": True, "arrivalTimeoutMs": 20000},
     ]
+    middle = fighting + settle + downing if fought else downing + settle
+    return opening + middle + judging
 
+
+# vuh2912-hp-02/03: chained on PC1's 22-HP saves, the later rounds and the downs fall to Axel's pressure, and the
+# friend round has passed twice. Lead #37 splits the remaining evidence: B1 the host round and interleaved, B2 the
+# downs, each judged alone and ending at its own milestone.
+HP_SPLITS = {
+    f"{HP_NAME}_b1": (dict(rounds=("host_target",), interleaved=True, downs=False),
+                      "B1 of the split: the host target round, then interleaved, each judged by both ledgers; no downs."),
+    f"{HP_NAME}_b2": (dict(rounds=(), interleaved=False, downs=True),
+                      "B2 of the split: owner_downs right after the release, the hp_ledger over its window, and the "
+                      "target ledger's downs; no target rounds."),
+}
 
 if __name__ == "__main__":
     description = __doc__.split("\n\n", 2)[2].strip().replace("\n", " ")
@@ -484,7 +515,9 @@ if __name__ == "__main__":
         out = Path(__file__).with_name(f"{name}.json")
         out.write_text(json.dumps(scenario, indent=1) + "\n", encoding="utf-8")
         print(out)
-    scenario = {"name": HP_NAME, "description": HP_DESCRIPTION, "playerDefaults": True, "protect": [], "steps": hp_steps()}
-    out = Path(__file__).with_name(f"{HP_NAME}.json")
-    out.write_text(json.dumps(scenario, indent=1) + "\n", encoding="utf-8")
-    print(out)
+    for name, (kwargs, note) in {HP_NAME: ({}, ""), **HP_SPLITS}.items():
+        scenario = {"name": name, "description": f"{HP_DESCRIPTION} {note}".strip(), "playerDefaults": True,
+                    "protect": [], "steps": hp_steps(**kwargs)}
+        out = Path(__file__).with_name(f"{name}.json")
+        out.write_text(json.dumps(scenario, indent=1) + "\n", encoding="utf-8")
+        print(out)
