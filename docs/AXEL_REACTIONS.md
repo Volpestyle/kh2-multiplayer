@@ -431,6 +431,12 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
       callback), by resource and connection. Admission requires the **current callback's** Owner decision: a
       retained earlier snapshot cannot authorize a later callback whose first send was refused and is Host.
       Refusal leaves both the later D303's native fades/reset and any earlier unfinished bindings independent.
+      A positively Host callback keeps its own proven node/thread handle, resolved thread and Axel source. Each
+      native fade/reset must identify that incarnation again; it can then run even while an earlier Owner node
+      header remains unread. Unread admission creates no native proof, and unread matching cannot bypass the
+      earlier candidate. The proof survives executor/role retirement, without borrowing their authority. An Owner
+      binding of the same node/handle takes precedence. Native proofs retire on identified white-in with readable
+      arguments or their original 600-frame lease; observing the same queued identity again cannot renew it.
       An unread scope, host handle or null role lookup at adoption cannot erase or replace current Owner authority.
     - **Three read outcomes** (Ione's `b318dd1b`, `7d1375e5`). Known-ours may deliver, known-not-ours stays native,
       and unread is withheld and dropped without clearing custody. This applies to the VM pointer and source,

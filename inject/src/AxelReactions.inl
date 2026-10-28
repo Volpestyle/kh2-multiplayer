@@ -26,6 +26,7 @@ struct SmAxelState {
     R::AxelFadeCustody cameraOwner{}; // captured at handoff; independent of executor observations
     std::vector<R::AxelFadeCustody> olderFades{}; // another D303 can outlive its role and overlap a later RC
     R::AxelFadeCustody fade{}; // D303 under a friend's custody; it outlives its executor and Axel himself
+    std::vector<R::AxelFadeCustody> nativeFades{}; // positively Host D303 incarnations, independent of Owner candidates
     // client
     bool whiteInOwed{};        // a retired role left this game whited out (SmAxelRetireCamera)
     std::uint8_t whiteInAttempts{}; // faulted payments of that white-in so far (kSmAxelWhiteInAttempts)
@@ -375,6 +376,10 @@ static void SmAxelExpireCamera() {
     older.erase(std::remove_if(older.begin(),older.end(),[](const auto& f) {
         return !f.axel || static_cast<std::int32_t>(f.until-g_frameCounter)<0;
     }),older.end());
+    auto& native=g_axel.nativeFades;
+    native.erase(std::remove_if(native.begin(),native.end(),[](const auto& f) {
+        return !f.axel || static_cast<std::int32_t>(f.until-g_frameCounter)<0;
+    }),native.end());
 }
 // A role/scope is captured when custody is taken, never rediscovered from a replacement at adoption.
 static void SmAxelRememberCamera(const ScriptActorRole* captured=nullptr,bool newSequence=false) {
@@ -518,10 +523,33 @@ static bool SmAxelNodeThread(std::uint32_t nodeHandle,std::uint32_t& threadHandl
     }
     return SmDecodeKnown(threadHandle,thread);
 }
+static bool SmAxelThreadHasOwner(const R::AxelFadeCustody& native) {
+    const auto same=[&](const auto& owner) {
+        return owner.axel && ((owner.nodeHandle && owner.nodeHandle==native.nodeHandle) ||
+            (owner.threadHandle && owner.threadHandle==native.threadHandle));
+    };
+    return same(g_axel.fade) || std::any_of(g_axel.olderFades.begin(),g_axel.olderFades.end(),same);
+}
+// A refused first start also owns its D303. Preserve only positive native identity: an unread Host observation
+// cannot exempt a candidate from an older Owner binding. No role or retained Owner snapshot lends this authority.
+static void SmAxelRememberNativeThread(const std::uint64_t* before,const std::uint64_t* after) {
+    if(!before || !after || !SmGameThread() || SmAxelCameraHost()!=SmAxelRead::Ours)return;
+    if(R::BitsOf(before[0])!=R::kAxelWhiteOutThread || R::TagOf(after[0])!=R::kTagAddress)return;
+    uintptr_t source=0;
+    if(!SmAxelVmSourceKnown(source) || source!=g_axel.actor)return;
+    R::AxelFadeCustody f{};f.nodeHandle=R::BitsOf(after[0]);
+    if(!f.nodeHandle || !SmAxelNodeThread(f.nodeHandle,f.threadHandle,f.thread) || !f.thread)return;
+    f.axel=source;f.until=g_frameCounter+R::kAxelFadeLeaseFrames;
+    if(SmAxelThreadHasOwner(f))return;
+    if(std::none_of(g_axel.nativeFades.begin(),g_axel.nativeFades.end(),[&](const auto& kept) {
+        return kept.threadHandle==f.threadHandle && kept.nodeHandle==f.nodeHandle;
+    }))g_axel.nativeFades.push_back(f);
+}
 // Host 2/20, after its native call: [0] the label before it, the node handle after it.
 static void SmAxelThreadStarted(const std::uint64_t* before,const std::uint64_t* after) {
     if(!SmAxelThreadWatched())return;
     SmAxelExpireCamera();
+    if(g_axel.cameraCustody==R::AxelCameraCustody::Host){SmAxelRememberNativeThread(before,after);return;}
     const auto& c=g_axel.cameraOwner;
     const bool labelKnown=before!=nullptr;
     if(labelKnown && R::BitsOf(before[0])!=R::kAxelWhiteOutThread)return;
@@ -547,8 +575,25 @@ static void SmAxelThreadStarted(const std::uint64_t* before,const std::uint64_t*
 static const ScriptActorRole* SmAxelFadeRole(const enemysync::DownedScope& scope,const R::AxelFadeCustody& f) {
     return SmAxelBoundCameraRole(f,scope);
 }
-// Whether the fade and reset hooks must look at this call: only while a D303 is adopted.
-static bool SmAxelFadePending() noexcept { return g_sm.hostActive && (g_axel.fade.thread || g_axel.fade.pending || !g_axel.olderFades.empty()); }
+// Whether the fade and reset hooks must look at this call: while an Owner candidate or native proof is retained.
+static bool SmAxelFadePending() noexcept { return g_sm.hostActive && (g_axel.fade.thread || g_axel.fade.pending || !g_axel.olderFades.empty() || !g_axel.nativeFades.empty()); }
+// A fully identified native incarnation distinguishes this op even if an earlier Owner node header is unread.
+// Never bypass by the current callback's Host decision: the older Owner thread still has its own custody.
+static bool SmAxelFadeNative(R::AxelCameraKind kind,const std::uint64_t* args) {
+    if(g_axel.nativeFades.empty())return false;
+    uintptr_t thread=0,source=0;
+    if(!ReadHitTrace(g_exeBase+kSmAxelCurrentThread,thread) || !SmAxelVmSourceKnown(source))return false;
+    for(auto& f:g_axel.nativeFades) {
+        if(!f.axel || thread!=f.thread || source!=f.axel)continue;
+        uintptr_t resolved=0;
+        if(!SmDecodeKnown(f.threadHandle,resolved) || resolved!=f.thread)continue;
+        // Contradictory observations of the same native identity do not overrule captured Owner authority.
+        if(SmAxelThreadHasOwner(f))continue;
+        if(kind==R::AxelCameraKind::WhiteIn && args)f={};
+        return true;
+    }
+    return false;
+}
 // Host 0/31, 0/32 and 1/295 (args: the fade's float, or none): one of the adopted D303's ops goes to its owner, or
 // is dropped, and never runs on the host. True: the hook skips it.
 static bool SmAxelFadeOne(R::AxelFadeCustody& f,R::AxelCameraKind kind,const std::uint64_t* args) {
@@ -590,6 +635,7 @@ static bool SmAxelFadeOne(R::AxelFadeCustody& f,R::AxelCameraKind kind,const std
 static bool SmAxelFade(R::AxelCameraKind kind,const std::uint64_t* args) {
     SmAxelExpireCamera();
     if(!SmAxelFadePending())return false;
+    if(SmAxelFadeNative(kind,args)){SmAxelExpireCamera();return false;}
     bool withheld=SmAxelFadeOne(g_axel.fade,kind,args);
     for(auto& f:g_axel.olderFades)withheld=SmAxelFadeOne(f,kind,args) || withheld;
     SmAxelExpireCamera();
