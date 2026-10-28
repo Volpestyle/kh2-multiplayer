@@ -1,7 +1,8 @@
 # VUH-2913: native provenance for validated seat-0 callbacks (Sorrel, round 7)
 
-This revision extends `952e577` on `vuh-2913-owner-camera`. Current main
-`c615c7d` remains included. Protocol stays 40. Mac only; no PC/game access.
+Product `059f802` extends `952e577` on `vuh-2913-owner-camera`. Current
+main `6b60e94` is merged without rewriting history. All pinned camera inputs
+are byte-identical across the merge (`merge-input-proof.json` in the archive). Protocol stays 40. Mac only; no PC/game access.
 
 R6 observed only friend callbacks, including their refused first sends. Genuine
 seat-0 Clear Light runs outside `inFriendCallback`; its native camera start did
