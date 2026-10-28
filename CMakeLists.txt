@@ -801,6 +801,7 @@ endif()
 # 1/101, and the client hold of the Axel clone.
 add_executable(kh2coop_axel_reaction_adapter_test tests/AxelReactionAdapterTest.cpp)
 target_include_directories(kh2coop_axel_reaction_adapter_test PRIVATE inject/src common/include)
+target_link_libraries(kh2coop_axel_reaction_adapter_test PRIVATE kh2coop_common) # the codec's validScriptCallEntry
 if(MSVC)
     target_compile_options(kh2coop_axel_reaction_adapter_test PRIVATE /W4 /WX)
 else()

@@ -1264,8 +1264,16 @@ bool validScriptCallEntry(const ScriptCallEntry& e) {
             float value=0;const auto raw=bits(1);std::memcpy(&value,&raw,sizeof(value));
             if(tag(0)!=SCRIPT_TAG_INT || bits(0)>4095 || tag(1)!=SCRIPT_TAG_FLOAT || value<0)return false;
         }
-        if(e.index==5 && (!bits(0) || bits(1)>1))return false;
-        if(e.index==13 && (bits(0)!=16386 || bits(1)!=5))return false;
+        // 5: target 0 role actor, 1 source, 2 none (Axel II). 13: Thorn's pair at bone 5, or Axel II held at bone 1.
+        if(e.index==5 && (!bits(0) || bits(1)>2))return false;
+        if(e.index==13 && (bits(0)!=16386 || (bits(1)!=5 && bits(1)!=1)))return false;
+        // 17 (Axel II): 1 watch and 2 reset carry int 0; 3 white-out and 4 white-in carry the fade's positive float.
+        if(e.index==17) {
+            float value=0;const auto raw=bits(1);std::memcpy(&value,&raw,sizeof(value));
+            if(tag(0)!=SCRIPT_TAG_INT || !bits(0) || bits(0)>4)return false;
+            if(bits(0)<=2 && (tag(1)!=SCRIPT_TAG_INT || bits(1)))return false;
+            if(bits(0)>=3 && (tag(1)!=SCRIPT_TAG_FLOAT || !(value>0)))return false;
+        }
         if(e.index==7 && (!scriptOwnerCommandMode(bits(0)) || !bits(1) || bits(1)>UINT16_MAX || bits(3)>255))return false;
         if(e.index==9 && (!(bits(0)&0x80000000u) || !bits(1) || bits(1)>UINT16_MAX))return false;
     }

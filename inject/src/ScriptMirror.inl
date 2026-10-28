@@ -95,6 +95,7 @@ static void SmAxelClientReset();
 struct ScriptActorRole;
 static bool SmAxelCloneHeld(const ScriptActorRole&);
 static bool SmAxelApplyHold(ScriptActorRole&,bool) noexcept;
+static R::Call SmAxelHoldRecord(const ScriptActorRole&,bool);
 static bool SmSetReactionCommand(const ReactionBinding&,std::uint32_t) noexcept;
 static bool SmOwnerInstall();
 static std::uint16_t SmNativeReactionCurrent(std::uint16_t) noexcept;

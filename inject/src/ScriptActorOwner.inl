@@ -1160,15 +1160,6 @@ static bool SmOwnerBeginAxelRole(std::uint8_t slot,uintptr_t actor,uintptr_t sou
     Log("[script-owner] begin source=%u role=%u seat=%u epoch=%u axel=1",netId,role.resource,role.slot,role.epoch);
     return true;
 }
-static bool SmOwnerEmitAxelCamera(std::uint8_t slot,uintptr_t actor,std::uint32_t fourcc,std::uint32_t target) {
-    enemysync::DownedScope scope;
-    if(slot>=3 || !SmOwnerScope(scope))return false;
-    const auto& role=g_smRoles[slot];
-    if(!role.resource || role.objectId!=R::kAxelIIObjectId || role.thread || role.actor!=actor ||
-       !SmOwnerCurrent(role,scope))return false;
-    auto call=SmOwnerRecord(role,5);call.values[0]=R::Tagged(R::kTagInt,fourcc);call.values[1]=R::Tagged(R::kTagInt,target);
-    return SmEmit(call);
-}
 // VUH-2913: the safe abort at 1/101 in Axel's own script (SmAxelCaptureQuery). Refused, it writes both dwords of the
 // native result, int 0 ("not captured"), without resolving the argument (42D36B and 42D370 have no null check).
 static void __fastcall SmOwnerCaptureQuery(std::uint64_t* args) {
@@ -1183,16 +1174,6 @@ static void __fastcall SmOwnerCameraGlobal(std::uint64_t* args) {
     std::uint64_t before[2]{};
     if(SmGameThread() && SmCopyArgs(args,before,2) && SmAxelCamera(before))return;
     reinterpret_cast<TrapFn>(g_smAxelCameraSlot.original)(args);
-}
-static bool SmOwnerEmitAxelHold(std::uint8_t slot,uintptr_t actor,bool held) {
-    enemysync::DownedScope scope;
-    if(slot>=3 || !SmOwnerScope(scope))return false;
-    const auto& role=g_smRoles[slot];
-    if(!role.resource || role.objectId!=R::kAxelIIObjectId || role.thread || role.actor!=actor ||
-       !SmOwnerCurrent(role,scope))return false;
-    auto call=SmOwnerRecord(role,held?13:14);
-    if(held){call.values[0]=R::Tagged(R::kTagInt,R::kAxelAttachFlags);call.values[1]=R::Tagged(R::kTagInt,R::kAxelAttachBone);}
-    return SmEmit(call);
 }
 static void __fastcall SmOwnerCapture(std::uint64_t* args) {
     SmOwnerResidueInvalidate(); // VUH-2580: our replays call the original, never this detour
@@ -1468,14 +1449,14 @@ static void SmOwnerFrame() {
                     auto capture=SmOwnerRecord(role,3);
                     capture.values[0]=role.captureValues[0];capture.values[1]=role.captureValues[1];(void)SmEmit(capture);
                 }
-                // VUH-2913: an Axel role's attachment is Axel held by its actor (bone 1); an unread one sends nothing.
+                // VUH-2913: an Axel role's attachment is Axel held by its actor (bone 1, SmAxelHoldRecord); an unread
+                // one sends nothing.
                 const bool axelRole=role.objectId==R::kAxelIIObjectId;
                 const int held=axelRole?SmAxelHeldBy(role.actor):SmOwnerHasAttachment(role,false)?1:0;
                 if(held>=0) {
-                    auto attachment=SmOwnerRecord(role,held?13:14);
-                    if(held) {
-                        attachment.values[0]=R::Tagged(R::kTagInt,16386);
-                        attachment.values[1]=R::Tagged(R::kTagInt,axelRole?R::kAxelAttachBone:5);
+                    auto attachment=axelRole?SmAxelHoldRecord(role,held==1):SmOwnerRecord(role,held?13:14);
+                    if(held && !axelRole) {
+                        attachment.values[0]=R::Tagged(R::kTagInt,16386);attachment.values[1]=R::Tagged(R::kTagInt,5);
                     }
                     (void)SmEmit(attachment);
                 }

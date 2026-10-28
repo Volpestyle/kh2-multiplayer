@@ -269,7 +269,8 @@ replacement actor, coroutine or unrelated attachment.
 The selected player's owner replays native capture, camera and command helpers
 against its own player and locally bound source. Cameras require a matching
 resident BAR asset. Current native attachment qualification is flags 16386,
-source bone 5; owner callback/data arguments are zero. The host alone retains
+source bone 5, or, for Axel II's role only, flags 16386 with Axel held at bone 1
+(protocol 40, docs/AXEL_REACTIONS.md); owner callback/data arguments are zero. The host alone retains
 its BDX attachment callback. Native update `3B2340` clears the script command
 slots after every reaction refresh, so a prompt lives only on updates that
 re-registered it. A client's own per-frame native captured-motion registration

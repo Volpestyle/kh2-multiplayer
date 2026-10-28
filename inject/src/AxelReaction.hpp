@@ -364,6 +364,13 @@ inline bool AxelAttachPair(std::uint32_t flags,std::uint32_t bone) noexcept {
 // (kAxelCameraNone) beside op 5's 0 (the role's actor) and 1 (the source). The trap has no result bit, so a skipped
 // call leaves the BDX stack as it was.
 inline constexpr std::uint32_t kAxelCameraNone=2;
+// A friend RC's global camera op on the wire (255/17): Watch (1/207) and Reset (1/295) carry int 0, WhiteOut (0/31)
+// and WhiteIn (0/32) the fade's own positive float argument.
+enum class AxelCameraKind : std::uint32_t { Watch=1, Reset=2, WhiteOut=3, WhiteIn=4 };
+inline bool AxelCameraOpValid(std::uint32_t kind,bool argFloat,std::uint32_t argBits,float arg) noexcept {
+    if(kind<1 || kind>4)return false;
+    return kind<=2?!argFloat && !argBits:argFloat && arg>0;
+}
 inline bool AxelCameraForwarded(bool axelSource,bool friendRole) noexcept { return axelSource && friendRole; }
 // Which RCs begin that role at completion: Overtaker and Clear Light. Burst Frontier hooks the player into its steering
 // coroutine (1/112), and ScriptActorOwner's hook mints the role, adopting the capture issued just before it.

@@ -337,6 +337,10 @@ capture reaches it:
   adopts the capture issued just before it (VUH-2611).
 - Axel's attachment is the reverse of Thorn's, so the role's attachment record is Axel held by its actor
   (`AxelAttachPair`: flags 16386, bone 1), sent on each change and with the heartbeat; an unread parent sends nothing.
+  The record is built only in `SmAxelHoldRecord`, and the camera's in `SmAxelCameraRecord`. Protocol 40 admits both
+  shapes, op 13 at bone 1 and op 5 with no target, in the client's rules (`R::ValidValues`) and the codec's
+  (`validScriptCallEntry`). Before it both refused them, so the slice-D commits on main sent neither (found
+  2026-10-28); the adapter test now runs every record the Axel paths build through both sets of rules.
   On the friend, op 13 attaches the Axel clone (the role's source) to its own player (`SmAxelApplyHold`), and op 14
   or the role's release detaches it. A pair is the role's only with its receipt (`axelHeld`) as well as a matching
   parent, flags, bone and no callback (`SmAxelCloneHeld`, as Thorn's helper requires `attached`). A matching pair

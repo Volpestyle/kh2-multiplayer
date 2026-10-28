@@ -14,9 +14,12 @@
 
 namespace kh2coop {
 
-inline constexpr std::uint16_t PROTOCOL_VERSION = 39;
+inline constexpr std::uint16_t PROTOCOL_VERSION = 40;
 
 // ===========================================================================
+// Protocol v40 (VUH-2913): ScriptCall's actor-owner records carry Axel II's: the camera with no target (255/5
+// target 2), Axel held at bone 1 (255/13 flags 16386, bone 1), and 255/17, a friend RC's global camera op (kind 1
+// watch, 2 reset, 3 white-out, 4 white-in, with the fade's float argument).
 // Protocol v39 (VUH-2897): the RoomTransition packet carries the host's combat-admission challenge
 // (u64 trailer, zero when the host holds no barrier), and CombatAdmissionAck (57) echoes it from a
 // friend that has finished its own issued load and native intro: client -> relay -> verified host only.
@@ -574,6 +577,7 @@ inline constexpr ScriptCallShape scriptCallShape(std::uint8_t table, std::uint16
          : table == 255 && index == 11 ? ScriptCallShape{K::Integers, 1, true} // role lease heartbeat
          : table == 255 && index == 13 ? ScriptCallShape{K::Integers, 2, true} // owner attach: qualified flags/bone, no callback/data
          : table == 255 && index == 14 ? ScriptCallShape{K::Scalars, 0, true} // owner detach
+         : table == 255 && index == 17 ? ScriptCallShape{K::Scalars, 2, true} // owner global camera op: kind + fade argument
          : scriptActorBirthOperation(table,index) ? ScriptCallShape{K::Integers, 4, true} // occurrence low/high, child netId/objectId
          : table == 1 && (index == 133 || index == 134) ? ScriptCallShape{K::Scalars, 0} // actor hide/show
          : table == 2 && index == 17 ? ScriptCallShape{K::Scalars, 2, true} // strike paired source copy on actual actor owner

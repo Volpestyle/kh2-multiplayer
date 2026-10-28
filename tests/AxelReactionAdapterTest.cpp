@@ -5,6 +5,7 @@
 // SmOwnerCapture, SmOwnerCaptureQuery) only call these, the slot installer is SmOwnerAxelAbortReady's stand-in, and
 // the host's ScriptActorOwner role is a recorder here.
 #include "ScriptMirror.hpp"
+#include "kh2coop/Protocol.hpp"
 
 #include <cstdarg>
 #include <cstdio>
@@ -111,24 +112,73 @@ static uintptr_t SmOwnerVmSource(std::uint16_t& netId,std::uint32_t& objectId) {
 static uintptr_t SmDrivenActor(std::uint16_t netId,std::uint32_t objectId) {
     return netId==7 && objectId==81?uintptr_t{0x100000}:0;
 }
-static bool SmEmit(const R::Call& c) { return R::ValidCall(c); }
 static void Log(const char*,...) {}
-// ScriptActorOwner's side: the owner role and its attachment record, recorded.
+// The role (ScriptActorOwner's): the fields the Axel code reads.
+struct ScriptActorRole {
+    std::uint32_t objectId{};uintptr_t actor{},source{};bool axelHeld{};
+    std::uint32_t resource{},epoch{};std::uint16_t netId{};std::uint8_t slot{0xFF};uintptr_t thread{};
+};
+static std::array<ScriptActorRole,3> g_smRoles{};
+static bool roleCurrent=true;
+static bool SmOwnerCurrent(const ScriptActorRole& role,const enemysync::DownedScope& scope) {
+    return roleCurrent && role.resource && role.epoch==scope.epoch;
+}
+static R::Call SmOwnerRecord(const ScriptActorRole& role,std::uint16_t operation) {
+    R::Call call{};call.netId=role.netId;call.objectId=role.objectId;call.effect=role.resource;
+    call.trap=static_cast<std::uint8_t>(R::FindTrap(255,operation));return call;
+}
+// SmEmit through both of the real wire rules: the client's (R::ValidCall, as SmEmit checks) and the codec's
+// (validScriptCallEntry, as SendScriptCalls checks each record SmFlush builds). Records that pass are kept.
+static bool emitOk=true;
+static unsigned wireRefused=0;
+static std::vector<R::Call> emitted;
+static bool SmEmit(const R::Call& c) {
+    kh2coop::ScriptCallEntry e{};
+    if(c.trap<R::kTrapCount) {
+        e.netId=c.netId;e.objectId=c.objectId;e.table=R::kTraps[c.trap].table;e.index=R::kTraps[c.trap].index;e.effect=c.effect;
+        for(unsigned i=0;i<4;++i)e.args[i]=c.values[i];
+    }
+    if(!R::ValidCall(c) || !kh2coop::validScriptCallEntry(e)){++wireRefused;return false;}
+    if(!emitOk)return false;
+    emitted.push_back(c);return true;
+}
+struct Hold { std::uint8_t slot{};uintptr_t actor{};bool held{}; };
+struct Camera { std::uint8_t slot{};uintptr_t actor{};std::uint32_t fourcc{},target{}; };
+// The records the Axel role emitted, by kind (op 13/14 holds, op 5 cameras), with the role they went on.
+static const ScriptActorRole* RoleOf(const R::Call& c) {
+    for(const auto& role:g_smRoles)if(role.resource && role.resource==c.effect)return &role;
+    return nullptr;
+}
+static std::vector<Hold> Holds() {
+    std::vector<Hold> out;
+    for(const auto& c:emitted) {
+        const auto index=R::kTraps[c.trap].index;const auto* role=RoleOf(c);
+        if(R::kTraps[c.trap].table==255 && (index==13 || index==14) && role)out.push_back({role->slot,role->actor,index==13});
+    }
+    return out;
+}
+static std::vector<Camera> Cameras() {
+    std::vector<Camera> out;
+    for(const auto& c:emitted) {
+        const auto* role=RoleOf(c);
+        if(R::kTraps[c.trap].table==255 && R::kTraps[c.trap].index==5 && role)
+            out.push_back({role->slot,role->actor,R::BitsOf(c.values[0]),R::BitsOf(c.values[1])});
+    }
+    return out;
+}
+// ScriptActorOwner's side: the host's owner role begin, recorded.
 struct RoleBegin { std::uint8_t slot{};uintptr_t actor{},source{};std::uint16_t netId{}; };
 static std::vector<RoleBegin> roleBegins;
 static bool roleBeginOk=true;
 static bool SmOwnerBeginAxelRole(std::uint8_t slot,uintptr_t actor,uintptr_t source,std::uint16_t netId,
-                                 const enemysync::DownedScope&) {
-    roleBegins.push_back({slot,actor,source,netId});return roleBeginOk;
-}
-struct Hold { std::uint8_t slot{};uintptr_t actor{};bool held{}; };
-static std::vector<Hold> holds;
-static bool SmOwnerEmitAxelHold(std::uint8_t slot,uintptr_t actor,bool held) { holds.push_back({slot,actor,held});return true; }
-struct Camera { std::uint8_t slot{};uintptr_t actor{};std::uint32_t fourcc{},target{}; };
-static std::vector<Camera> cameras;
-static bool cameraEmitOk=true;
-static bool SmOwnerEmitAxelCamera(std::uint8_t slot,uintptr_t actor,std::uint32_t fourcc,std::uint32_t target) {
-    cameras.push_back({slot,actor,fourcc,target});return cameraEmitOk;
+                                 const enemysync::DownedScope& scope) {
+    roleBegins.push_back({slot,actor,source,netId});
+    if(!roleBeginOk || slot>=3)return false;
+    static std::uint32_t sequence=0;
+    auto& role=g_smRoles[slot];
+    role={};role.resource=0x80000000u|++sequence;role.objectId=81;role.netId=netId;role.slot=slot;role.actor=actor;
+    role.source=source;role.epoch=scope.epoch;
+    return true;
 }
 static unsigned callbacks=0;
 static uintptr_t callbackPlayer=0;
@@ -140,8 +190,7 @@ static void (*g_smReactionCallback)(uintptr_t,uintptr_t,std::uint32_t,const std:
 static uintptr_t g_soraActor=0x200000;
 static std::uint32_t g_frameCounter=10;
 static struct { bool hostActive=true;unsigned faults=0; } g_sm;
-// The client's role and the native attach (1/18) and detach (1/102) originals, recorded.
-struct ScriptActorRole { std::uint32_t objectId{};uintptr_t actor{},source{};bool axelHeld{}; };
+// The client's native attach (1/18) and detach (1/102) originals, recorded.
 static bool SmOwnerReady() noexcept { return true; }
 static bool SmOwnerActorCurrent(const ScriptActorRole&) { return true; }
 using TrapFn=void(*)(std::uint64_t*);
@@ -171,7 +220,7 @@ void Setup(std::uint32_t groups) {
     g_axel={};memory.clear();handles={{kAxel,kAxelHandle},{kHostActor,kHostHandle},{kFriendActor,kFriendHandle}};
     enemytarget::g.candidateActor={kHostActor,kFriendActor,0};
     enemysync::scope={};enemysync::session=0xA1;enemysync::sentClaims=0;g_sm.hostActive=true;g_frameCounter=10;
-    scopeOk=true;roleBeginOk=true;roleBegins.clear();holds.clear();cameras.clear();cameraEmitOk=true;callbacks=0;callbackPlayer=0;downedspike::down=false;
+    scopeOk=true;roleBeginOk=true;roleBegins.clear();g_smRoles={};roleCurrent=true;emitted.clear();emitOk=true;callbacks=0;callbackPlayer=0;downedspike::down=false;
     g_soraActor=kHostActor;puppets={kFriendActor,0};abortArmed=true;Put(g_exeBase+enemytarget::RVA_NATIVE_PLAYER,kHostActor);
     Put(kAxel+0x100,uintptr_t{0x400000});Put(uintptr_t{0x400000},std::uint32_t{81});
     Put(kHostActor+0x100,uintptr_t{0x401000});Put(uintptr_t{0x401000},std::uint32_t{566});
@@ -428,18 +477,18 @@ int main() {
     // The hold travels to the owner on each change.
     {
         (void)FriendOvertaker();Put(kFriendActor+0x2B0,kAxel);++g_frameCounter;Frame(); // captured: the RC holds
-        const bool first=holds.size()==1 && !holds[0].held && holds[0].slot==1 && holds[0].actor==kFriendActor;
+        const bool first=Holds().size()==1 && !Holds()[0].held && Holds()[0].slot==1 && Holds()[0].actor==kFriendActor;
         HoldAxel(kFriendHandle);++g_frameCounter;Frame();++g_frameCounter;Frame();
-        const bool held=holds.size()==2 && holds[1].held;
+        const bool held=Holds().size()==2 && Holds()[1].held;
         check(first && held,"the friend's role is told Axel is free, then held, once each");
         memory.erase(kAxel+0x6A0);++g_frameCounter;Frame();
-        check(holds.size()==2,"an unread parent sends nothing");
+        check(Holds().size()==2,"an unread parent sends nothing");
         HoldAxel(kHostHandle);Put(kAxel+0x6A0,kHostHandle);++g_frameCounter;Frame();
-        check(holds.size()==3 && !holds[2].held,"Axel held by another actor is not the friend's hold");
+        check(Holds().size()==3 && !Holds()[2].held,"Axel held by another actor is not the friend's hold");
         Setup(1u<<R::kOvertakerGroup);g_seats[1].living=false;Frame();
         const bool ran=SmAxelComplete(Claim(),nullptr);
         HoldAxel(kHostHandle);++g_frameCounter;Frame();
-        check(ran && g_axel.executor.slot==0 && holds.empty(),"the host's own RC sends no hold");
+        check(ran && g_axel.executor.slot==0 && Holds().empty(),"the host's own RC sends no hold");
     }
 
     // Ione's 75233daf: the friend's hold of the Axel clone (client op 13/14) is this role's only with its receipt.
@@ -476,22 +525,22 @@ int main() {
             return SmAxelCamera(args);
         };
         (void)FriendOvertaker();handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3030}); // "00"
-        check(start(kAxelHandle) && cameras.size()==1 && cameras[0].slot==1 && cameras[0].actor==kFriendActor &&
-              cameras[0].fourcc==0x3030 && cameras[0].target==R::kAxelCameraNone,
+        check(start(kAxelHandle) && Cameras().size()==1 && Cameras()[0].slot==1 && Cameras()[0].actor==kFriendActor &&
+              Cameras()[0].fourcc==0x3030 && Cameras()[0].target==R::kAxelCameraNone,
               "a friend's Overtaker camera on Axel goes to the friend with no target, and the host skips it");
-        const auto sent=cameras.size();
-        check(!start(kHostHandle) && cameras.size()==sent,"another object's camera stays native");
+        const auto sent=Cameras().size();
+        check(!start(kHostHandle) && Cameras().size()==sent,"another object's camera stays native");
         Put(kName,std::uint32_t{0x0130});
-        check(!start(kAxelHandle) && cameras.size()==sent,"a name that is not a printable fourcc stays native");
-        Put(kName,std::uint32_t{0x3130});cameraEmitOk=false;
+        check(!start(kAxelHandle) && Cameras().size()==sent,"a name that is not a printable fourcc stays native");
+        Put(kName,std::uint32_t{0x3130});emitOk=false;
         check(!start(kAxelHandle),"if the record cannot be sent, the host plays it natively");
-        cameraEmitOk=true;Put(kFriendActor+0xD48,uintptr_t{0x777});
+        emitOk=true;Put(kFriendActor+0xD48,uintptr_t{0x777});
         check(!start(kAxelHandle),"without the friend's held role (Burst's hook role, or none) it stays native");
         g_sm.hostActive=false;
         check(!start(kAxelHandle),"a client's own starts stay native");
         Setup(1u<<R::kOvertakerGroup);g_seats[1].living=false;Frame();handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3030});
         const bool ran=SmAxelComplete(Claim(),nullptr);
-        check(ran && !start(kAxelHandle) && cameras.empty(),"the host's own RC camera plays on the host");
+        check(ran && !start(kAxelHandle) && Cameras().empty(),"the host's own RC camera plays on the host");
     }
 
     // The friend's side: the host's offer, its prompt proof and its press, which claims and runs nothing locally.
@@ -521,6 +570,24 @@ int main() {
         SmAxelClientReset();
         check(!g_axel.offers.Find(R::kOvertaker),"a client reset drops its offers");
     }
+
+    // The wire (VUH-2913, protocol 40): what the Axel role builds passes both of the real wire rules. Main's slice D
+    // sent no camera or hold, because the rules refused the no-target camera and the bone-1 hold.
+    {
+        ScriptActorRole role{81,kFriendActor,kAxel,false};role.resource=0x80000009u;role.netId=7;role.slot=1;
+        const auto passes=[](const R::Call& c) {
+            const auto before=wireRefused;emitted.clear();emitOk=true;return SmEmit(c) && wireRefused==before;
+        };
+        check(passes(SmAxelHoldRecord(role,true)) && passes(SmAxelHoldRecord(role,false)) &&
+              passes(SmAxelCameraRecord(role,0x3030)),
+              "the Axel role's hold, release and no-target camera records pass the client's and the codec's rules");
+        auto thorn=SmOwnerRecord(role,13);thorn.values[0]=R::Tagged(R::kTagInt,16386);thorn.values[1]=R::Tagged(R::kTagInt,6);
+        auto target=SmAxelCameraRecord(role,0x3030);target.values[1]=R::Tagged(R::kTagInt,3);
+        const auto before=wireRefused;
+        check(!SmEmit(thorn) && !SmEmit(target) && wireRefused==before+2,"another bone or camera target is still refused");
+        wireRefused=before;
+    }
+    check(!wireRefused,"no record any Axel path built in this run was refused by the wire rules");
 
     std::printf("%u failure(s)\n",errors);
     return errors?1:0;

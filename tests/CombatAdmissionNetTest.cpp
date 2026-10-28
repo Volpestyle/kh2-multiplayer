@@ -59,7 +59,7 @@ void codecChecks() {
           "the RoomTransition packet carries the admission challenge");
     ByteReader old(p, n - 8); RoomTransition stale;
     check(throws([&] { readRoomTransitionPacket(old, stale); }), "a v38 room packet without the trailer is refused");
-    check(PROTOCOL_VERSION == 39, "protocol version is 39");
+    check(PROTOCOL_VERSION == 40, "protocol version is 40");
 }
 
 void relayChecks() {

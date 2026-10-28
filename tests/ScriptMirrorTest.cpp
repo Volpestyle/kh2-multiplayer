@@ -266,14 +266,17 @@ void ownerCodecChecks() {
     add(8,{num(253),flt(25.5f)});
     add(9,{num(0x80000001u),num(1305),num(UINT32_MAX),num(0)});
     add(11,{num(100)});add(6,{});add(13,{num(16386),num(5)});add(14,{});
+    // VUH-2913 (protocol 40): Axel II's camera with no target, Axel held at bone 1, and a friend RC's global camera ops.
+    add(5,{num(0x3030),num(2)});add(13,{num(16386),num(1)});
+    add(17,{num(1),num(0)});add(17,{num(2),num(0)});add(17,{num(3),flt(70)});add(17,{num(4),flt(30)});
     const auto bytes=encode(packet);const std::uint8_t* p=nullptr;std::size_t n=0;
     decodePacketHeader(bytes.data(),bytes.size(),p,n);ByteReader reader(p,n);ScriptCall decoded;read(reader,decoded);
-    check(reader.atEnd() && encode(decoded)==bytes && decoded.entries.size()==13,
+    check(reader.atEnd() && encode(decoded)==bytes && decoded.entries.size()==19,
           "owner role, capture, camera, command and attack descriptors roundtrip without native handles");
     auto bad=packet;bad.entries[0].args[0]=num(3);check(refusedWrite(bad),"role begin refuses unknown seat");
     bad=packet;bad.entries[0].args[3]=num(61);check(refusedWrite(bad),"role begin refuses unbounded lease policy");
     bad=packet;bad.entries[1].args[1]=num(0);check(refusedWrite(bad),"capture rate must retain its native float tag");
-    bad=packet;bad.entries[3].args[1]=num(2);check(refusedWrite(bad),"camera cannot name an arbitrary target actor");
+    bad=packet;bad.entries[3].args[1]=num(3);check(refusedWrite(bad),"camera cannot name an arbitrary target actor");
     bad=packet;bad.entries[6].args[0]=num(0);check(refusedWrite(bad),"owner command cannot replace the ordinary attack category");
     bad=packet;bad.entries[6].args[3]=num(256);check(refusedWrite(bad),"command priority refuses truncation");
     bad=packet;bad.entries[7].args[1]=flt(-1);check(refusedWrite(bad),"role motion refuses negative time");
@@ -282,6 +285,28 @@ void ownerCodecChecks() {
     bad=packet;bad.entries[11].args[1]=num(6);check(refusedWrite(bad),"attach refuses another bone");
     bad=packet;bad.entries[11].args[2]=num(15845);check(refusedWrite(bad),"attach cannot carry a BDX callback PC");
     bad=packet;bad.entries[12].args[0]=num(1);check(refusedWrite(bad),"detach cannot carry native actor handles");
+    bad=packet;bad.entries[14].args[1]=num(2);check(refusedWrite(bad),"Axel's hold names no bone but its own 1 or Thorn's 5");
+    const std::pair<std::size_t,std::array<std::uint64_t,2>> cameraOps[]{
+        {15,{num(0),num(0)}},{15,{num(5),num(0)}},{15,{num(1),num(7)}},{16,{num(2),flt(1)}},
+        {17,{num(3),num(70)}},{17,{num(3),flt(0)}},{18,{num(4),flt(-30)}},{18,{flt(4),flt(30)}}};
+    bool refusedAll=true;
+    for(const auto& [entry,args]:cameraOps) {
+        bad=packet;bad.entries[entry].args[0]=args[0];bad.entries[entry].args[1]=args[1];refusedAll=refusedAll && refusedWrite(bad);
+    }
+    check(refusedAll,"a global camera op is a known kind: watch and reset carry int 0, a fade its positive float");
+    // The client's rules (R::ValidValues) and the codec's (validScriptCallEntry) agree on every owner record above.
+    bool agree=true;
+    for(const auto& e:packet.entries) {
+        const auto trap=R::FindTrap(255,e.index);
+        agree=agree && trap>=0 && static_cast<std::size_t>(trap)<R::kTrapCount &&
+            R::ValidValues(static_cast<std::size_t>(trap),e.args.data())==validScriptCallEntry(e);
+    }
+    for(const auto& [entry,args]:cameraOps) {
+        auto e=packet.entries[entry];e.args[0]=args[0];e.args[1]=args[1];
+        agree=agree && R::ValidValues(static_cast<std::size_t>(R::FindTrap(255,e.index)),e.args.data())==validScriptCallEntry(e) &&
+            !validScriptCallEntry(e);
+    }
+    check(agree,"the client's owner-record rules match the codec's, Axel II's included");
 }
 
 void codecChecks() {
@@ -337,7 +362,7 @@ void rulesAgreeWithCodec() {
             (t.fnRva ? t.body && t.bodySize>0 && (t.flags&0xFFFF)==scriptArgs :
              t.table==255 && ((t.index==1 && t.kind==R::Kind::ReactionOffer) ||
                              (t.index==12 && t.kind==R::Kind::ReactionOwner) ||
-                             (t.kind==R::Kind::Owner && ((t.index>=2 && t.index<=8) || t.index==11 || t.index==13 || t.index==14)) ||
+                             (t.kind==R::Kind::Owner && ((t.index>=2 && t.index<=8) || t.index==11 || t.index==13 || t.index==14 || t.index==17)) ||
                              (t.kind==R::Kind::OwnerAttackStart && t.index==9) ||
                              (t.kind==R::Kind::ActorBirth && scriptActorBirthOperation(t.table,t.index))) && !t.body && !t.bodySize);
         if (t.replay == R::Replay::None) {  // never on the wire itself: it travels as another trap

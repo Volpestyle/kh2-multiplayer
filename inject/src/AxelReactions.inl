@@ -124,6 +124,34 @@ static R::AxelAct SmAxelCaptureQuery(const std::uint64_t* args) {
     std::uint16_t netId=0;std::uint32_t objectId=0;
     return SmAxelActOn(SmOwnerVmSource(netId,objectId),args[0],"capture-query");
 }
+// The Axel role's own records in ScriptActorOwner's stream, built only here so that what they carry is what the wire
+// rules admit (R::ValidCall, validScriptCallEntry; tests/AxelReactionAdapterTest.cpp runs them through both).
+static R::Call SmAxelHoldRecord(const ScriptActorRole& role,bool held) {
+    auto call=SmOwnerRecord(role,held?13:14);
+    if(held){call.values[0]=R::Tagged(R::kTagInt,R::kAxelAttachFlags);call.values[1]=R::Tagged(R::kTagInt,R::kAxelAttachBone);}
+    return call;
+}
+static R::Call SmAxelCameraRecord(const ScriptActorRole& role,std::uint32_t fourcc) {
+    auto call=SmOwnerRecord(role,5);
+    call.values[0]=R::Tagged(R::kTagInt,fourcc);call.values[1]=R::Tagged(R::kTagInt,R::kAxelCameraNone);
+    return call;
+}
+// Host: the friend executor's current owner role, with no thread (SmOwnerBeginAxelRole), or none.
+static const ScriptActorRole* SmAxelFriendRole(std::uint8_t slot,uintptr_t actor) {
+    enemysync::DownedScope scope;
+    if(!slot || slot>=3 || !actor || !SmOwnerScope(scope))return nullptr;
+    const auto& role=g_smRoles[slot];
+    return role.resource && role.objectId==R::kAxelIIObjectId && !role.thread && role.actor==actor &&
+        SmOwnerCurrent(role,scope)?&role:nullptr;
+}
+static bool SmAxelEmitHold(std::uint8_t slot,uintptr_t actor,bool held) {
+    const auto* role=SmAxelFriendRole(slot,actor);
+    return role && SmEmit(SmAxelHoldRecord(*role,held));
+}
+static bool SmAxelEmitCamera(std::uint8_t slot,uintptr_t actor,std::uint32_t fourcc) {
+    const auto* role=SmAxelFriendRole(slot,actor);
+    return role && SmEmit(SmAxelCameraRecord(*role,fourcc));
+}
 // Host: whether Axel is attached to this actor with his own pair (R::AxelAttachPair): 1 held, 0 not, -1 unread.
 static int SmAxelHeldBy(uintptr_t actor) {
     if(!SmAxelHostCurrent() || !actor)return -1;
@@ -139,7 +167,7 @@ static void SmAxelSyncHeld() {
     if(!g_axel.executor.command || !g_axel.executor.slot || g_axel.executor.slot>=3 || !g_axel.executorActor)return;
     const int held=SmAxelHeldBy(g_axel.executorActor);
     if(held<0 || held==g_axel.heldSent)return;
-    if(SmOwnerEmitAxelHold(g_axel.executor.slot,g_axel.executorActor,held==1))g_axel.heldSent=held;
+    if(SmAxelEmitHold(g_axel.executor.slot,g_axel.executorActor,held==1))g_axel.heldSent=held;
 }
 // Client: Axel II's pair is the reverse of Thorn's: the Axel clone (the role's source) is the child of the friend's own
 // player (the role's actor) at bone 1, flags 16386, with no callback. It is this role's only with its receipt (Ione's
@@ -203,7 +231,7 @@ static bool SmAxelCamera(const std::uint64_t* args) {
         if(text[i]<0x20 || text[i]>0x7E)return false;
         fourcc|=static_cast<std::uint32_t>(static_cast<unsigned char>(text[i]))<<(8*i);
     }
-    if(!fourcc || !SmOwnerEmitAxelCamera(slot,g_axel.executorActor,fourcc,R::kAxelCameraNone))return false;
+    if(!fourcc || !SmAxelEmitCamera(slot,g_axel.executorActor,fourcc))return false;
     if(SmAxelLogBudget())
         Log("[axel-rc] camera forwarded command=%u owner=%u fourcc=%X",g_axel.executor.command,slot,fourcc);
     return true;

@@ -138,7 +138,8 @@ inline constexpr Trap kTraps[] = {
     // VUH-2605: observed on the host only; its birth travels as 255/15 once the census announces the child.
     {1,0,0x42B130,0x40000001,Kind::ActorBirthObserve,0,false,Replay::None,Group::Event,false,255,15,0,false,KH2_PIN(kSysobjAppear),"sysobj_appear"},
     {1,134,0x42B680,1,Kind::Actor,0,false,Replay::Trap,Group::Visibility,false,1,134,0,false,KH2_PIN(kObjShow),"obj_show"},
-
+    // VUH-2913: a friend RC's global camera op on its Axel role (AxelCameraKind and its fade argument).
+    {255,17,0,0,Kind::Owner,2,false,Replay::Owner,Group::Event,false,255,17,0,false,nullptr,0,"actor_owner_axel_camera"},
 };
 #undef KH2_PIN
 inline constexpr std::size_t kTrapCount = sizeof(kTraps) / sizeof(kTraps[0]);
@@ -194,8 +195,13 @@ inline bool ValidValues(std::size_t trap, const std::uint64_t* values) noexcept 
         if(t.index==2 && (BitsOf(values[0])>=3 || !(BitsOf(values[1]) || BitsOf(values[2])) || BitsOf(values[3])!=60))return false;
         if((t.index==3 || t.index==8) && (TagOf(values[0])!=kTagInt || BitsOf(values[0])>4095 ||
            TagOf(values[1])!=kTagFloat || FloatOf(values[1])<0))return false;
-        if(t.index==5 && (!BitsOf(values[0]) || BitsOf(values[1])>1))return false;
-        if(t.index==13 && (BitsOf(values[0])!=16386 || BitsOf(values[1])!=5))return false;
+        // Op 5's target and op 13's pair also carry Axel II's (VUH-2913): the no-target camera (kAxelCameraNone) and
+        // Axel held at bone 1 (AxelAttachPair). The client still admits those only on an Axel role.
+        if(t.index==5 && (!BitsOf(values[0]) || BitsOf(values[1])>kAxelCameraNone))return false;
+        if(t.index==13 && !(BitsOf(values[0])==16386 && BitsOf(values[1])==5) &&
+           !AxelAttachPair(BitsOf(values[0]),BitsOf(values[1])))return false;
+        if(t.index==17 && (TagOf(values[0])!=kTagInt ||
+           !AxelCameraOpValid(BitsOf(values[0]),TagOf(values[1])==kTagFloat,BitsOf(values[1]),FloatOf(values[1]))))return false;
         if(t.index==7 && ((BitsOf(values[0])!=1 && BitsOf(values[0])!=2) || !BitsOf(values[1]) || BitsOf(values[1])>UINT16_MAX || BitsOf(values[3])>255))return false;
     }
     if(t.kind==Kind::OwnerAttackStart && (!(BitsOf(values[0])&0x80000000u) || !BitsOf(values[1]) || BitsOf(values[1])>UINT16_MAX))return false;
