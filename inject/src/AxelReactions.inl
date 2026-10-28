@@ -534,7 +534,8 @@ static void SmAxelThreadStarted(const std::uint64_t* before,const std::uint64_t*
     std::uint32_t threadHandle=0;uintptr_t thread=0;
     const auto nodeHandle=after && R::TagOf(after[0])==R::kTagAddress?R::BitsOf(after[0]):0u;
     const bool known=after && (!nodeHandle || SmAxelNodeThread(nodeHandle,threadHandle,thread));
-    if(!R::AxelFadeAdopted(true,R::AxelCameraCustody::Owner,true,R::kAxelWhiteOutThread,thread || !known))return;
+    // Retained snapshots protect their own sequences; only this callback's Owner decision may adopt a new one.
+    if(!R::AxelFadeAdopted(true,g_axel.cameraCustody,true,R::kAxelWhiteOutThread,thread || !known))return;
     // A new callback is not completion of an older D303. Keep its binding and original lease too.
     if(g_axel.fade.axel)g_axel.olderFades.push_back(g_axel.fade);
     g_axel.fade=c;auto& f=g_axel.fade;

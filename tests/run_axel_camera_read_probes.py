@@ -43,7 +43,8 @@ static void ReviewNativeWhiteIn(std::uint64_t*) { ++reviewNativeIn; }
 static void ReviewNativeReset(std::uint64_t*) { ++reviewNativeReset; }
 static void ReviewNativeStart(std::uint64_t*) { ++reviewNativeStart; }
 static void ReviewNativeWatch(std::uint64_t*) { ++reviewNativeWatch; }
-static void ReviewNativeThread(std::uint64_t* args) { args[0]=R::Tagged(R::kTagAddress,0x71); }
+static std::uint32_t reviewThreadNode=0x71;
+static void ReviewNativeThread(std::uint64_t* args) { args[0]=R::Tagged(R::kTagAddress,reviewThreadNode); }
 static struct { uintptr_t original; }
     g_smAxelWhiteOutSlot{reinterpret_cast<uintptr_t>(&ReviewNativeWhiteOut)},
     g_smAxelWhiteInSlot{reinterpret_cast<uintptr_t>(&ReviewNativeWhiteIn)},
@@ -88,7 +89,8 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--ione-r3', type=Path)
     args = parser.parse_args()
-    mains = [('read-sites', Path(__file__).with_name('AxelCameraReadProbe.inl').read_text())]
+    mains = [('read-sites', Path(__file__).with_name('AxelCameraReadProbe.inl').read_text()),
+             ('cross-sequence', Path(__file__).with_name('AxelCameraSequenceProbe.inl').read_text())]
     if args.ione_r3:
         for name in ('identity-read-counterexamples', 'pending-retirement-counterexamples'):
             src = (args.ione_r3/(name+'.cpp')).read_text()
