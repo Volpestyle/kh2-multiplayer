@@ -248,13 +248,34 @@
   },
   {
    "do": "save",
+   "as": "friend_target_settle0",
+   "expr": "len([int(m['hp']) for m in log_matches(r'\\[statehash\\] native epoch=\\d+ frame=\\d+ netId=\\d+ objectId=81 hp=(?P<hp>-?\\d+) ', 0)])"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len([int(m['hp']) for m in log_matches(r'\\[statehash\\] native epoch=\\d+ frame=\\d+ netId=\\d+ objectId=81 hp=(?P<hp>-?\\d+) ', 0)]) > saved['friend_target_settle0'] and ((lambda c, h: all(s in h for s in c))([m['s'] for m in log_matches(r'\\[enemysync\\] client hit claim connection=\\d+ seq=(?P<s>\\d+) epoch=\\d+ netId=\\d+ objectId=81 ', 1)], [m['s'] for m in log_matches(r'\\[enemysync\\] host hit claim connection=\\d+ seq=(?P<s>\\d+) epoch=\\d+ netId=\\d+ objectId=81 ', 0)] + [m['s'] for m in log_matches(r'\\[hitclaim\\] reject epoch=\\d+ seq=(?P<s>\\d+) [^\\n]*objectId=81 ', 0)]) and ([int(m['hp']) for m in log_matches(r'\\[statehash\\] native epoch=\\d+ frame=\\d+ netId=\\d+ objectId=81 hp=(?P<hp>-?\\d+) ', 0)] or [None])[-1] == ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0])",
+   "timeoutMs": 5000,
+   "pollMs": 250
+  },
+  {
+   "do": "save",
    "as": "friend_target_base",
    "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=1 ', 0)), 'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0], 'hp': [a['hp'] for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0], 'downs': log_count('[downed] gate intercept', 1)}"
   },
   {
    "do": "save",
+   "as": "friend_target_quiet",
+   "expr": "{'hits': len(log_matches(r'(?P<x>victim=B_EX110@|\\[enemysync\\] host hit claim [^\\n]*objectId=81 )', 0)), 'claims': len(log_matches(r'\\[enemysync\\] client hit claim [^\\n]*objectId=81 ', 1)), 'targets': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 ', 0)), 'aligned': ((lambda c, h: all(s in h for s in c))([m['s'] for m in log_matches(r'\\[enemysync\\] client hit claim connection=\\d+ seq=(?P<s>\\d+) epoch=\\d+ netId=\\d+ objectId=81 ', 1)], [m['s'] for m in log_matches(r'\\[enemysync\\] host hit claim connection=\\d+ seq=(?P<s>\\d+) epoch=\\d+ netId=\\d+ objectId=81 ', 0)] + [m['s'] for m in log_matches(r'\\[hitclaim\\] reject epoch=\\d+ seq=(?P<s>\\d+) [^\\n]*objectId=81 ', 0)]) and ([int(m['hp']) for m in log_matches(r'\\[statehash\\] native epoch=\\d+ frame=\\d+ netId=\\d+ objectId=81 hp=(?P<hp>-?\\d+) ', 0)] or [None])[-1] == ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0])}"
+  },
+  {
+   "do": "save",
    "as": "m_friend_target0",
    "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['friend_target_quiet']['aligned'] and {'hits': len(log_matches(r'(?P<x>victim=B_EX110@|\\[enemysync\\] host hit claim [^\\n]*objectId=81 )', 0)), 'claims': len(log_matches(r'\\[enemysync\\] client hit claim [^\\n]*objectId=81 ', 1)), 'targets': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 ', 0))} == {k: saved['friend_target_quiet'][k] for k in ('hits', 'claims', 'targets')} and (log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '1'",
+   "message": "SETUP FAILURE (window), not a targeting result: friend_target's window opened without Axel's selection of the friend and settled boss HP"
   },
   {
    "do": "fight",
@@ -387,13 +408,34 @@
   },
   {
    "do": "save",
+   "as": "host_target_settle0",
+   "expr": "len([int(m['hp']) for m in log_matches(r'\\[statehash\\] native epoch=\\d+ frame=\\d+ netId=\\d+ objectId=81 hp=(?P<hp>-?\\d+) ', 0)])"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len([int(m['hp']) for m in log_matches(r'\\[statehash\\] native epoch=\\d+ frame=\\d+ netId=\\d+ objectId=81 hp=(?P<hp>-?\\d+) ', 0)]) > saved['host_target_settle0'] and ((lambda c, h: all(s in h for s in c))([m['s'] for m in log_matches(r'\\[enemysync\\] client hit claim connection=\\d+ seq=(?P<s>\\d+) epoch=\\d+ netId=\\d+ objectId=81 ', 1)], [m['s'] for m in log_matches(r'\\[enemysync\\] host hit claim connection=\\d+ seq=(?P<s>\\d+) epoch=\\d+ netId=\\d+ objectId=81 ', 0)] + [m['s'] for m in log_matches(r'\\[hitclaim\\] reject epoch=\\d+ seq=(?P<s>\\d+) [^\\n]*objectId=81 ', 0)]) and ([int(m['hp']) for m in log_matches(r'\\[statehash\\] native epoch=\\d+ frame=\\d+ netId=\\d+ objectId=81 hp=(?P<hp>-?\\d+) ', 0)] or [None])[-1] == ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0])",
+   "timeoutMs": 5000,
+   "pollMs": 250
+  },
+  {
+   "do": "save",
    "as": "host_target_base",
    "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=0 ', 0)), 'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0], 'hp': [a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'downs': log_count('[downed] gate intercept', 0)}"
   },
   {
    "do": "save",
+   "as": "host_target_quiet",
+   "expr": "{'hits': len(log_matches(r'(?P<x>victim=B_EX110@|\\[enemysync\\] host hit claim [^\\n]*objectId=81 )', 0)), 'claims': len(log_matches(r'\\[enemysync\\] client hit claim [^\\n]*objectId=81 ', 1)), 'targets': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 ', 0)), 'aligned': ((lambda c, h: all(s in h for s in c))([m['s'] for m in log_matches(r'\\[enemysync\\] client hit claim connection=\\d+ seq=(?P<s>\\d+) epoch=\\d+ netId=\\d+ objectId=81 ', 1)], [m['s'] for m in log_matches(r'\\[enemysync\\] host hit claim connection=\\d+ seq=(?P<s>\\d+) epoch=\\d+ netId=\\d+ objectId=81 ', 0)] + [m['s'] for m in log_matches(r'\\[hitclaim\\] reject epoch=\\d+ seq=(?P<s>\\d+) [^\\n]*objectId=81 ', 0)]) and ([int(m['hp']) for m in log_matches(r'\\[statehash\\] native epoch=\\d+ frame=\\d+ netId=\\d+ objectId=81 hp=(?P<hp>-?\\d+) ', 0)] or [None])[-1] == ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0])}"
+  },
+  {
+   "do": "save",
    "as": "m_host_target0",
    "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['host_target_quiet']['aligned'] and {'hits': len(log_matches(r'(?P<x>victim=B_EX110@|\\[enemysync\\] host hit claim [^\\n]*objectId=81 )', 0)), 'claims': len(log_matches(r'\\[enemysync\\] client hit claim [^\\n]*objectId=81 ', 1)), 'targets': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 ', 0))} == {k: saved['host_target_quiet'][k] for k in ('hits', 'claims', 'targets')} and (log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '0'",
+   "message": "SETUP FAILURE (window), not a targeting result: host_target's window opened without Axel's selection of the host and settled boss HP"
   },
   {
    "do": "fight",
