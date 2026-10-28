@@ -3508,8 +3508,9 @@ site `tt20-137`):
   full-party Kills then carry `skipIf` and are skipped, and the run goes straight to the Continue checks below;
 - each owner's move, jump and attacks filmed as a pair;
 - last, a full-party down, `press_continue` to `[2,21,99,2,0,0]`, and retirement: each seat holds only its
-  selected body (a Sora seat logs `[prologue] encounter exit at=02/15`), with no `P_EX110_BTLF`, no keyblade pair
-  and no puppet line for the old clone after the Continue load.
+  selected body (a Sora seat logs `[prologue] encounter exit at=02/15`), with no `P_EX110_BTLF`, no keyblade
+  actor at all (02/15 is a non-battle field, so a restored Sora holds none either; run vuh2931-sora-03) and no
+  puppet line for the old clone after the Continue load.
 The drive-form rows (`extraRanges`) must also be unchanged from boot after the hits and after the Continue.
 `tests/test_axel_form_fixture.py` evaluates these assertions against synthetic data, with negative controls.
 PC1's FM-02 Roxas has 22 HP, so natural downs are expected. `owner_downs` counts them, and the full-party

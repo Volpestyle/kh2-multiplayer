@@ -168,8 +168,9 @@ def steps_for(selection):
         f"saved['census_axel'][{i}]['roxas'] == 0 and saved['census_axel'][{i}]['w10'] == {w10} and "
         f"saved['census_axel'][{i}]['w20'] == {w20} and saved['census_axel'][{i}]['member0'] == {local[i]}" for i in (0, 1))
     retired = " and ".join(
+        # 02/15 is a non-battle field: no keyblade actor on either seat, Sora included (run vuh2931-sora-03).
         f"saved['retired'][{i}]['btlf'] == 0 and saved['retired'][{i}]['w10'] == 0 and "
-        f"saved['retired'][{i}]['w20'] == {int(selection[i] == SORA)} and "
+        f"saved['retired'][{i}]['w20'] == 0 and "
         f"saved['retired'][{i}]['roxas'] == {int(selection[i] == ROXAS)} and saved['retired'][{i}]['sora'] == {int(selection[i] == SORA)} and "
         f"saved['retired'][{i}]['member0'] == {selection[i]} and "
         f"log_count('[prologue] encounter exit at=02/15', {i}) == {int(selection[i] != ROXAS)}" for i in (0, 1))

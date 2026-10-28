@@ -140,9 +140,12 @@ class AxelFormFixtureTest(unittest.TestCase):
         exit_line = "[prologue] encounter exit at=02/15"
         for name, sora_seat in (("net_prologue_mansion_axel_form_sora_host", 0), ("net_prologue_mansion_axel_form_sora_friend", 1)):
             expr = assertion(load(name), "after Continue each seat")
-            good = [self.census(0x54, sora=1) if i == sora_seat else self.census(0x5A, roxas=1) for i in (0, 1)]
+            # 02/15 is a non-battle field: no keyblade actor on either seat (run vuh2931-sora-03's census).
+            good = [self.census(0x54, sora=1, w=0) if i == sora_seat else self.census(0x5A, roxas=1, w=0) for i in (0, 1)]
             logs = {(exit_line, sora_seat): 1}
             self.assertTrue(held({"retired": good}, logs)(expr), name)
+            drawn = [dict(c, w20=c["sora"]) for c in good]
+            self.assertFalse(held({"retired": drawn}, logs)(expr), name)             # a keyblade actor in the field
             native = [self.census(0x5A, roxas=1), self.census(0x5A, roxas=1)]
             self.assertFalse(held({"retired": native}, logs)(expr), name)            # Sora not restored
             self.assertFalse(held({"retired": good}, {})(expr), name)                # no exit receipt
