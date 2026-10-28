@@ -237,8 +237,9 @@ HP_DESCRIPTION = (
     "VUH-2912, FM-02 rehearsal route into Axel II (02/14 btl137, B_EX110 81), two default dual-wield Roxases, "
     "shipped defaults, no protect; KH2COOP_TRACE_HITS and KH2COOP_ENEMY_MIRROR_TRACE are diagnostics only. "
     "Lease: no boss damage or boss hit on either seat before the host's admitted release. Then three short rounds, "
-    "each filmed on both seats for its whole length: friend target (the host walks away from Axel and, once both "
-    "seats stand measured apart, only revives; the friend fights, so the host's Axel must choose the friend's seat "
+    "each filmed on both seats for its whole length: friend target (the friend walks in to Axel, the host walks away "
+    "from him, again if still too close, and, once both seats stand measured apart, only revives; the friend fights, "
+    "so the host's Axel must choose the friend's seat "
     "and the friend's own Roxas takes the native hit from its mirrored Axel), host target (the same, reversed) and "
     "interleaved (both fight). The boss HP ledger joins every host Axel HP change to one host native hit or one "
     "friend claim, and requires the host Axel's hits on the host's copy of the friend to be complete checked zeros "
@@ -262,7 +263,8 @@ def canonical_hp(i):
 
 
 def away_from_axel(i, distance=900):
-    """A point `distance` past seat i's canonical player on the line from Axel (walk_to targetExpr)."""
+    """A point `distance` from Axel on the line through seat i's canonical player (walk_to targetExpr): past the
+    player when it stands nearer than that, between them when farther."""
     return (f"(lambda a, m: (lambda d: (a[0] + {distance} * (m[0] - a[0]) / d, a[2] + {distance} * (m[1] - a[2]) / d))"
             f"(max(1.0, ((m[0] - a[0]) ** 2 + (m[1] - a[2]) ** 2) ** 0.5)))(pos('B_EX110', {i}), {canonical_xz(i)})")
 
@@ -309,28 +311,40 @@ def separation():
 
 
 SEPARATION_MARGIN = 200  # beyond the policy's 150-unit hysteresis
+FIGHTER_NEAR = 350      # the fighter's approach stops inside this distance from Axel
 
 
 def target_round(name, fighter, reviver):
-    """The reviver walks away from Axel; with both seats standing and measured apart, the round's baseline and window
-    start. Then the reviver only revives while the fighter fights, filmed on both seats for the whole round. The
-    round must reach its milestone (Axel's selection names the fighter, the fighter was hit or downed, it landed damage) before
-    its end mark; boss_target_ledger.py judges the choice, its order before the hit and the hit's witnesses."""
+    """The fighter walks in to Axel, then the reviver walks away; with both seats standing and measured apart, the
+    round's baseline and window start. Then the reviver only revives while the fighter fights, filmed on both seats
+    for the whole round. The round must reach its milestone (Axel's selection names the fighter, the fighter was hit
+    or downed, it landed damage) before its end mark; boss_target_ledger.py judges the choice, its order before the hit
+    and the hit's witnesses."""
     base = f"saved['{name}_base']"
     seat = ("host", "friend")
+    apart = (f"(lambda s: s['standing'] and s['{seat[reviver]}'] - s['{seat[fighter]}'] > {SEPARATION_MARGIN})"
+             f"({separation()})")
+    near = f"(lambda s: s['{seat[fighter]}'] < {FIGHTER_NEAR})({separation()})"
     landed = f"{host_claims()} > {base}['claims']" if fighter == 1 else f"{boss_hp(0)} < {base}['bossHp']"
     hit = (f"({canonical_hp(fighter)} < {base}['hp'] or "
            f"log_count('[downed] gate intercept', {fighter}) > {base}['downs'])")
     observe = (f"{{'axel': [(a['position']['x'], a['position']['z'], a.get('motionId')) for a in actors(0) if a['name'] == 'B_EX110'], "
                f"'host': {canonical_xz(0)}, 'clone': {clone_xz(0)}}}")
     return [
+        # The fighter's own approach, unless it already stands near Axel.
+        {"do": "walk_to", "instance": fighter, "body": "self", "x": 0, "z": 0, "targetExpr": away_from_axel(fighter, 250),
+         "radius": 60, "timeoutMs": 6000, "until": near, "as": f"{name}_walk_in"},
+        # Axel's attacks can knock the reviver off its walk (vuh2912-hp-01: 193 of ~500 units in 4 s), so it has a
+        # longer budget and one more walk, which does nothing once the seats already stand apart.
         {"do": "walk_to", "instance": reviver, "body": "self", "x": 0, "z": 0, "targetExpr": away_from_axel(reviver),
-         "radius": 60, "timeoutMs": 4000, "as": f"{name}_walk_away"},
+         "radius": 60, "timeoutMs": 8000, "as": f"{name}_walk_away"},
+        {"do": "walk_to", "instance": reviver, "body": "self", "x": 0, "z": 0, "targetExpr": away_from_axel(reviver),
+         "radius": 60, "timeoutMs": 8000, "until": apart, "as": f"{name}_walk_away_retry"},
         {"do": "save", "as": f"{name}_separation", "expr": separation()},
         {"do": "assert", "expr": f"saved['{name}_separation']['standing'] and saved['{name}_separation']['{seat[reviver]}'] - "
                                  f"saved['{name}_separation']['{seat[fighter]}'] > {SEPARATION_MARGIN}",
          "message": f"SETUP FAILURE, not a targeting result: {name} needs both seats standing and the {seat[reviver]} more than "
-                    f"{SEPARATION_MARGIN} units farther from Axel than the {seat[fighter]} after its walk"},
+                    f"{SEPARATION_MARGIN} units farther from Axel than the {seat[fighter]} after both walks"},
         {"do": "save", "as": f"{name}_base", "expr": f"{{'chosen': {targets(fighter)}, 'claims': {host_claims()}, "
                                                     f"'bossHp': {boss_hp(0)}, 'hp': {canonical_hp(fighter)}, "
                                                     f"'downs': log_count('[downed] gate intercept', {fighter})}}"},
