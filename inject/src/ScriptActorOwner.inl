@@ -151,6 +151,7 @@ static OwnerCommandFn g_smOwnerCapturedCommand=nullptr;
 static ScriptDispatchFn g_smScriptDispatch=nullptr;
 static std::atomic<bool> g_smOwnerInstalled{false};
 static bool g_smOwnerDispatchCreated=false,g_smOwnerCommandCreated=false,g_smOwnerCapturedCommandCreated=false;
+
 static unsigned g_smOwnerCommandRefusals=0;
 static std::atomic<unsigned> g_smOwnerCommandEntryLogs{0};
 static bool SmOwnerReady() noexcept {
@@ -177,6 +178,7 @@ struct OwnerTrapSlot {
     uintptr_t entry{},original{};
     bool swapped{};
 };
+static void __fastcall SmOwnerCameraGlobal(std::uint64_t*);
 static constexpr std::size_t kSmOwnerCoreTrapCount=6;
 static OwnerTrapSlot g_smOwnerTraps[]{
     {3,0x42B230,0x40000000,R::kOwnerPlayer,sizeof(R::kOwnerPlayer),&SmOwnerPlayer},
@@ -188,6 +190,8 @@ static OwnerTrapSlot g_smOwnerTraps[]{
     {14,0x42B440,0x40000001,R::kOwnerMotionEndObservation,sizeof(R::kOwnerMotionEndObservation),&SmLifeMotionEnd},
     {238,0x42D3B0,0x40000001,R::kOwnerCaptureIdObservation,sizeof(R::kOwnerCaptureIdObservation),&SmLifeCaptureId},
 };
+// VUH-2913: Axel's camera_start_global. Optional, outside the core: refused, his RC cameras play natively as before.
+static OwnerTrapSlot g_smAxelCameraSlot{164,0x42E0D0,0x2,R::kOwnerCameraGlobal,sizeof(R::kOwnerCameraGlobal),&SmOwnerCameraGlobal};
 static bool SmOwnerScope(enemysync::DownedScope& scope,const char** failure=nullptr) {
     const char* why="scope-current";
     const bool current=D::Check(SmGameThread(),"scope-game-thread",why) &&
@@ -1167,6 +1171,21 @@ static bool SmOwnerBeginAxelRole(std::uint8_t slot,uintptr_t actor,uintptr_t sou
     Log("[script-owner] begin source=%u role=%u seat=%u epoch=%u axel=1",netId,role.resource,role.slot,role.epoch);
     return true;
 }
+static bool SmOwnerEmitAxelCamera(std::uint8_t slot,uintptr_t actor,std::uint32_t fourcc,std::uint32_t target) {
+    enemysync::DownedScope scope;
+    if(slot>=3 || !SmOwnerScope(scope))return false;
+    const auto& role=g_smRoles[slot];
+    if(!role.resource || role.objectId!=R::kAxelIIObjectId || role.thread || role.actor!=actor ||
+       !SmOwnerCurrent(role,scope))return false;
+    auto call=SmOwnerRecord(role,5);call.values[0]=R::Tagged(R::kTagInt,fourcc);call.values[1]=R::Tagged(R::kTagInt,target);
+    return SmEmit(call);
+}
+// Host only decides (SmAxelCamera); a skipped start pushes nothing (the slot has no result bit).
+static void __fastcall SmOwnerCameraGlobal(std::uint64_t* args) {
+    std::uint64_t before[2]{};
+    if(SmGameThread() && SmCopyArgs(args,before,2) && SmAxelCamera(before))return;
+    reinterpret_cast<TrapFn>(g_smAxelCameraSlot.original)(args);
+}
 static bool SmOwnerEmitAxelHold(std::uint8_t slot,uintptr_t actor,bool held) {
     enemysync::DownedScope scope;
     if(slot>=3 || !SmOwnerScope(scope))return false;
@@ -1792,12 +1811,17 @@ static int SmOwnerApply(const R::Call& call,uintptr_t source) {
             role.motion=R::BitsOf(call.values[0]);role.motionTime=R::FloatOf(call.values[1]);role.haveMotion=true;return 1;
         }
         if(operation==5) {
-            if(cameraTrace.Bad(!source,"no-source") || cameraTrace.Bad(source!=role.source,"source-identity") || cameraTrace.Bad(R::BitsOf(call.values[1])>1,"camera-argument"))return SmCameraTraceResult(cameraTrace,0);
+            // VUH-2913: an Axel role's camera may also start with no target (R::kAxelCameraNone).
+            const auto targetCode=R::BitsOf(call.values[1]);
+            const bool axelRole=role.objectId==R::kAxelIIObjectId;
+            if(cameraTrace.Bad(!source,"no-source") || cameraTrace.Bad(source!=role.source,"source-identity") ||
+               cameraTrace.Bad(targetCode>(axelRole?R::kAxelCameraNone:1u),"camera-argument"))return SmCameraTraceResult(cameraTrace,0);
             char name[5]{};const auto fourcc=R::BitsOf(call.values[0]);std::memcpy(name,&fourcc,4);
             if(cameraTrace.Bad(!SmOwnerCameraAsset(source,fourcc),"resident-asset"))return SmCameraTraceResult(cameraTrace,0);
             using Camera=void(__fastcall*)(uintptr_t,const char*,uintptr_t);
             cameraTrace.nativeCalls=1; // VUH2707_TRACE
-            reinterpret_cast<Camera>(g_exeBase+0x3DB2F0)(source,name,R::BitsOf(call.values[1])?source:role.actor);
+            reinterpret_cast<Camera>(g_exeBase+0x3DB2F0)(source,name,
+                targetCode==R::kAxelCameraNone?uintptr_t{0}:targetCode?source:role.actor);
             return SmCameraTraceResult(cameraTrace,SmOwnerOpenedCamera(role,source,fourcc)?1:0,"registration");
         }
         if(operation==13 && role.objectId==R::kAxelIIObjectId) { // VUH-2913: Axel held by this seat's player
@@ -2023,6 +2047,12 @@ static void SmOwnerShutdown() {
     // A callback already inside its detour may still need the trampoline.
     // Disable our entries, but leave trampoline reclamation to global teardown.
     g_smOwnerInstalled.store(false,std::memory_order_release);
+    if(auto& slot=g_smAxelCameraSlot;slot.swapped) {
+        const auto previous=InterlockedCompareExchangePointer(reinterpret_cast<PVOID volatile*>(slot.entry),
+            reinterpret_cast<void*>(slot.original),reinterpret_cast<void*>(slot.detour));
+        if(previous==reinterpret_cast<void*>(slot.detour) || previous==reinterpret_cast<void*>(slot.original))slot.swapped=false;
+        else Log("[script-owner] restore slot changed index=%u",slot.index);
+    }
     for(auto& slot:g_smOwnerTraps)if(slot.swapped) {
         const auto previous=InterlockedCompareExchangePointer(reinterpret_cast<PVOID volatile*>(slot.entry),
             reinterpret_cast<void*>(slot.original),reinterpret_cast<void*>(slot.detour));
@@ -2096,5 +2126,14 @@ static bool SmOwnerInstall() {
         enemysync::SetScriptReactionCurrent(&SmNativeReactionCurrent);
     else Log("[script-rc-cache] unavailable pins=%u; existing owner suppression retained",reactionPins?1u:0u);
     (void)SmLifeInstall(table); // diagnostic refusal never rolls back the core
+    // VUH-2913: optional too. Refused, a friend's Axel RC camera keeps playing on the host, as before.
+    {
+        auto& slot=g_smAxelCameraSlot;std::uint32_t flags=0;slot.entry=R::EntryRva(table,slot.index);
+        slot.swapped=ReadHitTrace(slot.entry,slot.original) && slot.original==g_exeBase+slot.rva &&
+            ReadHitTrace(slot.entry+8,flags) && flags==slot.flags && SmOwnerPin(slot.rva,slot.body,slot.size) &&
+            InterlockedCompareExchangePointer(reinterpret_cast<PVOID volatile*>(slot.entry),reinterpret_cast<void*>(slot.detour),
+                reinterpret_cast<void*>(slot.original))==reinterpret_cast<void*>(slot.original);
+        if(!slot.swapped)Log("[axel-rc] camera_start_global hook refused; Axel's RC cameras stay native");
+    }
     return true;
 }

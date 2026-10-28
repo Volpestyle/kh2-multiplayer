@@ -130,6 +130,28 @@ static bool SmAxelRoleHeld(std::uint32_t objectId,std::uint8_t slot,uintptr_t ac
     return SmOwnerScope(scope) && R::AxelRoleHeld(SmAxelExecutorBound(scope),g_axel.executor.slot,g_axel.executorActor,
         slot,actor,read,thread);
 }
+// Host 1/164 on its copied arguments ([0] the object, [8] the camera name): a start on Axel during a friend's RC
+// goes to its owner instead (R::AxelCameraForwarded). True when the hook must skip the native start. A name that is
+// not a printable fourcc stays native.
+static bool SmAxelCamera(const std::uint64_t* args) {
+    if(!g_sm.hostActive || !args || !SmAxelHostCurrent() || R::TagOf(args[1])!=R::kTagAddress)return false;
+    std::uint32_t ignored=0;
+    const auto slot=g_axel.executor.slot;
+    const bool friendRole=g_axel.executor.command && slot && slot<3 && g_axel.executorActor &&
+        SmAxelRoleHeld(R::kAxelIIObjectId,slot,g_axel.executorActor,0);
+    if(!R::AxelCameraForwarded(SmActorOf(args[0],ignored)==g_axel.actor,friendRole))return false;
+    char text[4]{};std::uint32_t fourcc=0;
+    const auto name=SmDecode(R::BitsOf(args[1]));
+    if(!name || !ReadHitTraceMemory(name,text,sizeof(text)))return false;
+    for(unsigned i=0;i<4 && text[i];++i) {
+        if(text[i]<0x20 || text[i]>0x7E)return false;
+        fourcc|=static_cast<std::uint32_t>(static_cast<unsigned char>(text[i]))<<(8*i);
+    }
+    if(!fourcc || !SmOwnerEmitAxelCamera(slot,g_axel.executorActor,fourcc,R::kAxelCameraNone))return false;
+    if(SmAxelLogBudget())
+        Log("[axel-rc] camera forwarded command=%u owner=%u fourcc=%X",g_axel.executor.command,slot,fourcc);
+    return true;
+}
 static void SmAxelExecutorTick(const enemysync::DownedScope& scope) {
     if(!g_axel.executor.command)return;
     if(!SmAxelExecutorBound(scope)){SmAxelEndExecutor(g_axel.executor.epoch!=scope.epoch?"epoch":"lease");return;}

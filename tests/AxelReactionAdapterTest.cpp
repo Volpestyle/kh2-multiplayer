@@ -100,6 +100,12 @@ static bool SmOwnerBeginAxelRole(std::uint8_t slot,uintptr_t actor,uintptr_t sou
 struct Hold { std::uint8_t slot{};uintptr_t actor{};bool held{}; };
 static std::vector<Hold> holds;
 static bool SmOwnerEmitAxelHold(std::uint8_t slot,uintptr_t actor,bool held) { holds.push_back({slot,actor,held});return true; }
+struct Camera { std::uint8_t slot{};uintptr_t actor{};std::uint32_t fourcc{},target{}; };
+static std::vector<Camera> cameras;
+static bool cameraEmitOk=true;
+static bool SmOwnerEmitAxelCamera(std::uint8_t slot,uintptr_t actor,std::uint32_t fourcc,std::uint32_t target) {
+    cameras.push_back({slot,actor,fourcc,target});return cameraEmitOk;
+}
 static unsigned callbacks=0;
 static uintptr_t callbackPlayer=0;
 static std::size_t rolesAtCallback=0;
@@ -128,7 +134,7 @@ void Setup(std::uint32_t groups) {
     g_axel={};memory.clear();handles={{kAxel,kAxelHandle},{kHostActor,kHostHandle},{kFriendActor,kFriendHandle}};
     enemytarget::g.candidateActor={kHostActor,kFriendActor,0};
     enemysync::scope={};enemysync::session=0xA1;enemysync::sentClaims=0;g_sm.hostActive=true;g_frameCounter=10;
-    scopeOk=true;roleBeginOk=true;roleBegins.clear();holds.clear();callbacks=0;callbackPlayer=0;downedspike::down=false;
+    scopeOk=true;roleBeginOk=true;roleBegins.clear();holds.clear();cameras.clear();cameraEmitOk=true;callbacks=0;callbackPlayer=0;downedspike::down=false;
     g_soraActor=kHostActor;
     Put(kAxel+0x100,uintptr_t{0x400000});Put(uintptr_t{0x400000},std::uint32_t{81});
     Put(kAxel+0x5A0,groups);Put(kAxel+0x5A4,std::uint32_t{});Put(kAxel+0x5A8,std::uint32_t{});Put(kAxel+0x5AC,std::uint32_t{});
@@ -319,6 +325,32 @@ int main() {
         const bool ran=SmAxelComplete(Claim(),nullptr);
         HoldAxel(kHostHandle);++g_frameCounter;Frame();
         check(ran && g_axel.executor.slot==0 && holds.empty(),"the host's own RC sends no hold");
+    }
+
+    // Cameras: Axel's camera_start_global (1/164) during a friend's RC goes to its owner, and the host skips it.
+    {
+        constexpr uintptr_t kName=0x700000;constexpr std::uint32_t kNameHandle=0x70;
+        const auto start=[&](std::uint32_t object) {
+            const std::uint64_t args[2]{R::Tagged(R::kTagAddress,object),R::Tagged(R::kTagAddress,kNameHandle)};
+            return SmAxelCamera(args);
+        };
+        (void)FriendOvertaker();handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3030}); // "00"
+        check(start(kAxelHandle) && cameras.size()==1 && cameras[0].slot==1 && cameras[0].actor==kFriendActor &&
+              cameras[0].fourcc==0x3030 && cameras[0].target==R::kAxelCameraNone,
+              "a friend's Overtaker camera on Axel goes to the friend with no target, and the host skips it");
+        const auto sent=cameras.size();
+        check(!start(kHostHandle) && cameras.size()==sent,"another object's camera stays native");
+        Put(kName,std::uint32_t{0x0130});
+        check(!start(kAxelHandle) && cameras.size()==sent,"a name that is not a printable fourcc stays native");
+        Put(kName,std::uint32_t{0x3130});cameraEmitOk=false;
+        check(!start(kAxelHandle),"if the record cannot be sent, the host plays it natively");
+        cameraEmitOk=true;Put(kFriendActor+0xD48,uintptr_t{0x777});
+        check(!start(kAxelHandle),"without the friend's held role (Burst's hook role, or none) it stays native");
+        g_sm.hostActive=false;
+        check(!start(kAxelHandle),"a client's own starts stay native");
+        Setup(1u<<R::kOvertakerGroup);g_seats[1].living=false;Frame();handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3030});
+        const bool ran=SmAxelComplete(Claim(),nullptr);
+        check(ran && !start(kAxelHandle) && cameras.empty(),"the host's own RC camera plays on the host");
     }
 
     // The friend's side: the host's offer, its prompt proof and its press, which claims and runs nothing locally.

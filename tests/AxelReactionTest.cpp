@@ -462,6 +462,9 @@ int main() {
               !R::AxelRoleHeld(true,1,0x300,1,0x400,true,0),"not once the executor ends, or for another seat or actor");
         check(!R::AxelRoleHeld(true,1,0x300,1,0x300,false,0) && !R::AxelRoleHeld(true,1,0x300,1,0x300,true,0x777),
               "nor with the actor's coroutine word unread or held");
+        check(R::AxelCameraForwarded(true,true) && !R::AxelCameraForwarded(false,true) && !R::AxelCameraForwarded(true,false),
+              "only Axel's camera start, during a friend's role, is forwarded");
+        check(R::kAxelCameraNone==2,"the no-target code sits beside op 5's actor (0) and source (1)");
     }
 
     // Routing identity.

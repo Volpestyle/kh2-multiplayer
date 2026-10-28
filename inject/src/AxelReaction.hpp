@@ -350,6 +350,13 @@ inline bool AxelAttachPair(std::uint32_t flags,std::uint32_t bone) noexcept {
 // attachment, end) that replays the RC on the friend's own player. Axel's Overtaker and Clear Light hook no coroutine
 // into that actor (Burst Frontier's 1/112 hook mints its own role), so the role has no thread. It is current while
 // the executor stays bound to the same seat and actor and no coroutine holds the actor; the thread read must succeed.
+// Cameras. Axel starts his RC cameras with camera_start_global (1/164 at 42E0D0), which tail-jumps to the
+// entity-camera starter 3DB2F0(Axel, name, 0): anchored on Axel, with no target. During a friend's RC the host's
+// 1/164 hook skips it and sends it to the owner as the role's camera record (op 5). Its target code is "none"
+// (kAxelCameraNone) beside op 5's 0 (the role's actor) and 1 (the source). The trap has no result bit, so a skipped
+// call leaves the BDX stack as it was.
+inline constexpr std::uint32_t kAxelCameraNone=2;
+inline bool AxelCameraForwarded(bool axelSource,bool friendRole) noexcept { return axelSource && friendRole; }
 // Which RCs begin that role at completion: Overtaker and Clear Light. Burst Frontier hooks the player into its steering
 // coroutine (1/112), and ScriptActorOwner's hook mints the role, adopting the capture issued just before it.
 inline bool AxelRoleAtCompletion(std::uint16_t command) noexcept {

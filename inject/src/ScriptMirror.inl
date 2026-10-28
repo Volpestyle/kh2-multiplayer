@@ -89,6 +89,7 @@ static R::AxelAct SmAxelAct(const std::uint64_t*,const char*);
 static void SmAxelSyncHeld();
 static int SmAxelHeldBy(uintptr_t);
 static bool SmAxelRoleHeld(std::uint32_t,std::uint8_t,uintptr_t,uintptr_t);
+static bool SmAxelCamera(const std::uint64_t*);
 static void SmAxelClientReset();
 static bool SmSetReactionCommand(const ReactionBinding&,std::uint32_t) noexcept;
 static bool SmOwnerInstall();
