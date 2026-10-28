@@ -376,6 +376,13 @@ class AxelHpSplitTest(unittest.TestCase):
         self.assertNotIn("require", b2[verdict + 1])  # owner_downs' films are diagnostics
         assert_background_films(self, b2)
 
+    # Lead #72 (vuh2912-hp-08): Axel kept on the reviver and broke every hold. Each forced down waits, at most 20 s and
+    # labelled, until Axel stands at least 500 units from both seats: just over the 90th percentile (479) of how far
+    # he travelled in the second before each of his 96 hits on a seat in hp-05, hp-07 and hp-08 (max 591).
+    def test_owner_downs_waits_for_axel_to_clear_both_seats_before_each_forced_down(self):
+        for steps in (SPLIT["b2"], FULL):
+            self.assertEqual(self.named(steps, "owner_downs")["clearOf"], {"distance": 500, "maxMs": 20000})
+
     def test_every_other_split_step_is_the_full_fixtures_own(self):
         for key, steps in SPLIT.items():
             with self.subTest(key):

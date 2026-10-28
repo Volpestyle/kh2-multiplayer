@@ -1868,6 +1868,12 @@ def step_pilot_wait(ctx: Context, step: dict) -> dict:
     return results
 
 
+def living_enemies(ctx: "Context", index: int) -> list[dict]:
+    """Positions of the living enemies (object types 3 and 4, no F_ props) in one instance's game."""
+    return [a["position"] for a in ctx.actors(index)
+            if a.get("objectType") in (3, 4) and not a["name"].startswith("F_") and a.get("hp", -1) > 0]
+
+
 class ReviveGuard:
     """VUH-2344: while the host's route pilot fights, an otherwise idle friend
     keeps away from enemies (Axel downed it through team-0 protect in run
@@ -1905,6 +1911,78 @@ class ReviveGuard:
         except OSError:
             return 0
 
+    def hits(self, inst: "Instance", actor: int | None) -> int:
+        """Native hits on `actor` in the instance's log: `[hit]` lines naming it as the victim."""
+        if not actor:
+            return 0
+        try:
+            text = (LOGS / f"kh2coop_inject_{inst.pid}.log").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return 0
+        return len(re.findall(rf"^\[hit\] frame \d+ .*-> victim=\S+@{actor:X} ", text, re.M))
+
+    def press_hold(self, ms: int):
+        """Triangle for `ms` on the reviver, in a thread so the hold can be sampled while it runs."""
+        thread = threading.Thread(target=kh2ctl, args=("player-press", "--button", "triangle", "--duration-ms", str(ms)),
+                                  kwargs={"pid": self.friend.pid, "check": False}, daemon=True)
+        thread.start()
+        return thread
+
+    @staticmethod
+    def prompt_sample(game) -> dict | None:
+        """The revive prompt in the reviver's downed channel v7 (DownedSpikeState.hpp, read through the pilot's
+        existing read-only mapping), or None when it can't be read."""
+        reader = getattr(game, "prompt_reactions", None)
+        try:
+            raw = reader.read() if reader else None
+        except OSError:
+            raw = None
+        if not raw or len(raw) != DOWNED_CHANNEL_SIZE \
+                or struct.unpack_from("<II", raw) != (DOWNED_CHANNEL_MAGIC, DOWNED_CHANNEL_VERSION):
+            return None
+        kind, slot, progress, hide, triangle, fires = struct.unpack_from("<6I", raw, 328)
+        return {"frame": struct.unpack_from("<I", raw, 24)[0], "kind": kind, "slot": slot, "progress": progress,
+                "hide": hide, "triangle": triangle, "fires": fires}
+
+    def hold(self, event: dict, game, s: dict, revived) -> None:
+        """One revive hold, sampled: how far it got (progress 0..1000, Triangle frames) and why it ended, in order:
+        completed (a fire or a revive), hit (a native hit on the reviver or its HP fell), moved (out of range or no
+        target), hidden:<reason>, unread (no channel), full-unfired, or released (the press ended short)."""
+        hits, hp, pos = self.hits(self.friend, s.get("player")), s.get("hp"), s.get("pos")
+        record = {"atS": round(self.now() - event["downedAt"], 1), "distance": event["last"].get("distance")}
+        start, samples = self.now(), []
+        press = self.press_hold(self.HOLD_MS)
+        while True:
+            sample = self.prompt_sample(game)
+            if sample:
+                samples.append(sample)
+            if self.now() >= start + self.HOLD_MS / 1000 + self.HOLD_TAIL_S:
+                break
+            self.sleep(self.HOLD_SAMPLE_S)
+        press.join(timeout=5)
+        try:
+            after = game.state()
+        except Exception:  # a load between samples
+            after = {}
+        hit = self.hits(self.friend, s.get("player")) - hits
+        hp_drop = hp - after["hp"] if hp is not None and after.get("hp") is not None else None
+        hide = next((self.HIDES[p["hide"]] if p["hide"] < len(self.HIDES) else str(p["hide"])
+                     for p in samples if p["hide"] and p["hide"] != 10), None)  # fired is the hold's own success
+        fires = samples[-1]["fires"] - samples[0]["fires"] if samples else 0
+        record.update(samples=len(samples), maxProgress=max((p["progress"] for p in samples), default=None),
+                      endProgress=samples[-1]["progress"] if samples else None,
+                      triangleFrames=samples[-1]["triangle"] - samples[0]["triangle"] if samples else None,
+                      fires=fires, hide=hide, hits=hit, hpDrop=hp_drop,
+                      movedBy=round(math.hypot(after["pos"][0] - pos[0], after["pos"][2] - pos[2]), 1)
+                      if pos and after.get("pos") else None)
+        record["end"] = "completed" if fires > 0 or revived() else "hit" if hit > 0 or (hp_drop or 0) > 0 \
+            else "moved" if hide in ("out-of-range", "no-target") else f"hidden:{hide}" if hide \
+            else "unread" if not samples else "full-unfired" if record["maxProgress"] >= 1000 else "released"
+        if len(event.setdefault("holdLog", [])) < self.HOLD_LOG_CAP:
+            event["holdLog"].append(record)
+        else:
+            event["holdLogDropped"] = event.get("holdLogDropped", 0) + 1
+
     def stick(self, s: dict, dx: float, dz: float, ms: int) -> None:
         """Camera-relative stick toward world direction (dx, dz)."""
         fx, fz = s["forward"]
@@ -1917,11 +1995,15 @@ class ReviveGuard:
     # and only inside the step's `aside` envelope (Ione 00c3ac51): {"roomScope": the six-part scope, "center": [x, z],
     # "radius": r}. ASIDE_TRAVEL bounds one aside's travel for the endpoint check. No envelope: never aside.
     ASIDE_MS, ASIDE_PULSES, ASIDE_TRAVEL = 100, 4, 300.0
+    # Lead #72 (vuh2912-hp-08): each hold samples the reviver's downed channel every HOLD_SAMPLE_S through the press
+    # and HOLD_TAIL_S past it (a full hold fires on release), and the episode keeps the first HOLD_LOG_CAP records.
+    HOLD_SAMPLE_S, HOLD_TAIL_S, HOLD_LOG_CAP = 0.05, 0.3, 32
+    HIDES = ("none", "off", "local-unavailable", "local-downed", "event", "menu", "transition", "native-reaction",
+             "no-target", "out-of-range", "fired", "revive-off")  # RevivePrompt.hpp Hide
     INPUT_SLACK = 1.0  # seconds of the episode an input needs beyond its own duration
 
     def living_enemies(self) -> list[dict]:
-        return [a["position"] for a in self.ctx.actors(self.friend.index)
-                if a.get("objectType") in (3, 4) and not a["name"].startswith("F_") and a.get("hp", -1) > 0]
+        return living_enemies(self.ctx, self.friend.index)
 
     @staticmethod
     def native_yield(s: dict) -> bool:
@@ -2119,10 +2201,9 @@ class ReviveGuard:
                 if move[0] == "walk" and self.may_send(end, 0.4):
                     self.stick(s, move[1], move[2], 400)
                 elif move[0] == "hold" and self.may_send(end, self.HOLD_MS / 1000):
-                    kh2ctl("player-press", "--button", "triangle", "--duration-ms", str(self.HOLD_MS),
-                           pid=self.friend.pid, check=False)
                     event["holds"] += 1
-                    self.sleep(1.0)
+                    self.hold(event, friend, s, revived)  # the press, sampled, and HOLD_TAIL_S of its 1 s pause
+                    self.sleep(1.0 - self.HOLD_TAIL_S)
                 elif move[0] == "aside":  # a proven native RC owns Triangle: out of its line, inside the envelope
                     lost = self.step_aside(event, s, move, pin, end, reads, revived)
                     if lost:  # a context lost during the aside ends the episode too
@@ -2169,8 +2250,21 @@ def step_revive_guard(ctx: Context, step: dict) -> dict:
 DOWNED_DOWN, DOWNED_REVIVED, DOWNED_FULL = "[downed] gate intercept", "[downed] revive returned", "[downed] full party down"
 
 
+def enemy_clearance(ctx: Context, games: list) -> float | None:
+    """How far the nearest living enemy in the host's game stands from either seat (XZ), each seat at its own
+    game's position; None when a seat or the enemy list can't be read."""
+    try:
+        seats = [game.state()["pos"] for game in games]
+        enemies = living_enemies(ctx, 0)
+    except Exception:  # a load between samples
+        return None
+    if not all(seats):
+        return None
+    return min((math.hypot(e["x"] - p[0], e["z"] - p[2]) for e in enemies for p in seats), default=math.inf)
+
+
 def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guard=None, _clip=None,
-                     _now=None, _sleep=None) -> dict:
+                     _now=None, _sleep=None, _clearance=None) -> dict:
     """VUH-2911: one logical down and partner revive per owner, tolerant of natural downs (lead decision on
     run vuh2911-axel-01, where Axel downed the host before the fixed forced down and both seats went down).
     Two ReviveGuards run, one per direction: each keeps its seat away from enemies and revives the other seat
@@ -2179,8 +2273,10 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     no forced down is still open, `gapMs` after the last revive). Both seats down at once, or a host full-party
     down, is a named harness failure, never a pass; so is `timeoutMs`. Each downing starts a paired background
     clip (`clipSeconds`, 12) when none is running. Both seats must be standing when the step starts. `aside`
-    is both guards' envelope (ReviveGuard). Saved `as` (`owner_downs`): per owner {kind, seat}, the downing events
-    and both guards' events."""
+    is both guards' envelope (ReviveGuard). `clearOf` {distance, maxMs} (lead #72, vuh2912-hp-08): each forced down
+    first waits, at most maxMs, until no living enemy stands within `distance` of either seat, then downs anyway;
+    its Kill event says which ({result: clear|timeout, nearest, waitedS}). Saved `as` (`owner_downs`): per owner
+    {kind, seat}, the downing events and both guards' events."""
     owners = [int(o) for o in step.get("owners", [1, 0])]
     name = step.get("as", "owner_downs")
 
@@ -2209,6 +2305,15 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     seen, kinds, events = {0: 0, 1: 0}, {0: [], 1: []}, []
     last_revive = start
     guards = [guard(0, 1), guard(1, 0)]      # guards[i] revives seat i with the other seat
+    clear_of, waiting = step.get("clearOf"), None  # waiting: when the current forced down's clearance wait began
+    games: list = []
+
+    def read_clearance() -> float | None:
+        if not games:
+            games.extend(guards[0].pilot.Game(ctx.inst(i).pid) for i in (0, 1))
+        return enemy_clearance(ctx, games)
+
+    clearance = _clearance or read_clearance
     for g in guards:
         g.thread.start()
     failure = None
@@ -2233,10 +2338,26 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
                 raise StepFailed(f"owner_downs: HARNESS FAILURE, both seats down (events {events}); not a form result")
             open_forced = [s for s in forced if owed.get(s) is None]
             pending = [o for o in owners if owed[o] is None and o not in forced]
-            if not down_now and not open_forced and pending and now() - last_revive >= step.get("gapMs", 1500) / 1000:
+            ready = bool(not down_now and not open_forced and pending
+                         and now() - last_revive >= step.get("gapMs", 1500) / 1000)
+            clear = None
+            if not ready:
+                waiting = None  # a downing or revive since: the next forced down gets its own bound
+            elif clear_of:
+                waiting = now() if waiting is None else waiting
+                nearest = clearance()
+                cleared = nearest is not None and nearest >= clear_of["distance"]
+                if cleared or now() - waiting >= clear_of["maxMs"] / 1000:
+                    clear = {"result": "clear" if cleared else "timeout",
+                             "nearest": None if nearest is None else round(min(nearest, 1e6), 1),
+                             "waitedS": round(now() - waiting, 1)}
+                    waiting = None
+                else:
+                    ready = False
+            if ready:
                 o = pending[0]
                 result = kill(o)
-                events.append({"seat": o, "kill": result, "atS": round(now() - start, 1)})
+                events.append({"seat": o, "kill": result, "atS": round(now() - start, 1), **({"clear": clear} if clear else {})})
                 if result == "Ok":
                     forced[o] = downs[o] + 1
                 elif result != "WrongState":  # WrongState: already down, its natural downing is counted

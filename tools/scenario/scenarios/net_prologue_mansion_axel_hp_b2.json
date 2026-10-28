@@ -194,6 +194,10 @@
      -27
     ],
     "radius": 450
+   },
+   "clearOf": {
+    "distance": 500,
+    "maxMs": 20000
    }
   },
   {

@@ -8,6 +8,7 @@ or budget. No game.
 import importlib.util
 import json
 import math
+import struct
 import threading
 import unittest
 from pathlib import Path
@@ -96,8 +97,10 @@ class Rig:
     """A downed host (seat 0) within reach of the reviver (seat 1), whose native RC prompt yields Triangle, Axel at
     the origin, a simulated clock and every kh2ctl input recorded. `on_input` and `lookup` change the world."""
 
-    def __init__(self, observation=YIELD, aside=ARENA, until=8.0, lookup=None, on_input=None, before=None):
+    def __init__(self, observation=YIELD, aside=ARENA, until=8.0, lookup=None, on_input=None, before=None, prompt=None):
         self.t, self.until, self.lookups, self.inputs, self.before = 0.0, until, 0, [], before
+        self.prompt, self.hits, self.pressed_at = prompt, 0, None  # prompt(rig, seconds into the hold) -> fields
+        self.version = RUN.DOWNED_CHANNEL_VERSION
         self.friend = {"free": True, "pos": (0.0, 0.0, 500.0), "react": BURST_FRONTIER, "reactObservation": observation,
                        "forward": (0.0, 1.0), "roomScope": SCOPE, "player": 0xA000}
         self.host = {"free": True, "pos": (0.0, 0.0, 560.0), "roomScope": SCOPE, "player": 0xB000}
@@ -107,7 +110,10 @@ class Rig:
         g.host, g.friend = SimpleNamespace(pid=10, index=0), SimpleNamespace(pid=11, index=1)
         g.events, g.openError, g.keepAwaySteps, g.aside = [], "", 0, aside
         g.now, g.sleep, g.stop = (lambda: self.t), self.sleep, Stop(self)
-        g.pilot = SimpleNamespace(Game=lambda pid: SimpleNamespace(state=lambda: self.read(pid)))
+        g.pilot = SimpleNamespace(Game=lambda pid: SimpleNamespace(
+            state=lambda: self.read(pid), prompt_reactions=SimpleNamespace(read=self.channel)))
+        g.hits = lambda inst, actor: self.hits
+        g.press_hold = self.press
         self.revives, self.on_read = 0, None
         g.count = lambda inst, needle: int(self.t >= 1.0) if needle == "[downed] gate intercept" else self.revives
         self.guard = g
@@ -136,6 +142,27 @@ class Rig:
         if self.on_input:
             self.on_input(self)
         return {"ok": True}
+
+    def press(self, ms):
+        """The hold's Triangle press, recorded as it starts; the guard's own sampling runs the clock through it."""
+        self.inputs.append({"t": self.t, "cmd": "player-press", "ms": ms, "stopped": self.guard.stop.is_set()})
+        self.pressed_at = self.t
+        if self.on_input:
+            self.on_input(self)
+        return SimpleNamespace(join=lambda timeout=None: None)
+
+    def channel(self):
+        """The reviver's downed channel v7 (DownedSpikeState.hpp): prompt kind, slot, progress, hide, Triangle frames
+        and fires at 328, from `prompt` while a hold runs."""
+        fields = self.prompt(self, self.t - self.pressed_at) if self.prompt and self.pressed_at is not None else None
+        if fields is None:
+            return None
+        raw = bytearray(RUN.DOWNED_CHANNEL_SIZE)
+        struct.pack_into("<II", raw, 0, RUN.DOWNED_CHANNEL_MAGIC, self.version)
+        struct.pack_into("<I", raw, 24, int(self.t * 60))
+        struct.pack_into("<6I", raw, 328, 1, 0, fields.get("progress", 0), fields.get("hide", 0),
+                         fields.get("triangle", 0), fields.get("fires", 0))
+        return bytes(raw)
 
     def run(self):
         with mock.patch.object(RUN, "kh2ctl", self.kh2ctl):
@@ -408,6 +435,77 @@ class GuardLoopTest(unittest.TestCase):
         end = 1.0 + GUARD.TIMEOUT
         self.assertTrue(all(i["t"] + GUARD.HOLD_MS / 1000 + GUARD.INPUT_SLACK <= end + 1e-9 for i in holds))
         self.assertEqual(events[0]["holds"], len(holds))
+
+
+def climb(rig, dt, to=1000, over=1.0):
+    """A hold's progress, 0..`to` over `over` seconds of the press."""
+    return min(to, int(dt / over * 1000))
+
+
+class HoldLogTest(unittest.TestCase):
+    """Lead #72 (vuh2912-hp-08): each Triangle hold records how far it got and why it ended, from the reviver's
+    downed channel, so a failed revive reads without inference. Bounded per episode."""
+
+    def run_holds(self, prompt, until=4.0):
+        rig = Rig(observation={"source": "raw"}, until=until, prompt=prompt)
+        rig.friend["react"] = 0  # a plain revive hold
+        return rig, rig.run()
+
+    def test_a_hold_broken_by_a_hit_says_hit(self):
+        def prompt(rig, dt):
+            if dt >= 0.5:
+                rig.hits = 1
+                return {"progress": 0, "triangle": int(dt * 60)}
+            return {"progress": climb(rig, dt), "triangle": int(dt * 60)}
+        rig, events = self.run_holds(prompt)
+        hold = events[0]["holdLog"][0]
+        self.assertEqual(hold["end"], "hit")
+        self.assertEqual(hold["hits"], 1)
+        self.assertTrue(400 <= hold["maxProgress"] <= 500)
+        self.assertEqual(hold["endProgress"], 0)
+
+    def test_a_completed_hold_says_completed(self):
+        def prompt(rig, dt):
+            if dt >= GUARD.HOLD_MS / 1000 + 0.1:  # fired a few frames after the release
+                return {"progress": 0, "hide": 10, "fires": 1, "triangle": 60}
+            return {"progress": climb(rig, dt), "triangle": int(dt * 60)}
+        _, events = self.run_holds(prompt)
+        hold = events[0]["holdLog"][0]
+        self.assertEqual((hold["end"], hold["fires"], hold["maxProgress"]), ("completed", 1, 1000))
+
+    def test_a_hold_hidden_out_of_range_says_moved(self):
+        _, events = self.run_holds(lambda rig, dt: {"progress": climb(rig, dt), "hide": 9 if dt >= 0.3 else 0})
+        hold = events[0]["holdLog"][0]
+        self.assertEqual((hold["end"], hold["hide"]), ("moved", "out-of-range"))
+
+    def test_a_hold_hidden_for_another_reason_names_it(self):
+        _, events = self.run_holds(lambda rig, dt: {"progress": 0, "hide": 7})
+        self.assertEqual(events[0]["holdLog"][0]["end"], "hidden:native-reaction")
+
+    def test_a_short_hold_says_released(self):
+        _, events = self.run_holds(lambda rig, dt: {"progress": climb(rig, dt, to=400), "triangle": int(dt * 60)})
+        hold = events[0]["holdLog"][0]
+        self.assertEqual((hold["end"], hold["maxProgress"]), ("released", 400))
+        self.assertGreater(hold["triangleFrames"], 0)
+
+    def test_an_unreadable_channel_says_unread_and_still_holds(self):
+        rig, events = self.run_holds(None)
+        self.assertEqual(events[0]["holdLog"][0]["end"], "unread")
+        self.assertEqual([i["ms"] for i in rig.inputs if i["cmd"] == "player-press"][:1], [GUARD.HOLD_MS])
+
+    def test_a_channel_of_another_layout_version_is_unread(self):
+        rig = Rig(observation={"source": "raw"}, until=4.0, prompt=lambda rig, dt: {"progress": 500, "hide": 9})
+        rig.friend["react"], rig.version = 0, RUN.DOWNED_CHANNEL_VERSION - 1
+        self.assertEqual(rig.run()[0]["holdLog"][0]["end"], "unread")
+
+    def test_every_hold_is_logged_up_to_the_episode_bound(self):
+        with mock.patch.object(GUARD, "HOLD_LOG_CAP", 3):
+            rig, events = self.run_holds(lambda rig, dt: {"progress": 0}, until=200.0)
+        holds = len([i for i in rig.inputs if i["cmd"] == "player-press"])
+        self.assertGreater(holds, 3)
+        self.assertEqual(events[0]["holds"], holds)
+        self.assertEqual(len(events[0]["holdLog"]), 3)
+        self.assertEqual(events[0]["holdLogDropped"], holds - 3)
 
 
 class DeadlineTest(unittest.TestCase):
