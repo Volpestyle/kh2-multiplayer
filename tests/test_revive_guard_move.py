@@ -107,13 +107,18 @@ class Rig:
         g.host, g.friend = SimpleNamespace(pid=10, index=0), SimpleNamespace(pid=11, index=1)
         g.events, g.openError, g.keepAwaySteps, g.aside = [], "", 0, aside
         g.now, g.sleep, g.stop = (lambda: self.t), self.sleep, Stop(self)
-        g.pilot = SimpleNamespace(Game=lambda pid: SimpleNamespace(state=lambda: dict(self.host if pid == 10 else self.friend)))
-        self.revives = 0
+        g.pilot = SimpleNamespace(Game=lambda pid: SimpleNamespace(state=lambda: self.read(pid)))
+        self.revives, self.on_read = 0, None
         g.count = lambda inst, needle: int(self.t >= 1.0) if needle == "[downed] gate intercept" else self.revives
         self.guard = g
 
     def sleep(self, seconds):
         self.t = round(self.t + seconds, 3)
+
+    def read(self, pid):
+        if self.on_read:
+            self.on_read(self)
+        return dict(self.host if pid == 10 else self.friend)
 
     def actors(self, index):
         if self.t >= 1.0:  # the episode's lookups; keep_away's run before the down
@@ -166,21 +171,34 @@ class GuardLoopTest(unittest.TestCase):
         self.assertEqual(rig.inputs, [])
         self.assertGreater(events[0]["asideDeclined"]["no-envelope"], 0)
 
-    def test_seats_in_different_rooms_decline_the_aside(self):
+    def test_seats_in_different_rooms_send_nothing(self):
+        for aside in (ARENA, None):  # the generic guard too (Ione 796116d1)
+            for far in (False, True):  # in reach (aside or hold) or out of reach (walk)
+                with self.subTest(aside=aside is not None, far=far):
+                    rig = Rig(aside=aside)
+                    rig.friend["roomScope"] = CHECKPOINT  # host in 02/14, reviver free in 02/15
+                    if far:
+                        rig.friend["pos"] = (0.0, 0.0, -800.0)  # out of reach, clear of Axel
+                    events = rig.run()
+                    self.assertEqual(rig.inputs, [])
+                    self.assertEqual(events[0]["result"], "context-lost:room")
+
+    def test_both_seats_outside_the_envelopes_room_decline_the_aside(self):
         rig = Rig()
-        rig.friend["roomScope"] = CHECKPOINT  # host in 02/14, reviver free in 02/15
+        rig.friend["roomScope"] = rig.host["roomScope"] = CHECKPOINT  # together, but not in Axel's scope
         events = rig.run()
         self.assertEqual(rig.inputs, [])
+        self.assertEqual(rig.lookups, 0)
         self.assertGreater(events[0]["asideDeclined"]["room"], 0)
 
-    def test_a_replaced_downed_actor_declines_the_aside(self):
+    def test_a_replaced_downed_actor_ends_the_episode(self):
         def replace(r):
             r.host["player"] = 0xC000
         rig = Rig(on_input=replace)
         events = rig.run()
-        self.assertEqual(len([i for i in rig.inputs if i["cmd"] == "player-input"]), 1)
+        self.assertEqual(len(rig.inputs), 1)
         self.assertEqual(events[0]["asideStops"], {"context": 1})
-        self.assertGreater(events[0]["asideDeclined"]["context"], 0)
+        self.assertEqual(events[0]["result"], "context-lost:context")
 
     def test_a_load_during_an_aside_stops_its_pulses(self):
         def cross(r):  # the first pulse crosses into another room scope
@@ -189,6 +207,51 @@ class GuardLoopTest(unittest.TestCase):
         events = rig.run()
         self.assertEqual(len(rig.inputs), 1)  # no input in the new room
         self.assertEqual(events[0]["asideStops"], {"room": 1})
+        self.assertEqual(events[0]["result"], "context-lost:room")
+
+    # Ione 796116d1 (1): a rejected context stops every episode input, not only the aside.
+    def test_a_load_or_replaced_actor_during_a_walk_stops_the_walking(self):
+        changes = {"load": lambda r: (r.friend.update(roomScope=CHECKPOINT), r.host.update(roomScope=CHECKPOINT)),
+                   "respawn": lambda r: r.friend.update(player=0xD000),
+                   "replaced": lambda r: r.host.update(player=0xC000)}
+        for name, change in changes.items():
+            for aside in (ARENA, None):
+                with self.subTest(name, aside=aside is not None):
+                    rig = Rig(aside=aside, on_input=change)
+                    rig.friend["pos"] = (0.0, 0.0, -800.0)  # out of reach (it walks), clear of Axel
+                    events = rig.run()
+                    self.assertEqual([i["ms"] for i in rig.inputs], [400])  # the first walk only
+                    self.assertTrue(events[0]["result"].startswith("context-lost:"), events[0])
+
+    # Ione 796116d1 (2): the circle is rechecked with the remaining endpoint on every pulse.
+    def test_a_push_out_of_the_circle_after_a_pulse_stops_the_aside(self):
+        def push(r):
+            r.friend["pos"] = (0.0, 0.0, 1000.0)  # knocked from z500 to z1000, outside ARENA (centre z300, r450)
+        rig = Rig(on_input=push)
+        events = rig.run()
+        pulses = [i for i in rig.inputs if i["cmd"] == "player-input" and i["ms"] == GUARD.ASIDE_MS]
+        self.assertEqual(len(pulses), 1)
+        self.assertEqual(events[0]["asideStops"]["geometry"], 1)
+
+    def test_an_aside_that_travels_as_planned_sends_all_its_pulses(self):
+        # Axel at the origin, the reviver at z500: the aside heads -x; the circle just holds its 300-unit endpoint.
+        def travel(r):
+            x, y, z = r.friend["pos"]
+            r.friend["pos"] = (x - GUARD.ASIDE_TRAVEL / GUARD.ASIDE_PULSES, y, z)
+        rig = Rig(aside={**ARENA, "center": [0, 500], "radius": 310}, on_input=travel)
+        events = rig.run()
+        first = rig.inputs[:GUARD.ASIDE_PULSES]
+        self.assertTrue(all(i["cmd"] == "player-input" and i["ms"] == GUARD.ASIDE_MS for i in first), rig.inputs)
+        self.assertNotIn("geometry", events[0].get("asideStops", {}))  # the full 300 from each new spot would leave it
+
+    def test_each_later_pulse_needs_only_its_remaining_endpoint_inside(self):
+        # One pulse after an aside starting at the circle's edge: the remaining 225 units fit, the full 300 would not.
+        arena = {**ARENA, "center": [0, 500], "radius": 320}
+        own = (100.0, 0.0, 500.0)
+        self.assertTrue(GUARD.aside_inside(own, 1.0, 0.0, arena, 220.0))
+        self.assertFalse(GUARD.aside_inside(own, 1.0, 0.0, arena, 300.0))
+        self.assertFalse(GUARD.aside_inside((0.0, 0.0, 1000.0), 1.0, 0.0, arena, 10.0))  # the reviver itself outside
+        self.assertFalse(GUARD.aside_inside(own, 0.0, 0.0, arena, 10.0))  # no direction
 
     def test_a_yield_that_ends_during_an_aside_stops_it(self):
         def free(r):
@@ -246,7 +309,28 @@ class GuardLoopTest(unittest.TestCase):
         rig = Rig(lookup=cross)
         events = rig.run()
         self.assertEqual(rig.inputs, [])
-        self.assertGreater(events[0]["asideDeclined"]["room"], 0)
+        self.assertEqual(events[0]["result"], "context-lost:room")
+
+    # Ione 796116d1 (3): a revive that lands during the post-lookup refresh sends no first pulse.
+    def test_a_revive_during_the_post_lookup_refresh_sends_no_pulse(self):
+        def arm(r):
+            def revive_on_read(rr):
+                rr.revives, rr.on_read = 1, None
+            r.on_read = revive_on_read
+        rig = Rig(lookup=arm)
+        events = rig.run()
+        self.assertEqual(rig.inputs, [])
+        self.assertEqual(events[0]["result"], "revived")
+        self.assertNotIn("asides", events[0])  # caught right after the refresh, before any aside starts
+
+    def test_a_revive_after_a_pulse_sends_no_more(self):
+        def revive(r):
+            r.revives = 1
+        rig = Rig(on_input=revive)
+        events = rig.run()
+        self.assertEqual(len(rig.inputs), 1)
+        self.assertEqual(events[0]["asideStops"], {"revived": 1})
+        self.assertEqual(events[0]["result"], "revived")
 
     def test_keep_away_sends_nothing_after_a_lookup_that_returns_after_the_stop(self):
         def stop_during(r):

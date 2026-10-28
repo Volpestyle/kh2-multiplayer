@@ -3535,7 +3535,10 @@ Kills take `require: false`, so a seat Axel already downed refuses with `WrongSt
   off the line through the nearest enemy, but only on a fresh `downed-prompt-v7` receipt with hide reason 7
   (never the raw command alone), with both seats in that scope and in the scope and actors pinned when the
   episode began, and with the aside's 300-unit endpoint inside the circle. An aside is four 100 ms pulses, each
-  sent only after a fresh check; a load, replaced actor, ended yield, revive or stop sends nothing more. Its
+  sent only after a fresh check, including the reviver's position and the remaining endpoint; a load, replaced
+  actor, ended yield, revive, push out of the circle or stop sends nothing more. Every guard (with or without
+  `aside`) ends its revive episode, with no further walk, hold or aside, once either seat leaves the room scope
+  or either actor changes from the ones pinned at the episode's first free read. Its
   enemies lookup is capped to the episode's 60 s, and no input starts without its duration plus 1 s left.
   Without `aside` (every other fixture) a guard waits while a native RC holds Triangle.
 - **Interleaved:** both seats fight until a friend claim and a host native hit have both landed.
