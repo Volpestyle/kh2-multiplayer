@@ -1921,19 +1921,22 @@ class ReviveGuard:
         Input calls are never capped mid-pulse, which would leave the pulse held."""
         return not self.stop.is_set() and self.now() + seconds + self.INPUT_SLACK <= end
 
-    def step_aside(self, event: dict, s: dict, move: tuple, pin: tuple, end: float, reads, revived) -> None:
+    def step_aside(self, event: dict, s: dict, move: tuple, pin: tuple, end: float, reads, revived) -> str:
         """Send one aside's pulses. Before each: no revive since the last read; and, from the second, fresh reads
         of both seats (episode and aside fences, native yield) and the reviver's position with the aside's
         remaining endpoint still inside the circle. The first failed check sends nothing more and is counted in
-        asideStops."""
+        asideStops. Returns the episode fence's reason when the context was lost (the episode must end), else ""."""
         event["asides"] = event.get("asides", 0) + 1
-        stop = ""
+        stop = lost = ""
         for pulse in range(self.ASIDE_PULSES):
             if pulse:
                 try:
                     h, s = reads()
                 except Exception:  # a load or menu between samples
                     stop = "read"
+                    break
+                stop = lost = self.episode_fence(pin, s, h)
+                if lost:
                     break
                 left = self.ASIDE_TRAVEL * (self.ASIDE_PULSES - pulse) / self.ASIDE_PULSES
                 stop = self.aside_fence(self.aside, pin, s, h) or ("" if self.native_yield(s) else "yield-ended") or \
@@ -1950,6 +1953,7 @@ class ReviveGuard:
         if stop:
             stops = event.setdefault("asideStops", {})
             stops[stop] = stops.get(stop, 0) + 1
+        return lost
 
     def run(self) -> None:
         downs = self.count(self.host, "[downed] gate intercept")
@@ -2007,9 +2011,14 @@ class ReviveGuard:
                         event["lastError"] = str(error)
                         self.sleep(0.5)
                         continue
-                    # Stop, deadline, a revive (even one during this refresh) or a lost context: the loop top
-                    # ends the episode on each, before any input.
-                    if self.stop.is_set() or self.now() >= end or revived() or self.episode_fence(pin, s, h):
+                    # A lost context retires the episode at once, even if the next read would match the pin again
+                    # (Ione a3b07b72). Stop, deadline or a revive (even one during this refresh): the loop top ends
+                    # the episode on each, before any input.
+                    lost = self.episode_fence(pin, s, h)
+                    if lost:
+                        event["result"] = f"context-lost:{lost}"
+                        break
+                    if self.stop.is_set() or self.now() >= end or revived():
                         continue
                     fence = self.aside_fence(self.aside, pin, s, h)
                 target = h["pos"]
@@ -2033,7 +2042,10 @@ class ReviveGuard:
                     event["holds"] += 1
                     self.sleep(1.0)
                 elif move[0] == "aside":  # a proven native RC owns Triangle: out of its line, inside the envelope
-                    self.step_aside(event, s, move, pin, end, reads, revived)
+                    lost = self.step_aside(event, s, move, pin, end, reads, revived)
+                    if lost:  # a context lost during the aside ends the episode too
+                        event["result"] = f"context-lost:{lost}"
+                        break
                 else:
                     self.sleep(0.3)  # the native reaction command still owns Triangle, or no budget is left
             event["seconds"] = round(self.now() - event.pop("downedAt"), 1)
