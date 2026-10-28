@@ -31,6 +31,7 @@ class RouteSegmentsTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
         self.ran = []
+        ran = self.ran
 
         class Context:
             def __init__(self, run_dir):
@@ -43,6 +44,9 @@ class RouteSegmentsTest(unittest.TestCase):
 
             def check_all(self):
                 pass
+
+            def eval(self, text):  # skipIf sees which steps ran so far
+                return eval(text, {'ran': ran})
 
             def close(self):
                 pass
@@ -95,6 +99,27 @@ class RouteSegmentsTest(unittest.TestCase):
         self.assertEqual((route['reached'], route['furthestPass']), ('D', 'C'))
         self.assertEqual([f['segment'] for f in route['failures']], ['B', 'D'])
         self.assertEqual([s['status'] for s in report['steps'] if s['do'] == 'ok' and s['index'] == 5], ['skipped'])
+
+    # VUH-2931: skipIf skips a step whose expression is true when it is reached; the run goes on.
+    def test_skip_if_skips_a_step_when_true_and_runs_it_when_false(self):
+        report = self.run_steps([
+            {'do': 'ok', 'id': 'boot'},
+            {'do': 'bad', 'id': 'needs_revives', 'skipIf': "'boot' in ran"},
+            {'do': 'ok', 'id': 'kept', 'skipIf': "'never' in ran"},
+            {'do': 'ok', 'id': 'restore'}])
+        self.assertEqual(report['status'], 'pass')
+        self.assertEqual(self.ran, ['boot', 'kept', 'restore'])
+        statuses = [(s['index'], s['status']) for s in report['steps']]
+        self.assertEqual(statuses, [(0, 'pass'), (1, 'skipped'), (2, 'pass'), (3, 'pass')])
+        self.assertEqual(report['steps'][1]['skipIf'], "'boot' in ran")
+        self.assertNotIn('result', report['steps'][1])
+
+    def test_skip_if_that_cannot_be_evaluated_fails_the_step(self):
+        report = self.run_steps([{'do': 'ok', 'id': 'boot'}, {'do': 'ok', 'id': 'x', 'skipIf': "saved['missing']"},
+                                 {'do': 'ok', 'id': 'after'}])
+        self.assertEqual(report['status'], 'fail')
+        self.assertIn('skipIf: NameError', report['error'])
+        self.assertEqual(self.ran, ['boot'])
 
     def test_crash_ends_the_run_and_marks_its_segment(self):
         report = self.run_steps([{'do': 'checkpoint', 'name': 'A'}, {'do': 'crash'},

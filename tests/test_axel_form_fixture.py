@@ -101,6 +101,35 @@ class AxelFormFixtureTest(unittest.TestCase):
                                    "actors": lambda i: [{"address": host, "position": {"x": 900, "z": 0}}],
                                    "peek": lambda rva, kind, i: host}), name)  # one seat unseen: never clear
 
+    # VUH-2931 (runs vuh2931-sora-01/02): only the Sora host continues from a natural full-party down to Continue.
+    def test_only_the_sora_host_continues_from_a_natural_full_party_down(self):
+        for name in ("net_prologue_mansion_axel_form", "net_prologue_mansion_axel_form_sora_friend"):
+            steps = load(name)
+            self.assertNotIn("fullParty", next(s for s in steps if s["do"] == "owner_downs"), name)
+            self.assertFalse(any("skipIf" in s for s in steps), name)
+        steps = load("net_prologue_mansion_axel_form_sora_host")
+        dos = [s["do"] for s in steps]
+        downs = dos.index("owner_downs")
+        self.assertEqual(steps[downs]["fullParty"], "continue")
+        skipped = [i for i, s in enumerate(steps) if "skipIf" in s]
+        retry = dos.index("press_continue")
+        arrivals = next(i for i, s in enumerate(steps) if s.get("as") == "arrivals_before_retry")
+        kills = [i for i, s in enumerate(steps) if s["do"] == "downed_kill"]
+        # Skipped: everything that needs both owners revived, and the forced full-party Kills; nothing after them.
+        self.assertEqual(skipped, [i for i in range(downs + 2, arrivals)] + kills)
+        self.assertEqual(kills, [arrivals + 1, arrivals + 2])
+        self.assertEqual({steps[i].get("as") for i in skipped} - {None}, {"downs_after", "clone_motions"})
+        self.assertNotIn(arrivals, skipped)
+        self.assertLess(arrivals, retry)
+        self.assertTrue(all(i < retry for i in skipped))
+        wait = steps[kills[-1] + 1]
+        self.assertEqual(wait["do"], "wait_until")
+        self.assertIn("[downed] full party down", wait["expr"])  # the game over itself is still required
+        expr = steps[skipped[0]]["skipIf"]
+        self.assertTrue(all(steps[i]["skipIf"] == expr for i in skipped))
+        self.assertTrue(eval(expr, {"saved": {"owner_downs": {"fullParty": {"first": 1}}}}))
+        self.assertFalse(eval(expr, {"saved": {"owner_downs": {"fullParty": None}}}))
+
     def census(self, member0, roxas=0, sora=0, btlf=0, w=None):
         # One W_EX010_10 and one W_EX010_20 per dual-wield body, and Sora's own W_EX010_20 (runs axel-02, sora-01).
         w10 = btlf if w is None else w

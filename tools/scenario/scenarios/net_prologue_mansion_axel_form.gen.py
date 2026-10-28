@@ -135,7 +135,23 @@ def arrival(env):
     ]
 
 
+# owner_downs ended in the host's game-over request (fullParty "continue"): the owners were not both revived.
+FULL_PARTY = "saved['owner_downs']['fullParty'] is not None"
+SORA_HOST_NOTE = (
+    " The Sora-host fixture alone (VUH-2931, runs vuh2931-sora-01/02: Axel downed both seats during owner_downs) also "
+    "accepts that natural full-party down as its game over: owner_downs' fullParty continue passes only if the host "
+    "requested the game over while both seats were down, and records which seat fell first. The steps that need the "
+    "owners revived (their actions, clone motions) and the forced full-party Kills are then skipped (skipIf), and the "
+    "run goes on to the same Continue and 02/15 restore checks.")
+
+
 def steps_for(selection):
+    # VUH-2931: only the Sora host's fixture continues from a natural full-party down to its Continue checks.
+    continue_full = selection == VARIANTS["net_prologue_mansion_axel_form_sora_host"]
+
+    def unless_full_party(steps):
+        return [dict(s, skipIf=FULL_PARTY) for s in steps] if continue_full else steps
+
     local = [axel_body(s) for s in selection]           # each seat's own body at Axel II
     clone = [local[1], local[0]]                         # each seat's clone of the other seat
     btlf = sum(body == BTLF for body in local)           # dual-wield bodies on each screen
@@ -202,23 +218,24 @@ def steps_for(selection):
         # A forced Kill waits for Axel to stand clear of both seats (run vuh2931-sora-01: it landed while Axel was
         # combo-hitting the 10-HP reviver, which fell before reviving).
         {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000,
-         "killWhen": axel_clear(KILL_CLEARANCE)},
+         "killWhen": axel_clear(KILL_CLEARANCE), **({"fullParty": "continue"} if continue_full else {})},
         {"do": "clip_wait"},
-        {"do": "save", "as": "downs_after", "expr": f"[{census(0)}, {census(1)}]"},
-        {"do": "assert", "expr": f"all(saved['owner_downs']['owners'][k] for k in ('0', '1')) and "
-                                 f"all(saved['downs_after'][i]['btlf'] == {btlf} for i in (0, 1))",
-         "message": "each owner must be downed once and revived by the other seat, keeping both seats' bodies"},
-        # Each owner alone moves, jumps and attacks, filmed on both screens.
-        *clip_pair("owner0", 6), *owner_actions(0), {"do": "clip_wait"},
-        *clip_pair("owner1", 6), *owner_actions(1), {"do": "clip_wait"},
-        {"do": "save", "as": "clone_motions", "expr": f"[{motions(0)}, {motions(1)}]"},
-        {"do": "assert", "expr": "all(len(saved['clone_motions'][i]) >= 3 for i in (0, 1))",
-         "message": "each seat's clone must play its owner's motions (puppet receipts)"},
+        *unless_full_party([
+            {"do": "save", "as": "downs_after", "expr": f"[{census(0)}, {census(1)}]"},
+            {"do": "assert", "expr": f"all(saved['owner_downs']['owners'][k] for k in ('0', '1')) and "
+                                     f"all(saved['downs_after'][i]['btlf'] == {btlf} for i in (0, 1))",
+             "message": "each owner must be downed once and revived by the other seat, keeping both seats' bodies"},
+            # Each owner alone moves, jumps and attacks, filmed on both screens.
+            *clip_pair("owner0", 6), *owner_actions(0), {"do": "clip_wait"},
+            *clip_pair("owner1", 6), *owner_actions(1), {"do": "clip_wait"},
+            {"do": "save", "as": "clone_motions", "expr": f"[{motions(0)}, {motions(1)}]"},
+            {"do": "assert", "expr": "all(len(saved['clone_motions'][i]) >= 3 for i in (0, 1))",
+             "message": "each seat's clone must play its owner's motions (puppet receipts)"}]),
         # Full-party down (a seat Axel already downed refuses its Kill with WrongState), then the host's native
         # Continue to the Computer Room checkpoint.
         {"do": "save", "as": "arrivals_before_retry", "expr": "log_count('[enemysync] client arrived epoch=', 1)"},
-        {"do": "downed_kill", "instance": 1, "require": False},
-        {"do": "downed_kill", "instance": 0, "require": False},
+        *unless_full_party([{"do": "downed_kill", "instance": 1, "require": False},
+                            {"do": "downed_kill", "instance": 0, "require": False}]),
         {"do": "wait_until", "expr": "log_count('[downed] full party down', 0) > 0 and int(str(peek('0x2AE8050','u64',0)),0) != 0",
          "timeoutMs": 30000, "pollMs": 250},
         {"do": "wait", "ms": 7000},
@@ -441,6 +458,8 @@ if __name__ == "__main__":
     description = __doc__.split("\n\n", 2)[2].strip().replace("\n", " ")
     for name, selection in VARIANTS.items():
         seats = f" Selections: host 0x{selection[0]:X}, friend 0x{selection[1]:X}."
+        if name == "net_prologue_mansion_axel_form_sora_host":
+            seats += SORA_HOST_NOTE
         scenario = {"name": name, "description": description + seats, "playerDefaults": True, "protect": [],
                     "steps": steps_for(selection)}
         out = Path(__file__).with_name(f"{name}.json")

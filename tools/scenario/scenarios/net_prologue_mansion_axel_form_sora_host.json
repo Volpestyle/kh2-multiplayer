@@ -1,6 +1,6 @@
 {
  "name": "net_prologue_mansion_axel_form_sora_host",
- "description": "FM-02 rehearsal route (the committed Computer Room -> Basement Hall pilot, both Dusk waves) into Axel II, 02/14 btl137 (checked site tt20-137). A default Roxas seat builds the native encounter body 0x323 (P_EX110_BTLF) for its local and for its clone on the other seat, with both keyblades; a Sora seat keeps Sora for both. Inside the host's combat-admission hold (proven around the window, else a setup failure), one synthetic 1-HP native hit lands on each seat's clone: the observer's own HP, every SAVE character record (SAVE+0x24F0, 0xE04) and every drive-form row (SAVE+0x32F4, 0x230: the row a dual-wield status +0x254 references) must be byte-identical just before and just after the hits. Right after the admission release each owner is downed once and revived by the other seat (owner_downs: an Axel downing counts, else the DownedSpike fixture Kill; both seats down is a harness failure). Each owner then moves, jumps and attacks alone, filmed on both seats; then both are downed and the host takes the native Continue to the Computer Room 02/15 d99, where each seat holds only its selected body: no dual-wield body, keyblade pair or old clone. Video-only paired clips (lead amendment). Rehearsal save, no save. Selections: host 0x54, friend 0x5A.",
+ "description": "FM-02 rehearsal route (the committed Computer Room -> Basement Hall pilot, both Dusk waves) into Axel II, 02/14 btl137 (checked site tt20-137). A default Roxas seat builds the native encounter body 0x323 (P_EX110_BTLF) for its local and for its clone on the other seat, with both keyblades; a Sora seat keeps Sora for both. Inside the host's combat-admission hold (proven around the window, else a setup failure), one synthetic 1-HP native hit lands on each seat's clone: the observer's own HP, every SAVE character record (SAVE+0x24F0, 0xE04) and every drive-form row (SAVE+0x32F4, 0x230: the row a dual-wield status +0x254 references) must be byte-identical just before and just after the hits. Right after the admission release each owner is downed once and revived by the other seat (owner_downs: an Axel downing counts, else the DownedSpike fixture Kill; both seats down is a harness failure). Each owner then moves, jumps and attacks alone, filmed on both seats; then both are downed and the host takes the native Continue to the Computer Room 02/15 d99, where each seat holds only its selected body: no dual-wield body, keyblade pair or old clone. Video-only paired clips (lead amendment). Rehearsal save, no save. Selections: host 0x54, friend 0x5A. The Sora-host fixture alone (VUH-2931, runs vuh2931-sora-01/02: Axel downed both seats during owner_downs) also accepts that natural full-party down as its game over: owner_downs' fullParty continue passes only if the host requested the game over while both seats were down, and records which seat fell first. The steps that need the owners revived (their actions, clone motions) and the forced full-party Kills are then skipped (skipIf), and the run goes on to the same Continue and 02/15 restore checks.",
  "playerDefaults": true,
  "protect": [],
  "steps": [
@@ -304,7 +304,8 @@
    "as": "owner_downs",
    "clipSeconds": 12,
    "timeoutMs": 240000,
-   "killWhen": "(lambda a, ps: len(ps) == 2 and all(((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5 >= 600 for p in ps))(pos('B_EX110', 0), [(x['position']['x'], x['position']['z']) for x in actors(0) if int(x['address'],16) in (int(peek('0x2A105D0','u64',0),16), int(saved['probe_before'][0]['clone'],16))])"
+   "killWhen": "(lambda a, ps: len(ps) == 2 and all(((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5 >= 600 for p in ps))(pos('B_EX110', 0), [(x['position']['x'], x['position']['z']) for x in actors(0) if int(x['address'],16) in (int(peek('0x2A105D0','u64',0),16), int(saved['probe_before'][0]['clone'],16))])",
+   "fullParty": "continue"
   },
   {
    "do": "clip_wait"
@@ -312,12 +313,14 @@
   {
    "do": "save",
    "as": "downs_after",
-   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]"
+   "expr": "[{'btlf': len([a for a in actors(0) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(0) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(0) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(0) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(0) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',0), 'location': location(0)}, {'btlf': len([a for a in actors(1) if a['name'] == 'P_EX110_BTLF']), 'roxas': len([a for a in actors(1) if a['name'] == 'P_EX110']), 'sora': len([a for a in actors(1) if a['name'] == 'P_EX100']), 'w10': len([a for a in actors(1) if a['name'] == 'W_EX010_10']), 'w20': len([a for a in actors(1) if a['name'] == 'W_EX010_20']), 'member0': peek('0x2A25300','u16',1), 'location': location(1)}]",
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "assert",
    "expr": "all(saved['owner_downs']['owners'][k] for k in ('0', '1')) and all(saved['downs_after'][i]['btlf'] == 1 for i in (0, 1))",
-   "message": "each owner must be downed once and revived by the other seat, keeping both seats' bodies"
+   "message": "each owner must be downed once and revived by the other seat, keeping both seats' bodies",
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "clip",
@@ -325,7 +328,8 @@
    "seconds": 6,
    "fps": 30,
    "background": true,
-   "name": "owner0_0"
+   "name": "owner0_0",
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "clip",
@@ -333,7 +337,8 @@
    "seconds": 6,
    "fps": 30,
    "background": true,
-   "name": "owner0_1"
+   "name": "owner0_1",
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "kh2ctl",
@@ -344,11 +349,13 @@
     "1.0",
     "--duration-ms",
     "900"
-   ]
+   ],
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "wait",
-   "ms": 200
+   "ms": 200,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "kh2ctl",
@@ -359,11 +366,13 @@
     "circle",
     "--duration-ms",
     "120"
-   ]
+   ],
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "wait",
-   "ms": 700
+   "ms": 700,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "kh2ctl",
@@ -374,11 +383,13 @@
     "cross",
     "--duration-ms",
     "120"
-   ]
+   ],
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "wait",
-   "ms": 350
+   "ms": 350,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "kh2ctl",
@@ -389,11 +400,13 @@
     "cross",
     "--duration-ms",
     "120"
-   ]
+   ],
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "wait",
-   "ms": 350
+   "ms": 350,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "kh2ctl",
@@ -404,14 +417,17 @@
     "cross",
     "--duration-ms",
     "120"
-   ]
+   ],
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "wait",
-   "ms": 1200
+   "ms": 1200,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
-   "do": "clip_wait"
+   "do": "clip_wait",
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "clip",
@@ -419,7 +435,8 @@
    "seconds": 6,
    "fps": 30,
    "background": true,
-   "name": "owner1_0"
+   "name": "owner1_0",
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "clip",
@@ -427,7 +444,8 @@
    "seconds": 6,
    "fps": 30,
    "background": true,
-   "name": "owner1_1"
+   "name": "owner1_1",
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "kh2ctl",
@@ -438,11 +456,13 @@
     "1.0",
     "--duration-ms",
     "900"
-   ]
+   ],
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "wait",
-   "ms": 200
+   "ms": 200,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "kh2ctl",
@@ -453,11 +473,13 @@
     "circle",
     "--duration-ms",
     "120"
-   ]
+   ],
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "wait",
-   "ms": 700
+   "ms": 700,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "kh2ctl",
@@ -468,11 +490,13 @@
     "cross",
     "--duration-ms",
     "120"
-   ]
+   ],
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "wait",
-   "ms": 350
+   "ms": 350,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "kh2ctl",
@@ -483,11 +507,13 @@
     "cross",
     "--duration-ms",
     "120"
-   ]
+   ],
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "wait",
-   "ms": 350
+   "ms": 350,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "kh2ctl",
@@ -498,24 +524,29 @@
     "cross",
     "--duration-ms",
     "120"
-   ]
+   ],
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "wait",
-   "ms": 1200
+   "ms": 1200,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
-   "do": "clip_wait"
+   "do": "clip_wait",
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "save",
    "as": "clone_motions",
-   "expr": "[sorted({m['b'] for m in log_matches(r'\\[puppet 0\\] frame \\d+ motion \\d+ -> (?P<b>\\d+) [^\\n]*actor=0*(?P<a>[0-9A-F]+)', 0) if int(m['a'],16) == int(saved['probe_before'][0]['clone'],16)}), sorted({m['b'] for m in log_matches(r'\\[puppet 0\\] frame \\d+ motion \\d+ -> (?P<b>\\d+) [^\\n]*actor=0*(?P<a>[0-9A-F]+)', 1) if int(m['a'],16) == int(saved['probe_before'][1]['clone'],16)})]"
+   "expr": "[sorted({m['b'] for m in log_matches(r'\\[puppet 0\\] frame \\d+ motion \\d+ -> (?P<b>\\d+) [^\\n]*actor=0*(?P<a>[0-9A-F]+)', 0) if int(m['a'],16) == int(saved['probe_before'][0]['clone'],16)}), sorted({m['b'] for m in log_matches(r'\\[puppet 0\\] frame \\d+ motion \\d+ -> (?P<b>\\d+) [^\\n]*actor=0*(?P<a>[0-9A-F]+)', 1) if int(m['a'],16) == int(saved['probe_before'][1]['clone'],16)})]",
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "assert",
    "expr": "all(len(saved['clone_motions'][i]) >= 3 for i in (0, 1))",
-   "message": "each seat's clone must play its owner's motions (puppet receipts)"
+   "message": "each seat's clone must play its owner's motions (puppet receipts)",
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "save",
@@ -525,12 +556,14 @@
   {
    "do": "downed_kill",
    "instance": 1,
-   "require": false
+   "require": false,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "downed_kill",
    "instance": 0,
-   "require": false
+   "require": false,
+   "skipIf": "saved['owner_downs']['fullParty'] is not None"
   },
   {
    "do": "wait_until",

@@ -1912,10 +1912,12 @@ def step_revive_guard(ctx: Context, step: dict) -> dict:
 
 
 DOWNED_DOWN, DOWNED_REVIVED, DOWNED_FULL = "[downed] gate intercept", "[downed] revive returned", "[downed] full party down"
+GAME_OVER_REQUEST, GAME_OVER_FAULT = "path=game-over-request", "[downed] full party down: game-over request FAULT"
+DOWN_TICK = re.compile(r"\[downed\] gate intercept [^\n]*?tickMs=(\d+)")
 
 
 def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guard=None, _clip=None,
-                     _now=None, _sleep=None, _when=None) -> dict:
+                     _now=None, _sleep=None, _when=None, _tick=None) -> dict:
     """VUH-2911: one logical down and partner revive per owner, tolerant of natural downs (lead decision on
     run vuh2911-axel-01, where Axel downed the host before the fixed forced down and both seats went down).
     Two ReviveGuards run, one per direction: each keeps its seat away from enemies and revives the other seat
@@ -1928,8 +1930,14 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     before reviving) is an expression that must also be true before each forced Kill; an expression that cannot be
     evaluated yet (a load between samples) is false. Its kh2ctl reads are capped to the step's remaining
     `timeoutMs` (rpc_deadline), and the deadline is checked again before a Kill. It only defers a Kill: natural
-    downs count as before, and `timeoutMs` still bounds the step. Saved `as` (`owner_downs`): per owner {kind, seat}, the downing events, both
-    guards' events and how many polls `killWhen` deferred a due Kill."""
+    downs count as before, and `timeoutMs` still bounds the step. `fullParty: "continue"` (VUH-2931, the Sora host's
+    natural full-party down in runs vuh2931-sora-01/02) makes that one path a pass instead of a harness failure: once
+    both seats are down, the host must log its full-party line by the game-over request (`path=game-over-request`,
+    no request FAULT) within `fullPartyMs` (10000) while both are still down, and the step ends there with the owners
+    it has. A full-party line while any seat stands is a PRODUCT FAILURE (VUH-2931 acceptance 3); no request in the
+    bound fails too. Saved `as` (`owner_downs`): per owner {kind, seat}, the downing events, both guards' events, how
+    many polls `killWhen` deferred a due Kill, and `fullParty` (None, or which seat went down first by each seat's
+    own down line `tickMs`, the order, each seat's down kind and when the request came)."""
     owners = [int(o) for o in step.get("owners", [1, 0])]
     name = step.get("as", "owner_downs")
 
@@ -1945,7 +1953,14 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
                 step_clip(ctx, {"instance": index, "seconds": int(step.get("clipSeconds", 12)), "fps": 30,
                                 "background": True, "name": label})
 
-    count = _count or log_count
+    def last_tick(index: int) -> int | None:
+        try:
+            ticks = DOWN_TICK.findall((LOGS / f"kh2coop_inject_{ctx.inst(index).pid}.log").read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            return None
+        return int(ticks[-1]) if ticks else None
+
+    count, tick = _count or log_count, _tick or last_tick
     kill = _kill or (lambda index: step_downed_kill(ctx, {"instance": index, "require": False})["result"])
     guard = _guard or (lambda downed, reviver: ReviveGuard(ctx, downed, reviver, step.get("holdMs")))
     clip = _clip or film
@@ -1962,7 +1977,10 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     ready = _when or (evaluate_when if when_expr else (lambda: True))
     deferred = 0
     base = {i: (count(i, DOWNED_DOWN), count(i, DOWNED_REVIVED)) for i in (0, 1)}
-    full = count(0, DOWNED_FULL)
+    full, request, fault = count(0, DOWNED_FULL), count(0, GAME_OVER_REQUEST), count(0, GAME_OVER_FAULT)
+    continue_full, full_bound = step.get("fullParty") == "continue", step.get("fullPartyMs", 10000) / 1000
+    both_since, full_party = None, None
+    down_at: dict[int, float] = {}           # seat -> when its latest down was seen
     start, deadline = now(), now() + step.get("timeoutMs", 240000) / 1000
     owed = {o: None for o in owners}         # owner -> {"kind", "seat"} once revived
     forced: dict[int, int] = {}              # seat -> its down count when this step's Kill landed
@@ -1974,6 +1992,8 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     try:
         while any(v is None for v in owed.values()):
             ctx.check_all()
+            # The host's full-party lines first: a seat's down or revive read after them is at least as new.
+            full_now, request_now, fault_now = count(0, DOWNED_FULL), count(0, GAME_OVER_REQUEST), count(0, GAME_OVER_FAULT)
             downs = {i: count(i, DOWNED_DOWN) - base[i][0] for i in (0, 1)}
             ups = {i: count(i, DOWNED_REVIVED) - base[i][1] for i in (0, 1)}
             for i in (0, 1):
@@ -1982,13 +2002,40 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
                     kind = "forced" if forced.get(i) == seen[i] else "natural"
                     kinds[i].append(kind)
                     events.append({"seat": i, "kind": kind, "down": seen[i], "atS": round(now() - start, 1)})
+                    down_at[i] = now() - start
                     clip(f"{name}_{i}{kind}{seen[i]}")
                 if i in owed and owed[i] is None and ups[i] >= 1:
                     owed[i] = {"kind": kinds[i][0] if kinds[i] else "natural", "seat": i}
                     events.append({"seat": i, "revived": ups[i], "atS": round(now() - start, 1)})
                     last_revive = now()
             down_now = [i for i in (0, 1) if downs[i] > ups[i]]
-            if len(down_now) == 2 or count(0, DOWNED_FULL) > full:
+            if continue_full and full_now > full:
+                standing = [i for i in (0, 1) if i not in down_now]
+                if standing:
+                    raise StepFailed(f"owner_downs: PRODUCT FAILURE (VUH-2931 acceptance 3), the host took a full-party "
+                                     f"down while seat(s) {standing} stood (events {events})")
+                if request_now <= request or fault_now > fault:
+                    raise StepFailed(f"owner_downs: the full-party down was not a game-over request "
+                                     f"(requests {request_now - request}, faults {fault_now - fault}; events {events})")
+                ticks = {i: tick(i) for i in (0, 1)}
+                by = "tickMs" if all(v is not None for v in ticks.values()) else "observed"
+                order = sorted((0, 1), key=lambda i: (ticks[i], i) if by == "tickMs" else (down_at[i], i))
+                full_party = {"first": order[0], "order": order, "by": by, "tickMs": {str(i): ticks[i] for i in (0, 1)},
+                              "kinds": {str(i): kinds[i][-1] for i in (0, 1)},
+                              "downAtS": {str(i): round(down_at[i], 1) for i in (0, 1)},
+                              "requestAtS": round(now() - start, 1), "path": "game-over-request"}
+                events.append({"fullParty": full_party})
+                break
+            if continue_full and len(down_now) == 2:
+                if both_since is None:
+                    both_since = now()
+                elif now() - both_since >= full_bound:
+                    raise StepFailed(f"owner_downs: both seats down and no game-over request within "
+                                     f"{step.get('fullPartyMs', 10000)} ms (events {events})")
+                sleep(0.25)
+                continue
+            both_since = None
+            if not continue_full and (len(down_now) == 2 or full_now > full):
                 raise StepFailed(f"owner_downs: HARNESS FAILURE, both seats down (events {events}); not a form result")
             open_forced = [s for s in forced if owed.get(s) is None]
             pending = [o for o in owners if owed[o] is None and o not in forced]
@@ -2013,7 +2060,7 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
         for g in guards:
             g.thread.join(timeout=10)
         ctx.saved[name] = {"owners": {str(o): v for o, v in owed.items()}, "events": events,
-                           "guards": [g.events for g in guards], "killDeferred": deferred}
+                           "guards": [g.events for g in guards], "killDeferred": deferred, "fullParty": full_party}
     return ctx.saved[name]
 
 
@@ -5840,7 +5887,18 @@ def run_scenario(path: Path, attempt: int) -> dict:
             try:
                 if kind not in STEPS:
                     raise StepFailed(f"unknown step kind {kind!r}")
-                entry["result"] = STEPS[kind](ctx, step)
+                # `skipIf` (VUH-2931): a step whose expression is true when it is reached is skipped, not run;
+                # an expression that cannot be evaluated fails the step.
+                skip = False
+                if "skipIf" in step:
+                    try:
+                        skip = bool(ctx.eval(step["skipIf"]))
+                    except Exception as e:  # noqa: BLE001 - any evaluation error is this step's failure
+                        raise StepFailed(f"skipIf: {type(e).__name__}: {e}") from e
+                if skip:
+                    entry.update(status="skipped", skipIf=step["skipIf"])
+                else:
+                    entry["result"] = STEPS[kind](ctx, step)
                 ctx.check_all()
             except StepFailed as e:
                 entry.update(status="fail", error=str(e))
@@ -5856,7 +5914,7 @@ def run_scenario(path: Path, attempt: int) -> dict:
             finally:
                 entry["seconds"] = round(time.monotonic() - s0, 2)
                 report["steps"].append(entry)
-            if entry["status"] != "pass":
+            if entry["status"] not in ("pass", "skipped"):
                 if not segments:
                     break
                 skipping = True
@@ -6053,6 +6111,15 @@ def validate_scenario(scenario: dict) -> None:
             compile(step["until"], f"<{prefix} fight until>", "eval")
         if kind == "owner_downs" and "killWhen" in step:
             compile(step["killWhen"], f"<{prefix} owner_downs killWhen>", "eval")
+        if kind == "owner_downs" and step.get("fullParty", "continue") != "continue":
+            raise ValueError(f'{prefix}: owner_downs fullParty may only be "continue"')
+        if kind == "owner_downs" and "fullPartyMs" in step and \
+                (type(step["fullPartyMs"]) is not int or step["fullPartyMs"] <= 0):
+            raise ValueError(f"{prefix}: owner_downs fullPartyMs must be a positive integer")
+        if "skipIf" in step:
+            if kind == "checkpoint" or not isinstance(step["skipIf"], str):
+                raise ValueError(f"{prefix}: skipIf must be an expression string, and never on a checkpoint")
+            compile(step["skipIf"], f"<{prefix} skipIf>", "eval")
         if kind == "protect" and type(step.get("afterPilot", False)) is not bool:
             raise ValueError(f"{prefix}: protect afterPilot must be a boolean")
         if kind == "test_enemy_hp":

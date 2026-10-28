@@ -17,6 +17,7 @@ RUN = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(RUN)
 
 DOWN, UP, FULL = RUN.DOWNED_DOWN, RUN.DOWNED_REVIVED, RUN.DOWNED_FULL
+REQUEST, FAULT = RUN.GAME_OVER_REQUEST, RUN.GAME_OVER_FAULT
 
 
 class Rig:
@@ -27,6 +28,13 @@ class Rig:
         self.t, self.counts, self.script = 0.0, {(i, n): 0 for i in (0, 1) for n in (DOWN, UP, FULL)}, dict(script or {})
         self.revive, self.kill_result, self.kills, self.clips, self.guards = revive, kill_result, [], [], []
         self.pending = []  # (time, seat) revives
+        self.ticks = {0: None, 1: None}  # each seat's latest down line tickMs
+
+    def game_over(self, request=True, fault=False):
+        """The host's full-party line, by the game-over request unless `request` is false."""
+        self.counts[(0, FULL)] += 1
+        self.counts[(0, REQUEST)] = self.counts.get((0, REQUEST), 0) + int(request)
+        self.counts[(0, FAULT)] = self.counts.get((0, FAULT), 0) + int(fault)
 
     def down(self, seat):
         self.counts[(seat, DOWN)] += 1
@@ -37,6 +45,8 @@ class Rig:
 
     def sleep(self, seconds):
         self.t = round(self.t + seconds, 2)
+        if self.t > 1000:  # every bound the step has is far shorter
+            raise AssertionError("owner_downs never ended")
         for at in sorted(k for k in self.script if k <= self.t):
             self.script.pop(at)(self)
         for at, seat in list(self.pending):
@@ -62,9 +72,9 @@ class Rig:
     def run(self, evaluate=None, **step):
         ctx = SimpleNamespace(check_all=lambda: None, saved={}, sleep=self.sleep, eval=evaluate or (lambda text: True))
         try:
-            return RUN.step_owner_downs(ctx, {"owners": [1, 0], **step}, _count=lambda i, n: self.counts[(i, n)],
+            return RUN.step_owner_downs(ctx, {"owners": [1, 0], **step}, _count=lambda i, n: self.counts.get((i, n), 0),
                                         _kill=self.kill, _guard=self.guard, _clip=self.clips.append,
-                                        _now=lambda: self.t, _sleep=self.sleep), ctx, None
+                                        _now=lambda: self.t, _sleep=self.sleep, _tick=self.ticks.get), ctx, None
         except RUN.StepFailed as error:
             return None, ctx, error
 
@@ -213,6 +223,93 @@ class OwnerDownsTest(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(len(rig.kills), 2)
         self.assertEqual(result["killDeferred"], 0)
+
+    # VUH-2931 (runs vuh2931-sora-01/02, lead #35): the Sora host's natural full-party down may continue to Continue.
+    @staticmethod
+    def both_down_then_game_over(friend_tick=1000, host_tick=2500, at=4.0, **game_over):
+        """The forced Kill downs the friend at 1.5 s; Axel downs the host at 3.0 s before the slow revive; the host
+        takes the game over at `at`."""
+        def host_down(r):
+            r.down(0)
+            r.ticks.update({0: host_tick, 1: friend_tick})
+        return Rig(revive=30.0, script={3.0: host_down, at: lambda r: r.game_over(**game_over)})
+
+    def test_full_party_continue_passes_on_a_game_over_request_with_both_down(self):
+        rig = self.both_down_then_game_over()
+        result, ctx, error = rig.run(fullParty="continue")
+        self.assertIsNone(error)
+        party = result["fullParty"]
+        self.assertEqual((party["first"], party["order"], party["by"]), (1, [1, 0], "tickMs"))
+        self.assertEqual(party["kinds"], {"0": "natural", "1": "forced"})
+        self.assertEqual(party["path"], "game-over-request")
+        self.assertGreaterEqual(party["requestAtS"], 4.0)
+        self.assertEqual(result["owners"], {"1": None, "0": None})  # nobody was revived: the skipIf steps key on this
+        self.assertEqual([seat for _, seat in rig.kills], [1])        # no Kill while a seat is down
+        self.assertIs(ctx.saved["owner_downs"], result)
+
+    def test_the_first_seat_down_is_read_from_the_down_lines(self):
+        rig = self.both_down_then_game_over(friend_tick=9000, host_tick=2500)  # the host's line is older
+        result, _, error = rig.run(fullParty="continue")
+        self.assertIsNone(error)
+        self.assertEqual((result["fullParty"]["first"], result["fullParty"]["order"]), (0, [0, 1]))
+
+    def test_without_both_down_lines_the_order_is_the_observed_one(self):
+        rig = self.both_down_then_game_over(friend_tick=None)
+        result, _, error = rig.run(fullParty="continue")
+        self.assertIsNone(error)
+        self.assertEqual((result["fullParty"]["by"], result["fullParty"]["first"]), ("observed", 1))
+
+    def test_a_full_party_down_while_a_seat_stands_is_a_product_failure(self):
+        for name, script in (("nobody down", {0.5: lambda r: r.game_over()}),
+                             ("the friend down", {2.0: lambda r: r.game_over()})):
+            with self.subTest(name):
+                rig = Rig(revive=30.0, script=script)
+                result, ctx, error = rig.run(fullParty="continue")
+                self.assertIsNone(result)
+                self.assertIn("PRODUCT FAILURE (VUH-2931 acceptance 3)", str(error))
+                self.assertIsNone(ctx.saved["owner_downs"]["fullParty"])
+
+    def test_a_full_party_down_that_is_not_the_game_over_request_fails(self):
+        for game_over in ({"request": False}, {"fault": True}):
+            with self.subTest(**game_over):
+                _, _, error = self.both_down_then_game_over(**game_over).run(fullParty="continue")
+                self.assertIn("was not a game-over request", str(error))
+
+    def test_both_down_with_no_game_over_request_fails_within_the_bound(self):
+        rig = self.both_down_then_game_over(at=1e9)
+        _, ctx, error = rig.run(fullParty="continue", fullPartyMs=5000)
+        self.assertIn("both seats down and no game-over request within 5000 ms", str(error))
+        self.assertLessEqual(rig.t, 3.0 + 5.0 + 0.5)
+        self.assertIsNone(ctx.saved["owner_downs"]["fullParty"])
+
+    def test_a_seat_revived_before_the_game_over_resets_the_bound(self):
+        # Both down at 3.0 with fullPartyMs 2000; the friend is revived at 4.5, so the bound never expires.
+        def revive_friend(r):
+            r.counts[(1, UP)] += 1
+            r.pending = [(at, s) for at, s in r.pending if s != 1]
+        rig = Rig(revive=30.0, script={3.0: lambda r: r.down(0), 4.5: revive_friend, 6.0: lambda r: r.game_over()})
+        _, _, error = rig.run(fullParty="continue", fullPartyMs=2000)
+        self.assertIn("PRODUCT FAILURE", str(error))  # and a game over with the friend standing is acceptance 3
+
+    def test_the_validator_checks_full_party_and_skip_if(self):
+        boot = {"do": "boot"}
+        downs = {"do": "owner_downs", "owners": [1, 0]}
+        RUN.validate_scenario({"steps": [boot, {**downs, "fullParty": "continue", "fullPartyMs": 10000},
+                                         {"do": "wait", "ms": 1, "skipIf": "saved['owner_downs']['fullParty'] is not None"}]})
+        for bad, message in (({**downs, "fullParty": "pass"}, 'fullParty may only be "continue"'),
+                             ({**downs, "fullPartyMs": 0}, "fullPartyMs must be a positive integer"),
+                             ({"do": "wait", "ms": 1, "skipIf": "saved["}, "skipIf"),
+                             ({"do": "checkpoint", "name": "A", "skipIf": "True"}, "never on a checkpoint")):
+            with self.subTest(message), self.assertRaisesRegex((ValueError, SyntaxError), message):
+                RUN.validate_scenario({"steps": [boot, bad]})
+        for name in ("net_prologue_mansion_axel_form", "net_prologue_mansion_axel_form_sora_host",
+                     "net_prologue_mansion_axel_form_sora_friend"):
+            RUN.validate_scenario(RUN.json.loads((ROOT / f"tools/scenario/scenarios/{name}.json").read_text(encoding="utf-8")))
+
+    def test_without_the_option_a_game_over_request_is_still_a_harness_failure(self):
+        result, ctx, error = self.both_down_then_game_over().run()
+        self.assertIn("HARNESS FAILURE, both seats down", str(error))
+        self.assertIsNone(ctx.saved["owner_downs"]["fullParty"])
 
     def test_other_kill_results_fail(self):
         rig = Rig(kill_result="InEvent")
