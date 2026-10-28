@@ -62,7 +62,15 @@ With `KH2COOP_TRACE_HITS=1`, each seat also logs `[hitwitness] seq=<hittrace seq
 motion=<before>-><after> ignoreHit=<before>-><after> reads=<mask>` four frames after a boss's applied hit lowered its
 own canonical player's HP (reads only, 64 lines). A native hit leaves the reaction motion and the ignore-hit timer
 (`+0xD70`) running; an HP-only write leaves neither. `reads` has bits 1, 2, 4 and 8 for the motion and timer reads
-before the hit and then; a failed read leaves its field at 0xFFFFFFFF or -1.0, and the ledger requires all four. `tools/scenario/boss_target_ledger.py` joins it to the hit's scope, the friend's driven mirror
+before the hit and then; a failed read leaves its field at 0xFFFFFFFF or -1.0, and the ledger requires all four.
+The line then adds the victim's reactions until it is logged (VUH-2912, the same trace setting): `reactions=<n>
+refused=<n> reaction=<kind> reactRequest=<id> reactFrame=<f> reactHooked=<0|1>`. They come from a read-only hook on
+`0x3D6FC0`, which applies an actor's pending reaction request (it clears `actor+0x120` bit 25, which the hit entry
+`0x3D61D0` sets) and returns the reaction table entry, or 0 when it applied none (the actor refused it, or the
+entry's kind is 0); `refused` counts those with a request (the actor update `0x3A89A0` calls it every update, with
+request id 0 when there is none). An HP-only write never reaches it. `reaction` is the first applied entry's kind (`+2`), -1 with none; `reactHooked=0` means the hook
+is not installed (its bytes didn't match), so no count can be read as absent. The ledger does not use them yet.
+`tools/scenario/boss_target_ledger.py` joins the line to the hit's scope, the friend's driven mirror
 hit and the boss-target choice. `net_prologue_mansion_axel_hp.json` is the live check (docs/SCENARIOS.md).
 
 ### Dusks hit the friend natively (VUH-2466)

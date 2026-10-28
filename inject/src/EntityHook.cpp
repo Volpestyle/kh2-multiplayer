@@ -1022,6 +1022,7 @@ static uintptr_t ApplyHitDamageBody(void* victim, void* hit, nativehittrace::Hit
 // sequence of that ApplyHitDamage scope, so a fixture joins it to the scope and to the mirror's hit line. `reads`
 // has one bit per successful read (motion and timer before the hit, then again), so a failed read never looks like
 // a reaction; hitTickMs (GetTickCount64, one clock for every process on the PC) orders the hit against other seats.
+// The witness also counts the victim's reactions that 0x3D6FC0 applied or refused until it is logged (below).
 enum : uint32_t { kReadMotionBefore = 1, kReadIgnoreBefore = 2, kReadMotionAfter = 4, kReadIgnoreAfter = 8 };
 struct BossHitWitness {
     std::uint64_t seq, tickMs;
@@ -1029,6 +1030,8 @@ struct BossHitWitness {
     uint32_t frame, atkpId, motion, reads;
     float ignoreHit;
     int32_t hpBefore, hpAfter;
+    uint32_t reactions, refused, reactFrame, reactRequest;
+    int32_t reactKind;
 };
 static constexpr uintptr_t OFF_IGNORE_HIT = 0xD70;
 static constexpr uint32_t kWitnessFrames = 4;
@@ -1054,6 +1057,39 @@ static void NoteBossHitWitness(std::uint64_t seq, uintptr_t victim, uintptr_t re
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
+// VUH-2912 witness: 0x3D6FC0(actor, request) applies an actor's pending reaction request (flinch, knockback,
+// blow-away). It returns the reaction table entry it applied, or 0 when it applied none (the actor refused it, or
+// the entry's kind is 0), and on each applied path clears actor+0x120 bit 25, which the hit entry 0x3D61D0 sets; an
+// HP-only write never reaches it. The actor update 0x3A89A0 calls it every update with the actor's request record,
+// so a call with request id 0 is no request and is not counted. Installed only with the hit trace on, and it reads
+// only: while a witness is pending, each call on its victim with a request counts as applied (the first one's
+// request id, the entry's kind at +2 and the frame) or refused.
+using PFN_ApplyReaction = uintptr_t(__fastcall*)(void* actor, void* request);
+static constexpr uint64_t RVA_APPLY_REACTION = 0x3D6FC0;
+static constexpr uint8_t kApplyReactionBytes[] = {
+    0x48, 0x89, 0x5c, 0x24, 0x10, 0x57, 0x48, 0x83, 0xec, 0x30, 0x81, 0xa1, 0x24, 0x01, 0x00, 0x00, 0xff, 0xff, 0xfb, 0xff};
+static PFN_ApplyReaction g_origApplyReaction = nullptr;
+
+static uintptr_t __fastcall HookedApplyReaction(void* actor, void* request) {
+    uint16_t id = UINT16_MAX;  // read before the call, which may clear the request
+    const bool idRead = ReadHitTrace(reinterpret_cast<uintptr_t>(request), id);
+    const uintptr_t entry = g_origApplyReaction(actor, request);
+    if (idRead && id == 0 && !entry) return entry;
+    for (auto& w : g_witnesses) {
+        if (!w.seq || w.victim != reinterpret_cast<uintptr_t>(actor)) continue;
+        if (!entry) {
+            ++w.refused;
+            continue;
+        }
+        if (w.reactions++) continue;
+        int16_t kind = -1;
+        w.reactRequest = idRead ? id : UINT32_MAX;
+        w.reactKind = ReadHitTrace(entry + 2, kind) ? kind : -1;
+        w.reactFrame = g_frameCounter;
+    }
+    return entry;
+}
+
 static void BossHitWitnessTick() noexcept {
     for (auto& w : g_witnesses) {
         if (!w.seq || g_frameCounter - w.frame < kWitnessFrames) continue;
@@ -1069,10 +1105,13 @@ static void BossHitWitnessTick() noexcept {
         if (g_witnessesLogged < kWitnessLogLimit) {
             ++g_witnessesLogged;
             Log("[hitwitness] seq=%llu hitFrame=%u hitTickMs=%llu frame=%u attacker=%llX victim=%llX atkp=%u hp=%d->%d "
-                "motion=%u->%u ignoreHit=%.1f->%.1f reads=%u same=%u", static_cast<unsigned long long>(w.seq), w.frame,
+                "motion=%u->%u ignoreHit=%.1f->%.1f reads=%u same=%u reactions=%u refused=%u reaction=%d "
+                "reactRequest=%u reactFrame=%u reactHooked=%u", static_cast<unsigned long long>(w.seq), w.frame,
                 static_cast<unsigned long long>(w.tickMs), g_frameCounter, static_cast<unsigned long long>(w.attacker),
                 static_cast<unsigned long long>(w.victim), w.atkpId, w.hpBefore, w.hpAfter, w.motion, motion,
-                double(w.ignoreHit), double(ignoreHit), reads, same ? 1u : 0u);
+                double(w.ignoreHit), double(ignoreHit), reads, same ? 1u : 0u, w.reactions, w.refused,
+                w.reactions ? w.reactKind : -1, w.reactions ? w.reactRequest : UINT32_MAX, w.reactFrame,
+                g_origApplyReaction ? 1u : 0u);
         }
         w = {};
     }
@@ -4401,6 +4440,20 @@ bool Initialize(uintptr_t exeBase) {
             g_hitTraceImageSize = nt.OptionalHeader.SizeOfImage;
     }
     nativehittrace::Configure(hitTrace || causalTrace, hitTraceVerified, hitTraceInstalled);
+    if (hitTrace) {  // VUH-2912 witness: reactions, read only
+        if (std::memcmp(reinterpret_cast<const void*>(exeBase + RVA_APPLY_REACTION), kApplyReactionBytes,
+                        sizeof(kApplyReactionBytes)) == 0) {
+            void* target = reinterpret_cast<void*>(exeBase + RVA_APPLY_REACTION);
+            MH_STATUS st = MH_CreateHook(target, reinterpret_cast<void*>(&HookedApplyReaction),
+                                         reinterpret_cast<void**>(&g_origApplyReaction));
+            if (st == MH_OK) st = MH_EnableHook(target);
+            if (st != MH_OK) g_origApplyReaction = nullptr;
+            Log(st == MH_OK ? "  ApplyReaction witness hook installed (0x3D6FC0)"
+                            : "  WARNING: ApplyReaction witness hook failed");
+        } else {
+            Log("  WARNING: ApplyReaction bytes don't match this build; the hit witness logs no reactions");
+        }
+    }
 
     render::Install(exeBase, &Log);
     warp::Install(exeBase, &Log);
