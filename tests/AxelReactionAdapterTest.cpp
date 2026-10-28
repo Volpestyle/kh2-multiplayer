@@ -59,8 +59,11 @@ static std::uint32_t SmOwnHandle(uintptr_t actor) noexcept {
     if(!ReadHitTrace(actor+4,handle) || !handle || SmDecode(handle)!=actor)return 0;
     return handle;
 }
+// As ScriptMirror's: the argument names an object, whose +4 names the actor.
 static uintptr_t SmActorOf(std::uint64_t arg,std::uint32_t& objectId) noexcept {
-    objectId=0;return R::TagOf(arg)==R::kTagAddress?SmDecode(R::BitsOf(arg)):0;
+    objectId=0;std::uint32_t handle=0;
+    const auto object=R::TagOf(arg)==R::kTagAddress?SmDecode(R::BitsOf(arg)):0;
+    return object && ReadHitTrace(object+4,handle)?SmDecode(handle):0;
 }
 static bool scopeOk=true;
 static bool SmOwnerScope(enemysync::DownedScope& out) { out=enemysync::scope;return scopeOk; }
@@ -249,6 +252,14 @@ int main() {
         Put(kFriendActor+4,kFriendHandle);++g_frameCounter;Frame();
         check(g_axel.executor.slot==1 && Player()==kFriendHandle && Act("attach",kAxelHandle,kFriendHandle)==R::AxelAct::Admitted,
               "on recovery the same RC admits its own actor again");
+        // An object that still names the friend's actor while the actor's own identity is unread: the identity decides.
+        constexpr uintptr_t kObject=0x310000;constexpr std::uint32_t kObjectHandle=0x13;
+        handles[kObject]=kObjectHandle;Put(kObject+4,kFriendHandle);memory.erase(kFriendActor+4);
+        check(Act("attach",kAxelHandle,kObjectHandle)==R::AxelAct::Refused &&
+              Act("capture",kAxelHandle,kObjectHandle)==R::AxelAct::Refused,
+              "an argument naming the friend's actor is refused while that actor's identity is unread");
+        Put(kFriendActor+4,kFriendHandle);
+        check(Act("attach",kAxelHandle,kObjectHandle)==R::AxelAct::Admitted,"and admitted once it resolves");
     }
     {
         Setup(1u<<R::kOvertakerGroup);Frame();

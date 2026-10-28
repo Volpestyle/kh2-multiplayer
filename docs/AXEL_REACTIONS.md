@@ -302,11 +302,19 @@ resolving read admits again. So an RC whose executor is lost plays on with Axel 
 or held, and ends on its lease or a confirmed release. The gates sit in `SmAxelAct`, which `SmOwnerAttach` and
 `SmOwnerCapture` call before the native trap; other encounters return before any read.
 
-Static facts this depends on, requested from the PC (VUH-2913, "Static reads for slice D"): that `REACTION_CALLBACK`
-runs `L409`, `L140` and `L531` synchronously inside the native callback call, up to their first wait (their 1/29,
-1/13, 1/79 and 1/148 then act on the executor resolved just before the call); and that 1/18 and 1/101 are the only
-traps that consume the 1/3 result in `rc_run_up`, `rc_clear_light` and `idle_after_rc`. 1/101 only reads. If either
-fails, those traps need pins and the same gate.
+Static facts behind it (Kit's reads, VUH-2913 comment `b034e8cf`):
+- `L140`, `L409` and `L531` run synchronously inside the native callback (`3E1840` runs the trigger's thread once,
+  and none of them halts). Their 1/29, 1/13, 1/79, 1/148 and 1/112 take the player from the callback argument, the
+  executor resolved just before the call.
+- Every 1/3 call in these flows runs later, in Axel's action thread (`obj_act_start` only creates it), and
+  `idle_after_rc` repeats it every frame. The executor binding, held until a confirmed release or the lease, covers
+  them; a binding scoped to the callback would not.
+- The only consumers of the 1/3 result are 1/18 at pcs 10189 and 10252 (gated) and 1/101 `obj_motion_is_capture` at
+  10056 in `idle_after_rc`, which returns the actor's `+0x18C` bit 14 and writes nothing. It is not gated. It reads
+  1/3's result, which is always a live actor. On a lost executor that result is the host's own actor. Axel cannot
+  have captured the host's actor during a friend's RC, because the 1/29 gate refuses it, so the read says "not
+  captured" and `idle_after_rc` ends, as it does after a native capture ends. Any other capture would only keep Axel
+  idling; it acts on nobody. A pin and gate on 1/101 would need its body, which has not been read.
 
 **The friend's view (owner role).** A friend's Overtaker or Clear Light replays on its own player through an
 ordinary ScriptActorOwner role (`SmOwnerBeginAxelRole`), begun at completion before the callback, so the callback's
@@ -351,9 +359,15 @@ not exercised on the Mac.
 - **Not run live.** Native release timing, whether a host puppet runs `AP12`'s trigger 26 (Clear Light for a friend
   needs it on the host's copy of its actor, and its own copy needs it for the friend's native picker), and whether
   the friend's borrowed capture and Axel clone attachment look right are all unverified.
-- **Strike ownership is not claimed.** The friend's own player plays the borrowed capture, so its own hits would go
-  through its ordinary claims, and the host's copy's hits are zeroed (VUH-2910). Whether the RC's damage comes from
-  the player's capture motion or from Axel's script is a static read still pending.
+- **Strike ownership is claimed for none of them.**
+  - Burst Frontier's damage is the captured player's own weapon attacks: `AP10`'s weapon children (`0011`, `0141`)
+    carry trigger 10, atk 1262/1263, group 4, frames 47–73 (Kit, `b034e8cf`). On the host the friend's copy runs
+    them, and its hits are zeroed (VUH-2910). Whether the friend's own player plays them through the hook role's
+    replay, with its weapon's `+0x6C8` bit 0 set, so that they become its ordinary claims, is unverified.
+  - For Overtaker and Clear Light no damage source was found in the captures, Axel's RC motions or the RC script.
+- **Clear Light for a friend.** The host's copy of the friend's actor ticks native range triggers once Axel's 1/29
+  binds `AP12` on it, so trigger 26 sets its `+0x18C` bit 21 and `+0x638` (Kit, `b034e8cf`). Bit 21 is a level
+  flag cleared every tick, and the order of that tick against the host's chain read is unproven.
 - **Cameras still play on the host.** A friend's Overtaker or Clear Light runs `camera_start_global`, Clear Light's
   white-out and `camera_reset`, and Burst's `camera_watch` on the host's screen, and the friend sees none of them.
   Forwarding them needs the host to skip them and send op 5. That follows in its own change, once the trap bodies
