@@ -5,7 +5,8 @@ round longer than its film, and the ledgers' judged windows. No game.
 
     python -B -m unittest discover -s tests -p test_axel_hp_fixture.py -v
 
-AXEL_HP_FIXTURE names another generated JSON (for example the f31e14b one) to run these checks against.
+AXEL_HP_FIXTURE names another generated JSON (for example the f31e14b one) to run these checks against, and
+AXEL_HP_SPLITS (comma-separated, default b1_host,b1_inter,b2) the split fixtures the split checks read.
 """
 import json
 import os
@@ -53,6 +54,22 @@ def evaluate(text, logs=None, saved=None, actors=None, positions=None, peeks=Non
 
 def roxas(address, x, hp=22):
     return {"address": address, "name": "P_EX110_BTLF", "hp": hp, "position": {"x": x, "z": 0}}
+
+
+def assert_background_films(test, steps):
+    """Every filmed fight films in the background, and a clip_wait collects it before the next still, filmed fight,
+    clip or owner_downs, and before the run ends."""
+    pending = False
+    for i, s in enumerate(steps):
+        if s["do"] == "fight" and s.get("clips"):
+            test.assertTrue(all(c.get("background") is True for c in s["clips"]), (i, s.get("as")))
+            test.assertFalse(pending, (i, s.get("as")))
+            pending = True
+        elif s["do"] in ("capture", "owner_downs", "clip"):
+            test.assertFalse(pending, (i, s["do"], s.get("name")))
+        elif s["do"] == "clip_wait":
+            pending = False
+    test.assertFalse(pending, "a run must collect its last fight's clips")
 
 
 class AxelHpFixtureTest(unittest.TestCase):
@@ -205,6 +222,22 @@ class AxelHpFixtureTest(unittest.TestCase):
             self.assertTrue(all(c["seconds"] >= fight["seconds"] for c in fight["clips"]), name)
             self.assertIn("sample", fight)  # positions and Axel's motion, for the direct-aim measurement
 
+    # vuh2912-hp-06: the fight step held the round open ~70 s past its milestone for its clips to encode, and Axel
+    # downed both idle seats inside the window. Every fight films in the background, and a clip_wait collects those
+    # clips before any still, any later filmed fight or owner_downs (which films too).
+    def test_fights_film_in_the_background_and_collect_before_the_next_film_or_still(self):
+        assert_background_films(self, STEPS)
+
+    # B1-inter opens interleaved right after the take-over: both seats must stand at its window, as at a round's.
+    def test_interleaved_opens_with_both_seats_standing(self):
+        check = STEPS[index("m_interleaved0") - 1]
+        self.assertEqual(check["message"], "SETUP FAILURE (window), not an HP result: interleaved needs both seats standing")
+        self.assertTrue(evaluate(check["expr"], {0: [], 1: []}))
+        for downed in (0, 1):
+            self.assertFalse(evaluate(check["expr"], {downed: ["[downed] gate intercept mode=4 logical=1"]}), downed)
+        revived = ["[downed] gate intercept mode=4 logical=1", "[downed] revive returned hp=5/22"]
+        self.assertTrue(evaluate(check["expr"], {0: revived}))
+
     def test_the_reviver_walks_away_from_axel(self):
         for name, fighter, reviver in ROUNDS:
             walk = step(f"{name}_walk_away")
@@ -261,13 +294,14 @@ class AxelHpFixtureTest(unittest.TestCase):
 
 SCENARIOS = ROOT / "tools/scenario/scenarios"
 SPLIT = {k: json.loads((SCENARIOS / f"net_prologue_mansion_axel_hp_{k}.json").read_text(encoding="utf-8"))["steps"]
-         for k in ("b1", "b2")}
+         for k in os.environ.get("AXEL_HP_SPLITS", "b1_host,b1_inter,b2").split(",")}
 FULL = json.loads((SCENARIOS / "net_prologue_mansion_axel_hp.json").read_text(encoding="utf-8"))["steps"]
+SINGLE = {"b1_host": "host_target", "b1_inter": "interleaved"}  # lead #56: one judged round per run
 
 
 class AxelHpSplitTest(unittest.TestCase):
-    """Lead #37/#49: B1 is the host round plus interleaved, B2 the downs, each judged alone. Every other step is the
-    full fixture's own, unchanged."""
+    """Lead #37/#49/#56: B1-host is the host round, B1-inter interleaved, B2 the downs, each judged alone. Every other
+    step is the full fixture's own, unchanged."""
 
     @staticmethod
     def named(steps, name):
@@ -275,16 +309,40 @@ class AxelHpSplitTest(unittest.TestCase):
         assert len(found) == 1, (name, len(found))
         return found[0]
 
-    def test_b1_is_the_host_round_and_interleaved_judged_by_both_ledgers(self):
-        b1 = SPLIT["b1"]
-        self.assertFalse(any(s["do"] == "owner_downs" or str(s.get("as", "")).startswith(("friend_target", "m_friend", "m_downs"))
-                             for s in b1))
-        ledger = self.named(b1, "ledger")
-        self.assertEqual(ledger["window"], ["m_host_target0", "m_interleaved1"])
-        self.assertEqual(ledger["phases"], [p for p in self.named(FULL, "ledger")["phases"] if p["name"] != "friend_target"])
-        targets = self.named(b1, "targets")
-        self.assertEqual(targets["rounds"], [r for r in self.named(FULL, "targets")["rounds"] if r["name"] == "host_target"])
-        self.assertNotIn("downs", targets)
+    def test_each_single_round_split_is_that_round_alone_judged_by_both_ledgers(self):
+        for key, round_ in SINGLE.items():
+            with self.subTest(key):
+                steps = SPLIT[key]
+                others = {"host_target", "interleaved", "friend_target"} - {round_}
+                self.assertFalse(any(s["do"] == "owner_downs" or str(s.get("as", "")).startswith(
+                    tuple(f"{p}{o}" for o in (*others, "downs") for p in ("", "m_"))) for s in steps), key)
+                self.assertEqual(sum(s["do"] == "fight" and s.get("as") == round_ for s in steps), 1)
+                ledger = self.named(steps, "ledger")
+                self.assertEqual(ledger["window"], [f"m_{round_}0", f"m_{round_}1"])
+                self.assertEqual(ledger["phases"], [p for p in self.named(FULL, "ledger")["phases"] if p["name"] == round_])
+                targets = self.named(steps, "targets")
+                self.assertEqual(targets["rounds"], [r for r in self.named(FULL, "targets")["rounds"] if r["name"] == round_])
+                self.assertNotIn("downs", targets)
+
+    # Lead #56 (vuh2912-hp-06): the round's ledgers run right after it, with no revive wait between, and nothing after
+    # the verdict can fail on a later party down or game over.
+    def test_each_single_round_split_judges_right_after_its_window(self):
+        for key, round_ in SINGLE.items():
+            with self.subTest(key):
+                steps = SPLIT[key]
+                at = lambda name: steps.index(self.named(steps, name))  # noqa: E731
+                end, verdict = at(f"m_{round_}1"), at("verdict")
+                self.assertTrue(end < at("boss_settled") < at("ledger") < at("targets") < verdict, key)
+                between = steps[end + 1:verdict]
+                self.assertFalse([s for s in between if s["do"] in ("wait_until", "clip_wait", "capture", "revive_guard")
+                                  or "revive returned" in json.dumps(s)], key)
+                self.assertEqual([s["do"] for s in between],
+                                 ["assert"] * (round_ != "interleaved") + ["wait", "save", "hp_ledger", "assert", "assert",
+                                                                           "assert", "target_ledger", "assert"])
+                tail = steps[verdict + 1:]
+                self.assertTrue(tail and all(s["do"] in ("revive_guard", "clip_wait", "capture") for s in tail), key)
+                self.assertTrue(all(s.get("on") is False for s in tail if s["do"] == "revive_guard"), key)
+                assert_background_films(self, steps)
 
     def test_b2_is_owner_downs_right_after_the_release_judged_over_its_window(self):
         b2 = SPLIT["b2"]
@@ -305,7 +363,9 @@ class AxelHpSplitTest(unittest.TestCase):
                 others = [s for s in steps if s.get("as") not in ("ledger", "targets")]
                 self.assertTrue(all(s in FULL for s in others), [s for s in others if s not in FULL][:2])
                 self.assertEqual([s for s in steps if s["do"] == "boot"], [s for s in FULL if s["do"] == "boot"])
-                self.assertEqual(steps[-1], FULL[-1])  # the coop verdict
+                self.assertEqual(self.named(steps, "verdict"), FULL[-1])  # the coop verdict
+                if key not in SINGLE:
+                    self.assertEqual(steps[-1], FULL[-1])
 
 
 if __name__ == "__main__":

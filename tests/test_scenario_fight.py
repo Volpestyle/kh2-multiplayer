@@ -19,7 +19,7 @@ class StepFailed(Exception):
 
 
 class FightTest(unittest.TestCase):
-    def run_fight(self, seconds, until=None, birth_at=40, player='P_EX100'):
+    def run_fight(self, seconds, until=None, birth_at=40, player='P_EX100', clips=None, encode=None):
         # Virtual time advances only at simulated input/wait boundaries. Real
         # threads yield cooperatively; no wall-clock thresholds decide the test.
         clock_lock = threading.Lock()
@@ -43,7 +43,7 @@ class FightTest(unittest.TestCase):
                 self.observed = []
 
             def inst(self, index):
-                return types.SimpleNamespace(pid=100 + index)
+                return types.SimpleNamespace(pid=100 + index, index=index)
 
             def actors(self, index):
                 t = monotonic()
@@ -62,6 +62,9 @@ class FightTest(unittest.TestCase):
                     'enemies': lambda i: self.actors(i)[1:], 'len': len, 'any': any})
 
         def kh2ctl(command, *args, **kwargs):
+            if command == 'clip':  # recording and encoding: held until the test releases it
+                encode.wait(10)
+                return {'ok': True}
             if command == 'peek':
                 # The step finds its game's canonical player through 0x2A105D0 (VUH-2466).
                 return {'samples': [{'0x718C68': 0, '0x718C70': 1, '0x718C78': 0, '0x718C80': 0, '0x2A105D0': PLAYER}]}
@@ -72,7 +75,8 @@ class FightTest(unittest.TestCase):
         tree = ast.parse((ROOT / 'tools/scenario/run.py').read_text(encoding='utf-8'))
         tree.body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'step_fight']
         env = dict(Context=Context, threading=threading, time=types.SimpleNamespace(monotonic=monotonic, sleep=sleep),
-                   math=math, kh2ctl=kh2ctl, StepFailed=StepFailed, subprocess=subprocess, Path=Path, json=json)
+                   math=math, kh2ctl=kh2ctl, StepFailed=StepFailed, subprocess=subprocess, Path=Path, json=json,
+                   clip_receipt=lambda ctx, out, result: {**result, 'path': out.name})
         exec(compile(tree, '<real fight step>', 'exec'), env)
         with tempfile.TemporaryDirectory() as directory:
             ctx = Context(Path(directory))
@@ -80,8 +84,11 @@ class FightTest(unittest.TestCase):
             step = dict(instances=[0, 1], seconds=seconds)
             if until is not None:
                 step['until'] = until
+            if clips is not None:
+                step['clips'] = clips
             result = env['step_fight'](ctx, step)
             self.assertTrue(all(result[str(i)]['pulses'] > 0 and 'error' not in result[str(i)] for i in range(2)))
+            self.saved = ctx.saved
             return result, monotonic(), ctx.observed
 
     def milestone(self):
@@ -106,6 +113,35 @@ class FightTest(unittest.TestCase):
         # VUH-2466: both prologue seats' players are P_EX110; the step finds its own through 0x2A105D0, not by name.
         result, elapsed, _ = self.run_fight(30, player='P_EX110')
         self.assertGreaterEqual(elapsed, 30)
+
+    # VUH-2912 (vuh2912-hp-06): a held clip kept the round open past its milestone until it encoded; a background
+    # clip ends the step at the milestone and is left for clip_wait.
+    def film(self, background):
+        encode = threading.Event()
+        clips = [dict(instance=i, seconds=20, fps=30, name=f'round_{i}', background=background) for i in (0, 1)]
+        done = {}
+        runner = threading.Thread(target=lambda: done.update(out=self.run_fight(120, self.milestone(), clips=clips,
+                                                                                encode=encode)), daemon=True)
+        runner.start()
+        runner.join(2)
+        returned = not runner.is_alive()  # before any clip finished encoding
+        encode.set()
+        runner.join(10)
+        return returned, done['out'][0], self.saved
+
+    def test_background_clips_end_the_fight_at_its_milestone(self):
+        returned, result, saved = self.film(True)
+        self.assertTrue(returned)
+        self.assertTrue(result['until']['reached'])
+        self.assertEqual(result['backgroundClips'], ['round_0_0.mp4', 'round_1_1.mp4'])
+        self.assertNotIn('clips', result)
+        self.assertEqual([out.name for _, out, _ in saved['_background_clips']], ['round_0_0.mp4', 'round_1_1.mp4'])
+
+    def test_held_clips_still_hold_the_fight(self):  # the control: without background the step waits for encoding
+        returned, result, saved = self.film(False)
+        self.assertFalse(returned)
+        self.assertEqual([c['path'] for c in result['clips']], ['round_0_0.mp4', 'round_1_1.mp4'])
+        self.assertNotIn('_background_clips', saved)
 
     def test_missing_ticket_still_stops_at_the_deadline(self):
         result, elapsed, _ = self.run_fight(120, self.milestone(), birth_at=1000)

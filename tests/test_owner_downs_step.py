@@ -99,6 +99,23 @@ class OwnerDownsTest(unittest.TestCase):
         self.assertEqual([seat for _, seat in rig.kills], [1])
         self.assertTrue(all(g.stop.is_set() for g in rig.guards))
         self.assertIsNone(ctx.saved["owner_downs"]["owners"]["0"])
+        # VUH-2912 (vuh2912-hp-05): the guards' events ride on the failure, in its text and its report details.
+        guards = [g.events for g in rig.guards]
+        self.assertIn('guards [[{"host":0,"friend":1}],[{"host":1,"friend":0}]]', str(error))
+        self.assertEqual(error.details, {"owner_downs": ctx.saved["owner_downs"]})
+        self.assertEqual(error.details["owner_downs"]["guards"], guards)
+
+    def test_every_failure_carries_the_guard_events(self):
+        for rig, step in ((Rig(revive=1e9), {"timeoutMs": 20000}), (Rig(kill_result="InEvent"), {}),
+                          (Rig(revive=10.0, script={0.5: lambda r: r.counts.__setitem__((0, FULL), 1)}), {})):
+            _, ctx, error = rig.run(**step)
+            self.assertIn("; guards [[", str(error))
+            self.assertEqual(error.details["owner_downs"]["guards"], [g.events for g in rig.guards])
+
+    def test_a_pass_carries_no_failure_details(self):
+        result, ctx, error = Rig().run()
+        self.assertIsNone(error)
+        self.assertEqual(result["guards"], [[{"host": 0, "friend": 1}], [{"host": 1, "friend": 0}]])
 
     def test_full_party_line_is_a_harness_failure(self):
         rig = Rig(revive=10.0, script={0.5: lambda r: r.counts.__setitem__((0, FULL), 1)})

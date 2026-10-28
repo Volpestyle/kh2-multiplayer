@@ -3578,17 +3578,33 @@ reported, not judged. `tests/test_axel_hp_fixture.py` checks the fixture's expre
 negative controls, and fails on the `f31e14b` fixture (`AXEL_HP_FIXTURE`).
 `tests/test_boss_target_ledger.py` reproduces the review's false passes as controls.
 
-**The split (`_b1`, `_b2`).** On PC1's 22-HP saves, Axel's pressure ended the chained rounds and downs of runs
-vuh2912-hp-02/03, after the friend round had passed twice. The generator also writes two split fixtures, each
-built from the full fixture's own steps and judged alone:
-- `net_prologue_mansion_axel_hp_b1.json`: the host target round, then interleaved. The `hp_ledger` window runs
-  from `m_host_target0` to `m_interleaved1`, with those two phases, and the `target_ledger` judges the host round.
-  It has no downs.
+**The split (`_b1_host`, `_b1_inter`, `_b2`).** On PC1's 22-HP saves, Axel's pressure ended the chained rounds and
+downs of runs vuh2912-hp-02/03, after the friend round had passed twice. The generator also writes split fixtures,
+each built from the full fixture's own steps and judged alone. In vuh2912-hp-06 the old B1 (host round, then
+interleaved) passed its host round, then lost the party before interleaved and before either ledger ran. So each
+fighting split now judges one round, and its ledgers run right after it:
+- `net_prologue_mansion_axel_hp_b1_host.json`: the host target round alone. The `hp_ledger` window runs from
+  `m_host_target0` to `m_host_target1` (phase `host_target`), and the `target_ledger` judges that round.
+- `net_prologue_mansion_axel_hp_b1_inter.json`: interleaved right after the friend's take-over, behind a
+  both-seats-standing check. The `hp_ledger` window runs from `m_interleaved0` to `m_interleaved1`, and the
+  `target_ledger` has no round to judge.
 - `net_prologue_mansion_axel_hp_b2.json`: `owner_downs` right after the friend's take-over, with no round. The
   `hp_ledger` then judges the closed downs window (one phase, `downs`, that asks for no hits) and pins the boss
   lifetime, and the `target_ledger` judges only the downs.
 
-The full fixture is unchanged. `AxelHpSplitTest` checks the split's structure.
+In the two single-round splits, nothing waits for a revive after the round. The settle, `hp_ledger`,
+`target_ledger` and `coop_verdict` follow the end mark directly. Only then does the run stop the revive guard,
+collect the round's clips and take the stills, none of which can fail on a later party down or game over.
+
+Every fight films in the background (`"background": true` on its clips) and a `clip_wait` collects the clips before
+the next still or filmed step. In vuh2912-hp-06 the fight step held the round open about 70 s past its milestone
+while its 20 s clips encoded, and Axel downed both idle seats inside the window. The full fixture differs from its
+earlier form only in that and in the interleaved standing check. `AxelHpSplitTest` checks the split's structure.
+
+**Diagnostics on failure (vuh2912-hp-05).** The runner finishes any background clip a failed run left uncollected
+before it kills the games (`clipDrain` in the report, at most 185 s in all). A failed `owner_downs` puts both
+ReviveGuard event lists into its step error and its report entry (`details`). A guard stopped mid-episode marks that
+episode `stopped`.
 
 ### Waiting for the friend's arrival before `coop_verdict` (VUH-2898)
 

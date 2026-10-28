@@ -784,19 +784,30 @@ def step_fight(ctx: Context, step: dict) -> dict:
     threads = [threading.Thread(target=bot, args=(i,), daemon=True) for i in indices]
     # {"instance", "seconds", "fps", "name"}: film the fight while it runs. "clips" films several
     # instances at the same time (side-by-side evidence, VUH-2252); "clip" is the single form.
+    # VUH-2912 (vuh2912-hp-06): a clip with "background" does not hold the step open. The step ends at its
+    # milestone and clip_wait collects the clip later, as step_clip's background clips. A held clip kept a
+    # round open ~70 s after its milestone (20 s recording plus encoding), long enough for the boss to down both
+    # idle seats before the round's end mark.
     clips = list(step.get("clips") or ([step["clip"]] if step.get("clip") else []))
     films: list[tuple[Path, dict]] = []
+    background: list[str] = []
     for clip in clips:
         inst = ctx.inst(clip.get("instance", 0))
         out = ctx.run_dir / f"{clip.get('name', 'fight')}_{inst.index}.mp4"
         clip_result: dict = {}
-        films.append((out, clip_result))
 
         def film(clip=clip, inst=inst, out=out, clip_result=clip_result) -> None:
             clip_result.update(kh2ctl("clip", "--seconds", str(clip.get("seconds", 5)), "--fps",
                                       str(clip.get("fps", 10)), "--out", str(out), pid=inst.pid,
                                       check=False, timeout=180))
 
+        if clip.get("background"):
+            thread = threading.Thread(target=film, daemon=True)
+            thread.start()
+            ctx.saved.setdefault("_background_clips", []).append((thread, out, clip_result))
+            background.append(out.name)
+            continue
+        films.append((out, clip_result))
         threads.append(threading.Thread(target=film, daemon=True))
     # {"expr", "everyMs"}: evaluate expr while the bots fight (VUH-2342: both games' mission gauges).
     sample = step.get("sample")
@@ -841,10 +852,12 @@ def step_fight(ctx: Context, step: dict) -> dict:
         if out.exists():
             ctx.artifacts.append(out.name)
         receipts.append(clip_receipt(ctx, out, clip_result))
-    if step.get("clip") and not step.get("clips"):
+    if step.get("clip") and not step.get("clips") and receipts:
         ctx.saved[name]["clip"] = receipts[0]
     elif receipts:
         ctx.saved[name]["clips"] = receipts
+    if background:
+        ctx.saved[name]["backgroundClips"] = background
     return ctx.saved[name]
 
 
@@ -1113,6 +1126,24 @@ def step_clip_wait(ctx: Context, step: dict) -> dict:
             ctx.artifacts.append(out.name)
         receipts.append(clip_receipt(ctx, out, result))
     return {"clips": receipts}
+
+
+def drain_clips(ctx: Context, pending: list, seconds: float = 185, *, _now=None) -> dict:
+    """Wait at most `seconds` in all for background clips a run left uncollected (a step failed before its
+    clip_wait), then record their receipts. Joins threads only: no game check, which may fail on a dead game."""
+    now = _now or time.monotonic
+    deadline = now() + seconds
+    for thread, _, _ in pending:
+        thread.join(timeout=max(0.0, deadline - now()))
+    receipts, unfinished = [], []
+    for thread, out, result in pending:
+        if thread.is_alive():
+            unfinished.append(out.name)
+            continue
+        if out.exists():
+            ctx.artifacts.append(out.name)
+        receipts.append(clip_receipt(ctx, out, result))
+    return {"clips": receipts, "unfinished": unfinished}
 
 
 def step_avatar_stall(ctx: Context, step: dict) -> dict:
@@ -2048,6 +2079,8 @@ class ReviveGuard:
                         break
                 else:
                     self.sleep(0.3)  # the native reaction command still owns Triangle, or no budget is left
+            if self.stop.is_set() and event["result"] == "timeout":
+                event["stopped"] = True  # VUH-2912: the step ended mid-episode, not the guard's own deadline
             event["seconds"] = round(self.now() - event.pop("downedAt"), 1)
             self.events.append(event)
 
@@ -2127,6 +2160,7 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     guards = [guard(0, 1), guard(1, 0)]      # guards[i] revives seat i with the other seat
     for g in guards:
         g.thread.start()
+    failure = None
     try:
         while any(v is None for v in owed.values()):
             ctx.check_all()
@@ -2160,6 +2194,8 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
                 raise StepFailed(f"owner_downs: HARNESS FAILURE, no revive within {step.get('timeoutMs', 240000)} ms "
                                  f"(events {events}); not a form result")
             sleep(0.25)
+    except StepFailed as error:
+        failure = error
     finally:
         for g in guards:
             g.stop.set()
@@ -2167,6 +2203,12 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
             g.thread.join(timeout=10)
         ctx.saved[name] = {"owners": {str(o): v for o, v in owed.items()}, "events": events,
                            "guards": [g.events for g in guards]}
+    if failure:
+        # VUH-2912 (vuh2912-hp-05): a failed step never reaches the report's saved values, so its guards' events
+        # (each downing episode: result, holds, last distance, asides) ride on the error and its report entry.
+        error = StepFailed(f"{failure}; guards {json.dumps(ctx.saved[name]['guards'], separators=(',', ':'))}")
+        error.details = {name: ctx.saved[name]}
+        raise error from failure
     return ctx.saved[name]
 
 
@@ -5997,6 +6039,8 @@ def run_scenario(path: Path, attempt: int) -> dict:
                 ctx.check_all()
             except StepFailed as e:
                 entry.update(status="fail", error=str(e))
+                if getattr(e, "details", None):  # a failed step's own diagnostics (owner_downs' guard events)
+                    entry["details"] = e.details
                 report["status"] = "fail"
                 report.setdefault("error", f"step {i} ({kind}): {e}")
                 if segments:
@@ -6022,6 +6066,11 @@ def run_scenario(path: Path, attempt: int) -> dict:
         report["error"] = f"runner error: {e}"
         report["traceback"] = traceback.format_exc()
     finally:
+        # VUH-2912 (vuh2912-hp-05): a step that failed before its clip_wait left encoders running, and the kills
+        # below cut both owner_downs clips before their moov atom. Finish them first, bounded as pilot_until's drain.
+        pending = getattr(ctx, "saved", {}).pop("_background_clips", [])  # isolated test contexts have no saved
+        if pending:
+            report["clipDrain"] = drain_clips(ctx, pending)
         ctx.close()
         for inst in ctx.instances:  # recover: never leave this run's instances behind
             kh2ctl("kill", pid=inst.pid, check=False)
