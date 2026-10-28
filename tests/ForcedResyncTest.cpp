@@ -577,8 +577,12 @@ void bossSitOutRelay(unsigned mode,std::uint16_t port){
         check(r.wait([&]{return r.seen[2].hp.size()==hp2+1;})&&r.fencedBarrier()&&r.seen[1].hp.size()==hp1,"the boss's HP still reaches other seats but not the fenced target");
         check(r.sendAck(1)&&r.result(ResyncResultReason::Converged),"the host-owned boss's HP is no material change: the sit-out converges");
         const auto held=r.seen[1].holds.size();
-        r.clients[0]->sendEnemyHp({7,{{1,800,1000}},12});r.clients[0]->sendEventHold({7,true,157});
-        check(r.wait([&]{return r.seen[2].hp.size()==hp2+2;})&&r.fencedBarrier()&&r.seen[1].hp.size()==hp1&&r.seen[1].holds.size()==held,
+        // EnemyHp is unreliable on both hops and ENet may drop any one copy, so it is resent with a fresh sequence, as
+        // the host's periodic HP is, until seat 2 has one. The hold goes after it: sent first, it can discard the HP.
+        bool hpReached=false;
+        for(std::uint64_t seq=12;seq<17&&!hpReached;++seq){r.clients[0]->sendEnemyHp({7,{{1,800,1000}},seq});hpReached=r.wait([&]{return r.seen[2].hp.size()>=hp2+2;});}
+        r.clients[0]->sendEventHold({7,true,157});
+        check(hpReached&&r.fencedBarrier()&&r.seen[1].hp.size()==hp1&&r.seen[1].holds.size()==held,
               "after convergence the sit-out target stays quarantined: no host HP, hold or progress reaches it");
     }
     if(mode==1){
