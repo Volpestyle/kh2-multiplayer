@@ -1795,13 +1795,36 @@ class ReviveGuard:
         kh2ctl("player-input", "--lx", f"{dx * fz - dz * fx:.2f}", "--ly", f"{dx * fx + dz * fz:.2f}",
                "--duration-ms", str(ms), pid=self.friend.pid, check=False)
 
+    ASIDE_MS = 400  # one sideways step while a native RC holds Triangle (revive_move)
+
+    def living_enemies(self) -> list[dict]:
+        return [a["position"] for a in self.ctx.actors(self.friend.index)
+                if a.get("objectType") in (3, 4) and not a["name"].startswith("F_") and a.get("hp", -1) > 0]
+
+    @staticmethod
+    def revive_move(own, target, react: int, enemies: list[dict], reach: float) -> tuple:
+        """One tick of a revive, from the reviver's and the downed seat's positions: ("walk", dx, dz) toward the
+        downed seat, ("hold",) to revive, ("aside", dx, dz) while a native RC owns Triangle, or ("wait",).
+        vuh2912-hp-02: Axel's Burst Frontier offer (444) held Triangle while Axel kept attacking, and the reviver
+        stood in his line until it fell. Aside is perpendicular to the line from the nearest living enemy, so the
+        reviver leaves the line of spheres along that enemy's forward (and its attack) instead of waiting in it."""
+        dx, dz = target[0] - own[0], target[2] - own[2]
+        if math.hypot(dx, dz) > reach:
+            return ("walk", dx, dz)
+        if react == 0:
+            return ("hold",)
+        if not enemies:
+            return ("wait",)
+        near = min(enemies, key=lambda e: math.hypot(e["x"] - own[0], e["z"] - own[2]))
+        ex, ez = own[0] - near["x"], own[2] - near["z"]
+        return ("aside", -ez, ex) if ex or ez else ("wait",)
+
     def keep_away(self, friend) -> None:
         try:
             s = friend.state()
             if not s["free"] or not s["pos"]:
                 return
-            enemies = [a["position"] for a in self.ctx.actors(self.friend.index)
-                       if a.get("objectType") in (3, 4) and not a["name"].startswith("F_") and a.get("hp", -1) > 0]
+            enemies = self.living_enemies()
         except Exception:  # a load between samples
             return
         if not enemies:
@@ -1845,15 +1868,22 @@ class ReviveGuard:
                 if not s["free"] or not s["pos"] or not target:
                     time.sleep(0.5)
                     continue
-                dx, dz = target[0] - s["pos"][0], target[2] - s["pos"][2]
-                event["last"]["distance"] = round(math.hypot(dx, dz), 1)
-                if math.hypot(dx, dz) > self.REACH:
-                    self.stick(s, dx, dz, 400)
-                elif s["react"] == 0:
+                event["last"]["distance"] = round(math.hypot(target[0] - s["pos"][0], target[2] - s["pos"][2]), 1)
+                try:
+                    enemies = self.living_enemies() if s["react"] else []
+                except Exception:  # a load between samples
+                    enemies = []
+                move = self.revive_move(s["pos"], target, s["react"], enemies, self.REACH)
+                if move[0] == "walk":
+                    self.stick(s, move[1], move[2], 400)
+                elif move[0] == "hold":
                     kh2ctl("player-press", "--button", "triangle", "--duration-ms", str(self.HOLD_MS),
                            pid=self.friend.pid, check=False)
                     event["holds"] += 1
                     time.sleep(1.0)
+                elif move[0] == "aside":  # the native reaction command owns Triangle: out of its line
+                    event["asides"] = event.get("asides", 0) + 1
+                    self.stick(s, move[1], move[2], self.ASIDE_MS)
                 else:
                     time.sleep(0.3)  # the native reaction command still owns Triangle
             event["seconds"] = round(time.monotonic() - event.pop("downedAt"), 1)
