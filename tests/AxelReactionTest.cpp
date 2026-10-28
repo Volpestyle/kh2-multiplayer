@@ -494,14 +494,22 @@ int main() {
               !R::AxelFadeAdopted(true,Custody::Owner,true,303,0),
               "only Axel's own D303, queued in a friend's callback under the owner's custody, is adopted");
         const R::AxelFadeCustody fade{0x720,0x100,0x300,1,5,700,0x72,0x80000002u,0x2222};
-        check(R::AxelFadeOurs(fade,0x720,0x720,0x100,5,700) && !R::AxelFadeOurs(fade,0x721,0x720,0x100,5,700) &&
-              !R::AxelFadeOurs(fade,0x720,0x720,0x200,5,700) && !R::AxelFadeOurs(fade,0x720,0x720,0x100,6,700) &&
-              !R::AxelFadeOurs(fade,0x720,0x720,0x100,5,701) && !R::AxelFadeOurs({},0,0,0,5,700),
+        using Match=R::AxelFadeMatch;
+        const auto match=[&](const R::AxelFadeCustody& f,bool tk,std::uintptr_t t,bool rk,std::uintptr_t r,std::uintptr_t v,
+                             std::uint32_t e=5,std::uint32_t frame=700) { return R::AxelFadeMatchFor(f,tk,t,rk,r,v,e,frame); };
+        check(match(fade,true,0x720,true,0x720,0x100)==Match::Ours && match(fade,true,0x721,true,0x720,0x100)==Match::Other &&
+              match(fade,true,0x720,true,0x720,0x200)==Match::Other && match(fade,true,0x720,true,0x720,0x100,6)==Match::Other &&
+              match(fade,true,0x720,true,0x720,0x100,5,701)==Match::Other && match({},true,0,true,0,0)==Match::Other,
               "a fade or reset is D303's only on its thread, with Axel as the source, in its epoch and lease");
-        auto unhandled=fade;unhandled.threadHandle=0;
-        check(!R::AxelFadeOurs(fade,0x720,0,0x100,5,700) && !R::AxelFadeOurs(fade,0x720,0x730,0x100,5,700) &&
-              !R::AxelFadeOurs(unhandled,0x720,0x720,0x100,5,700),
-              "and only while its adopted handle still resolves to that thread: another at its address is not D303");
+        check(match(fade,true,0x720,true,0,0x100)==Match::Ended && match(fade,true,0x720,true,0x730,0x200)==Match::Ended,
+              "a handle that answers with another thread, or none, has ended D303: its address is another's");
+        check(match(fade,true,0x720,false,0,0x100)==Match::Unread && match(fade,false,0,true,0x720,0x100)==Match::Unread &&
+              match(fade,false,0,false,0,0x200)==Match::Other && match(fade,true,0x721,false,0,0x100)==Match::Other,
+              "a lookup that could not be made proves nothing: with Axel as the source it is withheld, never native");
+        auto pending=fade;pending.thread=0;pending.pending=true;
+        check(match(pending,true,0x999,true,0,0x100)==Match::Unread && match(pending,true,0x999,true,0,0x200)==Match::Other &&
+              match(pending,true,0x999,true,0,0x100,6)==Match::Other,
+              "an adoption pending its thread withholds Axel's ops on any thread, and no one else's");
         R::AxelCameraHooks hooks{};
         bool partial=false;
         for(unsigned i=0;i<static_cast<unsigned>(R::AxelCameraHook::Count);++i) {

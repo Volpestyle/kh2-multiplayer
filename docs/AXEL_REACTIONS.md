@@ -355,7 +355,8 @@ capture reaches it:
 `local completion`, `complete`, `complete refused`, `press refused`, `executor engaged`, `executor end`,
 `player unresolved`, and for the owner-only camera `camera forwarded|dropped|native <op>`, `camera adopted D303`,
 `camera forwarded|dropped D303 kind=… role=…` (`ended: not on any game` when its role is gone), `camera D303 expired`,
-`camera D303 ended`, `<hook> hook refused; a friend's Axel RC camera stays on the host`, `camera replay pins refused`,
+`camera D303 ended`, `camera adopted D303 … pending: its thread unread`, `… unread: not on any game`,
+`camera retired whitein dropped: a load faded in`, `<hook> hook refused; a friend's Axel RC camera stays on the host`, `camera replay pins refused`,
 `camera applied kind=…`, `camera retired role=… watched=… whitedout=…` and `camera retired whitein` (or `faulted; given up`),
 256 lines per session.
 
@@ -424,9 +425,17 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
       are read raw, so the adoption holds after Axel dies; his death doesn't stop D303. The host keeps the handle
       too, and the role current at adoption: the one the RC's start went to (Clear Light's begins before the
       callback), by resource and connection.
-    - **Its three ops.** They are recognized by that thread, while the kept handle still resolves to it, and by its
-      source (`AxelFadeOurs`), so no other script's fade or reset is ever taken from the host, and a thread freed and
-      reallocated at D303's address is not D303 (the adoption ends, `camera D303 ended`). They go as op 17 to the
+    - **Unread is not an answer** (Ione's `b318dd1b`). Each lookup goes through `SmDecodeKnown`, which tells a lookup
+      that could not be made (no resolver, a caught fault) or an unread node from one that answered. If 2/20's node,
+      its first word or the thread's handle cannot be read, the adoption is *pending*: the node and any handle are
+      kept and resolved on each later op. Until they resolve, an op with Axel as its VM's source is withheld and
+      dropped on both games; once they do, it is D303's or not as above. A node that answers with no thread adopts
+      nothing, and a pending one that resolves to none is released.
+    - **Its three ops** (`AxelFadeMatchFor`). They are recognized by that thread, while the kept handle still resolves
+      to it, and by its source, so no other script's fade or reset is ever taken from the host. A handle that answers
+      with another thread, or none, has ended D303: the thread at its address is another's and plays natively
+      (`camera D303 ended`). A running thread, handle or owner scope that cannot be read is withheld and dropped
+      (`unread: not on any game`), never run on the host. They go as op 17 to the
       adopted role only, which a continuation keeps (same resource), and are dropped once it is gone: a later RC's
       role on the same seat and actor never gets them (Ione's `629ab5f1`).
     - **The end.** White-in ends the adoption; so do a new epoch and, if 3C5440 kills the thread early,
@@ -443,8 +452,11 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
   - **Retirement.**
     - A white-out leaves a receipt on the role (`axelWhitedOut`), reserved before the call, and a role continuation
       carries it. A role retired with it owes a white-in (30), paid on the next owner frame on the game thread
-      outside a load or transition. Nothing native resets the fade on a load (Kit, `e4a7861e`). The debt stays until
-      a payment returns: one that faults is retried on the next safe frames, three tries in all (Ione's `629ab5f1`).
+      outside a load or transition. The debt stays until a payment returns: one that faults is retried on the next
+      safe frames, three tries in all (Ione's `629ab5f1`). A load completed since the role's own load drops the debt
+      instead: load complete (`152CD0`, `152F40`) calls `156C90`'s fade-in on all seven fade records, unconditionally,
+      and Continue reaches the same load complete (Kit's `e0b6cad9`), so paying it would only whiten the faded-in
+      screen (`camera retired whitein dropped: a load faded in`).
     - A watch is not undone. Natively, Burst's watch ends on its own: when Axel's target goes invalid, when the
       subject's `+0x18C & 0x1C`, or on any other camera mode or player camera init. The friend's replay ends the
       same way. The role keeps a receipt (`axelWatched`) only so its retirement log says a watch was replayed.
@@ -453,12 +465,13 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
     - *Watch after a down or release while Axel stays valid.* The replay ends only as the native watch does. The
       live control is a friend's Burst downed or released mid-watch: `camera retired … watched=1` marks it, and the
       camera must return. If it lingers, an owned cancellation needs a pinned native end (`1656F0`/`176350`).
-    - *An owed white-in after a load.* It is paid after the load and overwrites whatever fade the load path left
-      (every fade call does, Kit's read 6): if that path fades on its own, the owner sees up to 30 frames of white
-      instead of a stuck white screen. Whether it does is unread.
-    - *A role that ends before D303's +110.* Its white-out, reset and white-in are dropped (`ended: not on any
-      game`): neither game whites out. Clear Light's authored fade then plays nowhere; carrying it past the role
-      needs camera authority of its own on the wire.
+    - *An owed white-in across a load.* Dropped at load complete on Kit's `e0b6cad9` read; the paired
+      white-out → down/load/Continue → restore run is the live proof.
+    - *A role that ends before D303's +110.* **Incomplete, by Ione's `b318dd1b` ruling.** Its white-out, reset and
+      white-in are dropped (`ended: not on any game`): neither game whites out, and Clear Light's authored fade plays
+      nowhere. These are counted and excluded from any claim of complete Clear Light camera coverage; carrying them
+      past the role needs camera authority of its own on the wire (a follow-up, not this slice).
+    - Ione accepts the first two as scoped gaps for this slice, not as issue acceptance: each needs its live control.
 - **Axel's own pose on the friend while held.** The host stops publishing Axel's motion while he is parented, so the
   friend's held clone keeps its last mirrored motion.
 - **Host-owned RCs show nothing on the friend's copy of the host.** No role is minted for the host's own executor,

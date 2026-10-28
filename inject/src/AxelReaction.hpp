@@ -407,6 +407,11 @@ inline bool AxelCameraOpValid(std::uint32_t kind,bool argFloat,std::uint32_t arg
 // thread is D303's only while that handle still resolves to it (Ione's 629ab5f1), so a thread freed and reallocated
 // at the same address is another. The ops go only to the role current at adoption (its resource and connection), and
 // a continuation keeps both; a later RC's role on the same seat and actor is never D303's.
+// A lookup that could not be made (no resolver, a caught fault, an unread node) proves nothing either way (Ione's
+// b318dd1b): it never hands the owner's sequence back to the host. At 2/20 the adoption is then pending, keeping
+// the node and any thread handle to resolve later; until it resolves, an op with Axel as its VM's source is D303's
+// candidate and is withheld and dropped. Only a lookup that answers tells D303 from another thread: one that resolves
+// to nothing queued adopts nothing, and one that resolves elsewhere has ended it.
 inline constexpr std::uint32_t kAxelWhiteOutThread=303,kAxelFadeLeaseFrames=600;
 struct AxelFadeCustody {
     std::uintptr_t thread{},axel{},actor{};
@@ -414,16 +419,26 @@ struct AxelFadeCustody {
     std::uint32_t epoch{},until{};
     std::uint32_t threadHandle{},resource{};
     std::uint64_t connection{};
+    std::uint32_t nodeHandle{};
+    bool pending{}; // adopted with its thread unread
 };
+// queued: 2/20's node names a thread, or could not be read.
 inline bool AxelFadeAdopted(bool friendCallback,AxelCameraCustody custody,bool axelSource,std::uint32_t label,
-                            std::uintptr_t thread) noexcept {
-    return friendCallback && custody==AxelCameraCustody::Owner && axelSource && label==kAxelWhiteOutThread && thread;
+                            bool queued) noexcept {
+    return friendCallback && custody==AxelCameraCustody::Owner && axelSource && label==kAxelWhiteOutThread && queued;
 }
-// resolved: what the adopted handle resolves to now.
-inline bool AxelFadeOurs(const AxelFadeCustody& f,std::uintptr_t thread,std::uintptr_t resolved,std::uintptr_t vmSource,
-                         std::uint32_t epoch,std::uint32_t frame) noexcept {
-    return f.thread && f.threadHandle && thread==f.thread && resolved==f.thread && f.axel && vmSource==f.axel &&
-        f.epoch==epoch && static_cast<std::int32_t>(f.until-frame)>=0;
+enum class AxelFadeMatch : std::uint8_t { Other, Ended, Unread, Ours };
+// threadKnown/thread: the running thread (0x2A25048); resolvedKnown/resolved: the kept handle's lookup now.
+// Other: native. Ended: D303 is over and this is another thread (native). Unread: withheld and dropped. Ours: D303's.
+inline AxelFadeMatch AxelFadeMatchFor(const AxelFadeCustody& f,bool threadKnown,std::uintptr_t thread,bool resolvedKnown,
+                                      std::uintptr_t resolved,std::uintptr_t vmSource,std::uint32_t epoch,
+                                      std::uint32_t frame) noexcept {
+    if(!f.axel || (!f.thread && !f.pending))return AxelFadeMatch::Other;
+    if(f.thread && threadKnown && thread==f.thread && resolvedKnown && resolved!=f.thread)return AxelFadeMatch::Ended;
+    if(vmSource!=f.axel || f.epoch!=epoch || static_cast<std::int32_t>(f.until-frame)<0)return AxelFadeMatch::Other;
+    if(f.pending || !threadKnown)return AxelFadeMatch::Unread;
+    if(thread!=f.thread)return AxelFadeMatch::Other;
+    return resolvedKnown?AxelFadeMatch::Ours:AxelFadeMatch::Unread;
 }
 // Which RCs begin that role at completion: Overtaker and Clear Light. Burst Frontier hooks the player into its steering
 // coroutine (1/112), and ScriptActorOwner's hook mints the role, adopting the capture issued just before it.

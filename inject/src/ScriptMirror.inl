@@ -194,6 +194,13 @@ static uintptr_t SmDecode(std::uint32_t handle) noexcept {
     if (!handle || !g_resolveHandle) return 0;
     __try { return g_resolveHandle(handle); } __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
 }
+// SmDecode, telling a lookup that could not be made (no resolver, a caught fault) from an answer, 0 included.
+static bool SmDecodeKnown(std::uint32_t handle, uintptr_t& out) noexcept {
+    out = 0;
+    if (!handle) return true;
+    if (!g_resolveHandle) return false;
+    __try { out = g_resolveHandle(handle); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { out = 0; return false; }
+}
 // The actor a trap's actor argument names (the argument, then that object's +4), and its object id.
 static uintptr_t SmActorOf(std::uint64_t arg, std::uint32_t& objectId) noexcept {
     objectId = 0;
