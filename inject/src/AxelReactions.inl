@@ -84,15 +84,12 @@ static bool SmAxelPlayer(std::uint64_t* args,uintptr_t source,const enemysync::D
     if(route==R::AxelPlayerRoute::Executor)args[0]=R::Tagged(R::kTagAddress,handle);
     return route!=R::AxelPlayerRoute::Choice;
 }
-// The safe abort at host Axel's 1/18 attach and 1/29 capture (R::AxelActAdmitted), on the trap's copied arguments.
-// Both take Axel first (the attach's child, the capture's source) and the player second (the parent, the captured
-// actor). Refused: the hook skips the native call. A player argument that does not decode counts as a player: the
-// native trap would fault on it (42C576, 42D187).
-static R::AxelAct SmAxelAct(const std::uint64_t* args,const char* trap) {
-    if(!g_sm.hostActive || !args || !SmAxelHostCurrent())return R::AxelAct::Native;
+// The safe abort (R::AxelActAdmitted) for host Axel acting on the player argument. A player argument that does not
+// decode counts as a player: the native trap would fault on it (42C576, 42D187).
+static R::AxelAct SmAxelActOn(uintptr_t axel,std::uint64_t player,const char* trap) {
+    if(!g_sm.hostActive || !axel || !SmAxelHostCurrent() || axel!=g_axel.actor)return R::AxelAct::Native;
     std::uint32_t ignored=0;
-    if(SmActorOf(args[0],ignored)!=g_axel.actor)return R::AxelAct::Native;
-    const auto target=SmActorOf(args[1],ignored);
+    const auto target=SmActorOf(player,ignored);
     enemysync::DownedScope scope;
     const bool bound=SmOwnerScope(scope) && SmAxelExecutorBound(scope);
     const auto state=bound?SmAxelExecutorActor():R::AxelActorState::Gone;
@@ -103,6 +100,20 @@ static R::AxelAct SmAxelAct(const std::uint64_t* args,const char* trap) {
             g_axel.executor.slot,!target?"undecoded":executor?"executor":"other-seat",
             !bound?"unbound":state==R::AxelActorState::Unknown?"unread":state==R::AxelActorState::Gone?"gone":"resolves");
     return act;
+}
+// 1/18 attach and 1/29 capture, on the trap's copied arguments: both take Axel first (the attach's child, the
+// capture's source) and the player second (the parent, the captured actor). Refused: the hook skips the native call.
+static R::AxelAct SmAxelAct(const std::uint64_t* args,const char* trap) {
+    if(!g_sm.hostActive || !args || !SmAxelHostCurrent())return R::AxelAct::Native; // nothing read elsewhere
+    std::uint32_t ignored=0;
+    return SmAxelActOn(SmActorOf(args[0],ignored),args[1],trap);
+}
+// 1/101 obj_motion_is_capture in Axel's own script (idle_after_rc), on its copied argument: the player, 1/3's result.
+// Refused: the hook answers "not captured" without reading, so the wait ends.
+static R::AxelAct SmAxelCaptureQuery(const std::uint64_t* args) {
+    if(!g_sm.hostActive || !args || !SmAxelHostCurrent())return R::AxelAct::Native; // nothing read elsewhere
+    std::uint16_t netId=0;std::uint32_t objectId=0;
+    return SmAxelActOn(SmOwnerVmSource(netId,objectId),args[0],"capture-query");
 }
 // Host: whether Axel is attached to this actor with his own pair (R::AxelAttachPair): 1 held, 0 not, -1 unread.
 static int SmAxelHeldBy(uintptr_t actor) {

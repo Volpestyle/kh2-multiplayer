@@ -292,15 +292,20 @@ seat that pressed.
 **Safe abort (`AxelActAdmitted`).** On the host, Axel's own acts on a player go only to the bound executor's
 resolving actor:
 - 1/18 attach with Axel as the child (`rc_run_up`, `rc_clear_light`): the parent must be that actor;
-- 1/29 capture with Axel as the source (the callback's `AP10`/`AP12`/`AP13`): the captured actor must be that actor.
+- 1/29 capture with Axel as the source (the callback's `AP10`/`AP12`/`AP13`): the captured actor must be that actor;
+- 1/101 `obj_motion_is_capture` in Axel's own script (`idle_after_rc`, on 1/3's result): the queried actor must be
+  that actor. Refused, it answers int 0, "not captured", writing both dwords as `42D39B`/`42D3A2` do, without resolving
+  the argument (`42D36B`/`42D370` have no null check), so the wait ends. Its slot is optional (pinned from Kit's
+  `27d75a59`): refused, the query reads natively, and 1/3's result is always a live actor.
 
 Anything else is refused before the native call (`[axel-rc] attach refused` / `capture refused`): the attach is
 skipped, and the capture returns int 0, as `42D1C0` writes its result. That covers the host's actor named by 1/3's
 native result, another seat's actor, an argument that does not decode (it would fault at `42C576` or `42D187`), and
 any act while no RC is bound. An unread executor identity refuses the act without ending the binding; the next
 resolving read admits again. So an RC whose executor is lost plays on with Axel unparented and nobody else captured
-or held, and ends on its lease or a confirmed release. The gates sit in `SmAxelAct`, which `SmOwnerAttach` and
-`SmOwnerCapture` call before the native trap; other encounters return before any read.
+or held, and ends on its lease or a confirmed release. The gates sit in `SmAxelAct` and `SmAxelCaptureQuery`, which
+`SmOwnerAttach`, `SmOwnerCapture` and `SmOwnerCaptureQuery` call before the native trap; outside Axel II they return
+before any read.
 
 Static facts behind it (Kit's reads, VUH-2913 comment `b034e8cf`):
 - `L140`, `L409` and `L531` run synchronously inside the native callback (`3E1840` runs the trigger's thread once,
@@ -309,12 +314,8 @@ Static facts behind it (Kit's reads, VUH-2913 comment `b034e8cf`):
 - Every 1/3 call in these flows runs later, in Axel's action thread (`obj_act_start` only creates it), and
   `idle_after_rc` repeats it every frame. The executor binding, held until a confirmed release or the lease, covers
   them; a binding scoped to the callback would not.
-- The only consumers of the 1/3 result are 1/18 at pcs 10189 and 10252 (gated) and 1/101 `obj_motion_is_capture` at
-  10056 in `idle_after_rc`, which returns the actor's `+0x18C` bit 14 and writes nothing. It is not gated. It reads
-  1/3's result, which is always a live actor. On a lost executor that result is the host's own actor. Axel cannot
-  have captured the host's actor during a friend's RC, because the 1/29 gate refuses it, so the read says "not
-  captured" and `idle_after_rc` ends, as it does after a native capture ends. Any other capture would only keep Axel
-  idling; it acts on nobody. A pin and gate on 1/101 would need its body, which has not been read.
+- The only consumers of the 1/3 result are 1/18 at pcs 10189 and 10252 and 1/101 at 10056 in `idle_after_rc`
+  (`(+0x18C >> 14) & 1`, re-run every frame). All three are gated.
 
 **The friend's view (owner role).** A friend's Overtaker or Clear Light replays on its own player through an
 ordinary ScriptActorOwner role (`SmOwnerBeginAxelRole`), begun at completion before the callback, so the callback's
