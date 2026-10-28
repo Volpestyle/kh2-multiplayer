@@ -262,13 +262,21 @@ inline AxelPress AxelPressDecision(const ReactionWindow* w,std::uint16_t command
     return localSlot==0?AxelPress::Execute:AxelPress::Claim;
 }
 
-// Any seat may own and execute an Axel RC. The host runs a friend's with that seat's actor on the host, and the safe
-// abort below keeps a lost executor's RC from acting on anyone else.
-inline bool AxelExecutionAdmitted(std::uint8_t ownerSlot) noexcept { return ownerSlot<3; }
+// Any seat may own and execute an Axel RC while the safe abort below is armed: every trap that takes 1/3's result is
+// gated (the core 1/18 and 1/29, and the optional 1/101). The host runs a friend's with that seat's actor on the host,
+// and the abort keeps a lost executor's RC from acting on anyone else. Unarmed, only the host executes.
+inline bool AxelExecutionAdmitted(std::uint8_t ownerSlot,bool abortArmed) noexcept {
+    return ownerSlot==0 || (abortArmed && ownerSlot<3);
+}
+// The seats that may win an Axel offer: those that may execute it.
+inline std::array<ReactionSeat,3> AxelOfferSeats(std::array<ReactionSeat,3> seats,bool abortArmed) noexcept {
+    for(unsigned i=0;i<seats.size();++i)if(!AxelExecutionAdmitted(static_cast<std::uint8_t>(i),abortArmed))seats[i]={};
+    return seats;
+}
 // The host's consumption of an Axel window: ConsumeReaction, for an owner admitted to execute.
 inline bool AxelConsume(ReactionWindow& w,const ReactionCompletion& c,std::uint32_t epoch,std::uint32_t frame,
-                        const std::array<ReactionSeat,3>& seats) noexcept {
-    return AxelExecutionAdmitted(c.slot) && ConsumeReaction(w,c,epoch,frame,seats);
+                        const std::array<ReactionSeat,3>& seats,bool abortArmed) noexcept {
+    return AxelExecutionAdmitted(c.slot,abortArmed) && ConsumeReaction(w,c,epoch,frame,AxelOfferSeats(seats,abortArmed));
 }
 
 // The RC's executor: the seat, and the actor on the host, that ran it. It is bound to that actor, not to the seat's

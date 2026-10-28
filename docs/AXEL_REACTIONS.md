@@ -296,12 +296,20 @@ resolving actor:
 - 1/101 `obj_motion_is_capture` in Axel's own script (`idle_after_rc`, on 1/3's result): the queried actor must be
   that actor. Refused, it answers int 0, "not captured", writing both dwords as `42D39B`/`42D3A2` do, without resolving
   the argument (`42D36B`/`42D370` have no null check), so the wait ends. Its slot is optional (pinned from Kit's
-  `27d75a59`): refused, the query reads natively, and 1/3's result is always a live actor.
+  `27d75a59`), but the abort needs it.
+
+**The abort is armed** (`SmOwnerAxelAbortReady`) only while every trap that takes 1/3's result is gated: the core's
+1/18 and 1/29, and the 1/101 slot. If the 1/101 pin or swap is refused, friend execution is withheld
+(`AxelExecutionAdmitted`, `AxelOfferSeats`, Ione's `75233daf`). Friends are offered nothing, a friend's claim
+consumes nothing, and only the host executes, as in slice 1. The rest of the owner core stays in.
 
 Anything else is refused before the native call (`[axel-rc] attach refused` / `capture refused`): the attach is
 skipped, and the capture returns int 0, as `42D1C0` writes its result. That covers the host's actor named by 1/3's
 native result, another seat's actor, an argument that does not decode (it would fault at `42C576` or `42D187`), and
-any act while no RC is bound. An unread executor identity refuses the act without ending the binding; the next
+any act while no RC is bound. A player is known by identity, not by targeting eligibility (`SmAxelPlayerActor`): a
+candidate, the canonical player (`g_soraActor` or the native player pointer `2A105D0`), or a party puppet's actor.
+A downed or otherwise ineligible host leaves the candidate table but stays 1/3's native result, so the candidate
+table alone would let it through (Ione's `75233daf`). An actor that is no player's stays native. An unread executor identity refuses the act without ending the binding; the next
 resolving read admits again. So an RC whose executor is lost plays on with Axel unparented and nobody else captured
 or held, and ends on its lease or a confirmed release. The gates sit in `SmAxelAct` and `SmAxelCaptureQuery`, which
 `SmOwnerAttach`, `SmOwnerCapture` and `SmOwnerCaptureQuery` call before the native trap; outside Axel II they return
@@ -329,9 +337,11 @@ capture reaches it:
   adopts the capture issued just before it (VUH-2611).
 - Axel's attachment is the reverse of Thorn's, so the role's attachment record is Axel held by its actor
   (`AxelAttachPair`: flags 16386, bone 1), sent on each change and with the heartbeat; an unread parent sends nothing.
-  On the friend, op 13 attaches the Axel clone (the role's source) to its own player, and op 14 or the role's
-  release detaches it, only if this role's receipt (`axelHeld`) and the clone's parent both say it is ours. A
-  spectator's visual never takes Axel's pair.
+  On the friend, op 13 attaches the Axel clone (the role's source) to its own player (`SmAxelApplyHold`), and op 14
+  or the role's release detaches it. A pair is the role's only with its receipt (`axelHeld`) as well as a matching
+  parent, flags, bone and no callback (`SmAxelCloneHeld`, as Thorn's helper requires `attached`). A matching pair
+  this role never made belongs to another activation: op 13 does not take it as its own, op 14 never detaches it,
+  and a continuation does not carry it (Ione's `75233daf`). A spectator's visual never takes Axel's pair.
 - A down or a load retires through the existing release paths. The friend's logical down, lease or scope loss
   releases the role, and its cleanup detaches the Axel clone before the player's own detach and idle (`42C5F0`,
   `42D0E0`) unwind the borrowed capture. On the host, a seat leaving the candidate table releases the role while the
@@ -349,12 +359,21 @@ capture reaches it:
 - the adapter's reads, against simulated memory with a failure at each field: masks (`AxelReadMasks`), executor
   identity and contact (`AxelReadActor`, `AxelReadContact`), and the chain (`AxelReadChain`).
 
-`kh2coop_axel_reaction_adapter_test` compiles `AxelReactions.inl` itself against simulated memory: a friend's
-completion end to end (consume once, role before callback, 1/3 naming the friend), duplicate, stale, replaced and
-wrong-owner completions, the abort's final effect through `SmAxelPlayer` and `SmAxelAct` (lost, unread and recovered
-executor identities, no RC bound), the role's lifetime and the hold record, and the friend's offer, proof and press.
-ScriptActorOwner is a recorder there: the role stream, its client replay and the hook bodies' one-line calls are
-not exercised on the Mac.
+`kh2coop_axel_reaction_adapter_test` compiles `AxelReactions.inl` itself against simulated memory, covering:
+- a friend's completion end to end (consume once, role before callback, 1/3 naming the friend);
+- duplicate, stale, replaced and wrong-owner completions;
+- the abort's final effect through `SmAxelPlayer`, `SmAxelAct` and `SmAxelCaptureQuery`: lost, unread and recovered
+  executor identities, no RC bound, and a downed or otherwise ineligible host;
+- the unarmed abort, which offers friends nothing and runs none of their claims;
+- the role's lifetime and the hold record;
+- the client's hold of the Axel clone against recorded native attach and detach: no receipt, its own pair, a
+  replaced parent;
+- the friend's offer, proof and press.
+
+ScriptActorOwner is a recorder there. Not exercised on the Mac:
+- the role stream and its client replay;
+- the hook bodies' one-line calls;
+- the slot installer behind `SmOwnerAxelAbortReady`.
 
 **Known limits:**
 - **Not run live.** Native release timing, whether a host puppet runs `AP12`'s trigger 26 (Clear Light for a friend

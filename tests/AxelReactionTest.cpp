@@ -414,29 +414,43 @@ int main() {
     }
     {
         // A friend owns and executes its own RC; the host consumes its claim once.
-        check(R::AxelExecutionAdmitted(0) && R::AxelExecutionAdmitted(1) && R::AxelExecutionAdmitted(2) &&
-              !R::AxelExecutionAdmitted(3),"every seat may execute an Axel RC");
+        check(R::AxelExecutionAdmitted(0,true) && R::AxelExecutionAdmitted(1,true) && R::AxelExecutionAdmitted(2,true) &&
+              !R::AxelExecutionAdmitted(3,true),"with the abort armed, every seat may execute an Axel RC");
+        check(R::AxelExecutionAdmitted(0,false) && !R::AxelExecutionAdmitted(1,false) && !R::AxelExecutionAdmitted(2,false),
+              "unarmed, only the host may");
         const auto s=Seats({100,0,1100},{100,0,600});
         check(R::AxelFamilyWinner(R::kOvertakerSpheres,overtakerOn,axel,0,s)==1,"the nearer friend wins Overtaker");
         R::AxelWindows w;
         (void)w.Tick(0,true,1,kSource,kEpoch,80,s);
         auto* friendWindow=w.Find(R::kOvertaker);
-        check(friendWindow && !R::AxelConsume(*friendWindow,Claim(*friendWindow,0,kHost),kEpoch,81,s) && !friendWindow->consumed,
+        check(friendWindow && !R::AxelConsume(*friendWindow,Claim(*friendWindow,0,kHost),kEpoch,81,s,true) && !friendWindow->consumed,
               "the host's claim on the friend's window consumes nothing");
-        check(!R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kHost),kEpoch,81,s) && !friendWindow->consumed,
+        check(!R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kHost),kEpoch,81,s,true) && !friendWindow->consumed,
               "nor does the friend's seat under another connection");
         auto stale=Claim(*friendWindow,1,kFriend);stale.epoch=kEpoch-1;
-        check(!R::AxelConsume(*friendWindow,stale,kEpoch,81,s) && !friendWindow->consumed,"nor a claim from another epoch");
-        check(R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kFriend),kEpoch,81,s) &&
-              !R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kFriend),kEpoch,82,s),"the friend's own claim consumes once");
+        check(!R::AxelConsume(*friendWindow,stale,kEpoch,81,s,true) && !friendWindow->consumed,"nor a claim from another epoch");
+        check(R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kFriend),kEpoch,81,s,true) &&
+              !R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kFriend),kEpoch,82,s,true),"the friend's own claim consumes once");
         const auto old=Claim(*friendWindow,1,kFriend);
         (void)w.Tick(0,false,-1,kSource,kEpoch,83,s);(void)w.Tick(0,true,1,kSource,kEpoch,84,s);
         auto* next=w.Find(R::kOvertaker);
-        check(next && next->occurrence>old.occurrence && !R::AxelConsume(*next,old,kEpoch,85,s) && !next->consumed,
+        check(next && next->occurrence>old.occurrence && !R::AxelConsume(*next,old,kEpoch,85,s,true) && !next->consumed,
               "a claim for a replaced occurrence consumes nothing in the new one");
         R::AxelWindows chained;R::AxelFrameFacts f{};f.observed=true;f.active={false,true,false};f.winners={-1,1,-1};
         check(chained.Frame(f,kSource,kEpoch,85,s)==2u && chained.Find(R::kClearLight)->slot==1,
               "the friend's Overtaker chains its own Clear Light");
+    }
+    {
+        // Ione's 75233daf: unarmed (the 1/101 gate refused), a friend is offered nothing and its claim consumes nothing.
+        const auto s=Seats({100,0,1100},{100,0,600});
+        check(R::AxelFamilyWinner(R::kOvertakerSpheres,overtakerOn,axel,0,R::AxelOfferSeats(s,true))==1 &&
+              R::AxelFamilyWinner(R::kOvertakerSpheres,overtakerOn,axel,0,R::AxelOfferSeats(s,false))!=1,
+              "unarmed, the nearer friend wins no offer");
+        R::AxelWindows w;
+        (void)w.Tick(0,true,1,kSource,kEpoch,80,s);
+        auto* friendWindow=w.Find(R::kOvertaker);
+        check(friendWindow && !R::AxelConsume(*friendWindow,Claim(*friendWindow,1,kFriend),kEpoch,81,s,false) &&
+              !friendWindow->consumed,"and a friend's claim consumes nothing unarmed");
     }
     {
         // The safe abort (Ione's probe 694ad7cd: a friend's actor lost before contact made 1/3 name the host). 1/3 keeps
