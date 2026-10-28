@@ -454,6 +454,9 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
     judged = fought or ["downs"]
     # Lead #56: a split judges one round, and its ledgers run right after it, so a later party down is no failure.
     single = len(fought) == 1 and not downs
+    # vuh2912-hp-07: B2 (the downs alone) closes and judges its window right after owner_downs too; its 42 s clip_wait
+    # left both seats idle with the guards off, and Axel took the party to a game over before the end mark.
+    downs_only = downs and not fought
     ledger_marks = [f"m_{name}{k}" for name in judged for k in (0, 1)]
     opening = [
         *arrival([HP_ENV, HP_ENV]),
@@ -488,7 +491,7 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
     settle = [
         {"do": "wait", "ms": 4000},
         {"do": "save", "as": "boss_settled", "expr": living},
-        *([] if single else captures),
+        *([] if single or downs_only else captures),
         {"do": "hp_ledger", "objectId": AXEL_OBJECT, "program": 137, "marks": ledger_marks, "as": "ledger", "require": False,
          "window": [ledger_marks[0], ledger_marks[-1]],
          "phases": [{"name": name, "from": f"m_{name}0", "to": f"m_{name}1", **HP_PHASES[name]} for name in judged]},
@@ -505,7 +508,7 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
         marks("m_downs0"),
         {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000,
          "aside": AXEL_ARENA},
-        {"do": "clip_wait"},
+        *([] if downs_only else [{"do": "clip_wait"}]),
         marks("m_downs1"),
         {"do": "assert", "expr": "all(saved['owner_downs']['owners'][k] for k in ('0', '1'))",
          "message": "each owner must be downed once and revived by the other seat"},
@@ -527,8 +530,10 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
         tail = [*([{"do": "revive_guard", "on": False, "as": f"{rounds[0]}_guard"}] if rounds else []),
                 {"do": "clip_wait", "require": True}, *captures]
         return opening + fighting + settle + judging + tail
-    middle = fighting + settle + downing if fought else downing + settle
-    return opening + middle + judging
+    if downs_only:
+        # Judged, then owner_downs' clips (diagnostics, not required) and the stills.
+        return opening + downing + settle + judging + [{"do": "clip_wait"}, *captures]
+    return opening + fighting + settle + downing + judging
 
 
 # vuh2912-hp-02/03: chained on PC1's 22-HP saves, the later rounds and the downs fall to Axel's pressure, and the

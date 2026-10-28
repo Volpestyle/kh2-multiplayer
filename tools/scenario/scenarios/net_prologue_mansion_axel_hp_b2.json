@@ -197,9 +197,6 @@
    }
   },
   {
-   "do": "clip_wait"
-  },
-  {
    "do": "save",
    "as": "m_downs1",
    "expr": "[log_count('', 0), log_count('', 1)]"
@@ -222,16 +219,6 @@
    "do": "save",
    "as": "boss_settled",
    "expr": "[[(a['hp'], a.get('maxHp')) for a in actors(i) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] for i in (0, 1)]"
-  },
-  {
-   "do": "capture",
-   "instance": 0,
-   "name": "settled_host"
-  },
-  {
-   "do": "capture",
-   "instance": 1,
-   "name": "settled_friend"
   },
   {
    "do": "hp_ledger",
@@ -292,6 +279,19 @@
    "as": "verdict",
    "require": true,
    "arrivalTimeoutMs": 20000
+  },
+  {
+   "do": "clip_wait"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "settled_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "settled_friend"
   }
  ]
 }

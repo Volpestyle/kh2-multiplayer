@@ -3594,7 +3594,14 @@ fighting split now judges one round, and its ledgers run right after it:
   `target_ledger` has no round to judge.
 - `net_prologue_mansion_axel_hp_b2.json`: `owner_downs` right after the friend's take-over, with no round. The
   `hp_ledger` then judges the closed downs window (one phase, `downs`, that asks for no hits) and pins the boss
-  lifetime, and the `target_ledger` judges only the downs.
+  lifetime, and the `target_ledger` judges only the downs. The end mark follows `owner_downs` directly, and the
+  settle, both ledgers and `coop_verdict` come next; `owner_downs`' clips (diagnostics, not required) and the stills
+  are collected only after the verdict. In vuh2912-hp-07 `owner_downs` passed in 8.6 s, then its 42 s `clip_wait`
+  left both seats idle with the guards off, and Axel took the party to a game over before the end mark.
+- **Live evidence so far (VUH-2912 78182198, a5b337a, FM-02 saves, one PC):** in vuh2912-hp-07 `owner_downs` passed
+  after the friend's take-over: each owner was force-downed (logical, engine HP 1) and revived natively by the other
+  seat (host to 5/22), and both seats' clips finalized (360 frames each). That run's ledgers are not judgeable: the
+  game over above came before its end mark.
 
 In the two single-round splits, nothing waits for a revive after the round. The settle, `hp_ledger`,
 `target_ledger` and `coop_verdict` follow the end mark directly. Only then does the run stop the revive guard,
