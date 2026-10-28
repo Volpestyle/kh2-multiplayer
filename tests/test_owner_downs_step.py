@@ -29,16 +29,31 @@ class Rig:
         self.revive, self.kill_result, self.kills, self.clips, self.guards = revive, kill_result, [], [], []
         self.pending = []  # (time, seat) revives
         self.ticks = {0: None, 1: None}  # each seat's latest down line tickMs
+        self.seq = {0: [], 1: []}         # each seat's downed lines in log order (downed_sequence)
+        self.on_read = {}                 # seat -> callback after its log is read
 
     def game_over(self, request=True, fault=False):
         """The host's full-party line, by the game-over request unless `request` is false."""
         self.counts[(0, FULL)] += 1
-        self.counts[(0, REQUEST)] = self.counts.get((0, REQUEST), 0) + int(request)
-        self.counts[(0, FAULT)] = self.counts.get((0, FAULT), 0) + int(fault)
+        self.seq[0].append(("full", "game-over-request" if request else "native-death"))
+        if fault:
+            self.seq[0].append(("fault",))
 
-    def down(self, seat):
+    def down(self, seat, revive=True):
         self.counts[(seat, DOWN)] += 1
-        self.pending.append((self.t + self.revive, seat))
+        self.seq[seat].append(("down", f"E{seat}"))
+        if revive:
+            self.pending.append((self.t + self.revive, seat))
+
+    def revived(self, seat):
+        self.counts[(seat, UP)] += 1
+        self.seq[seat].append(("up",))
+
+    def read(self, seat):
+        seq = list(self.seq[seat])
+        if seat in self.on_read:
+            self.on_read[seat](self)
+        return seq
 
     def is_down(self, seat):
         return self.counts[(seat, DOWN)] > self.counts[(seat, UP)]
@@ -53,7 +68,7 @@ class Rig:
             if at <= self.t:
                 self.pending.remove((at, seat))
                 if not self.is_down(1 - seat):  # a downed reviver revives nobody
-                    self.counts[(seat, UP)] += 1
+                    self.revived(seat)
                 else:
                     self.pending.append((at + 0.5, seat))
 
@@ -74,7 +89,8 @@ class Rig:
         try:
             return RUN.step_owner_downs(ctx, {"owners": [1, 0], **step}, _count=lambda i, n: self.counts.get((i, n), 0),
                                         _kill=self.kill, _guard=self.guard, _clip=self.clips.append,
-                                        _now=lambda: self.t, _sleep=self.sleep, _tick=self.ticks.get), ctx, None
+                                        _now=lambda: self.t, _sleep=self.sleep, _tick=self.ticks.get,
+                                        _seq=self.read), ctx, None
         except RUN.StepFailed as error:
             return None, ctx, error
 
@@ -285,11 +301,96 @@ class OwnerDownsTest(unittest.TestCase):
     def test_a_seat_revived_before_the_game_over_resets_the_bound(self):
         # Both down at 3.0 with fullPartyMs 2000; the friend is revived at 4.5, so the bound never expires.
         def revive_friend(r):
-            r.counts[(1, UP)] += 1
+            r.revived(1)
             r.pending = [(at, s) for at, s in r.pending if s != 1]
         rig = Rig(revive=30.0, script={3.0: lambda r: r.down(0), 4.5: revive_friend, 6.0: lambda r: r.game_over()})
         _, _, error = rig.run(fullParty="continue", fullPartyMs=2000)
         self.assertIn("PRODUCT FAILURE", str(error))  # and a game over with the friend standing is acceptance 3
+
+    # Ione 313a3a5d (1): proof that both seats were down before the request, from each seat's own log order.
+    def test_a_request_while_the_friend_stands_fails_even_if_the_friend_falls_right_after(self):
+        def friend_falls_after_the_host_read(r):  # the friend's down lands just after the host's log is read
+            if r.seq[0] and r.seq[0][-1][0] == "full" and not r.is_down(1):
+                r.down(1, revive=False)
+        rig = Rig(revive=30.0, script={0.5: lambda r: r.down(0), 2.0: lambda r: r.game_over()})
+        rig.kill_result = "WrongState"  # no forced Kill: the friend stands until after the request
+        rig.on_read[0] = friend_falls_after_the_host_read
+        _, ctx, error = rig.run(fullParty="continue")
+        self.assertIn("PRODUCT FAILURE (VUH-2931 acceptance 3)", str(error))
+        self.assertIsNone(ctx.saved["owner_downs"]["fullParty"])
+
+    def test_a_friend_down_logged_after_the_request_has_no_witness_and_fails(self):
+        # Request at 2.0 while the friend stands; the friend's down lands in the same tick, before the next reads.
+        def request_then_friend_down(r):
+            r.game_over()
+            r.down(1, revive=False)
+        rig = Rig(revive=30.0, script={0.5: lambda r: r.down(0), 2.0: request_then_friend_down})
+        rig.kill_result = "WrongState"
+        _, ctx, error = rig.run(fullParty="continue")
+        self.assertIn("no earlier both-down witness", str(error))
+        self.assertIsNone(ctx.saved["owner_downs"]["fullParty"])
+
+    def test_two_downs_and_one_revive_leave_the_friend_standing(self):
+        # A re-down within one episode, then one revive: the friend stands although its downs exceed its revives.
+        def friend_twice_then_up(r):
+            r.down(1, revive=False)
+            r.down(1, revive=False)
+            r.revived(1)
+        rig = Rig(revive=30.0, script={0.5: lambda r: r.down(0), 1.0: friend_twice_then_up, 2.0: lambda r: r.game_over()})
+        rig.kill_result = "WrongState"
+        _, _, error = rig.run(fullParty="continue")
+        self.assertIn("PRODUCT FAILURE (VUH-2931 acceptance 3)", str(error))
+
+    def test_a_revive_or_re_down_between_the_witness_and_the_request_is_not_proven(self):
+        for name, change in (("revive and re-down", lambda r: (r.revived(1), r.down(1, revive=False))),
+                             ("re-down", lambda r: r.down(1, revive=False))):
+            with self.subTest(name):
+                def at_request(r, change=change):
+                    change(r)
+                    r.game_over()
+                rig = Rig(revive=30.0, script={3.0: lambda r: r.down(0), 4.0: at_request})
+                _, ctx, error = rig.run(fullParty="continue")
+                self.assertIn("between the both-down witness and the full-party line", str(error))
+                self.assertIsNone(ctx.saved["owner_downs"]["fullParty"])
+
+    def test_a_host_revived_and_downed_again_at_the_request_is_not_proven(self):
+        rig = self.both_down_then_game_over()
+        def host_up_and_down(r):
+            r.revived(0)
+            r.down(0, revive=False)  # down again by the next read, but not the witness's down
+        rig.script[4.0] = lambda r: (r.game_over(), host_up_and_down(r))
+        _, _, error = rig.run(fullParty="continue")
+        self.assertIn("not proven", str(error))
+
+    # Ione 313a3a5d (2): the full-party wait and its acceptance stay inside timeoutMs.
+    def test_the_full_party_wait_ends_at_the_step_deadline(self):
+        rig = Rig(revive=30.0, script={0.5: lambda r: r.down(0), 1.0: lambda r: r.down(1, revive=False)})
+        rig.kill_result = "WrongState"
+        _, _, error = rig.run(fullParty="continue", timeoutMs=2000, fullPartyMs=5000)
+        self.assertIn("within 2000 ms", str(error))
+        self.assertLessEqual(rig.t, 2.25)
+
+    def test_a_request_after_the_step_deadline_does_not_pass(self):
+        rig = Rig(revive=30.0, script={0.5: lambda r: r.down(0), 1.0: lambda r: r.down(1, revive=False),
+                                       2.25: lambda r: r.game_over()})
+        rig.kill_result = "WrongState"
+        result, ctx, error = rig.run(fullParty="continue", timeoutMs=2000, fullPartyMs=5000)
+        self.assertIsNone(result)
+        self.assertIn("within 2000 ms", str(error))
+        self.assertIsNone(ctx.saved["owner_downs"]["fullParty"])
+
+    def test_the_parser_reads_each_seats_own_log_order(self):
+        host = ("[downed] gate intercept mode=0 episode=90E43BDB00000001 actor=7FF7969BE050 hp=0 tickMs=932101718\n"
+                "[downed] full party down episode=90E43BDB00000001: the host takes the native game over (Continue "
+                "retries the room) path=game-over-request mode=0\n[downed] full party down: game-over request FAULT\n")
+        friend = ("[downed] gate intercept mode=4 logical=1 episode=D339765E00000001 actor=7F hp=14 tickMs=932095468\n"
+                  "[downed] revive returned hp=5\n[downed] gate intercept mode=4 logical=1 episode=D339765E00000002 tickMs=1\n")
+        self.assertEqual(RUN.downed_sequence(host), [("down", "90E43BDB00000001"), ("full", "game-over-request"), ("fault",)])
+        view = RUN.downed_view(RUN.downed_sequence(friend))
+        self.assertEqual((view["down"], view["mark"]), (True, (2, "D339765E00000002")))
+        self.assertFalse(RUN.downed_view([("down", "E"), ("down", "E"), ("up",)])["down"])  # downs > revives, standing
+        self.assertEqual(RUN.downed_view([("down", "E"), ("full", "game-over-request")])["fulls"],
+                         [{"path": "game-over-request", "afterOpenDown": True}])
 
     def test_the_validator_checks_full_party_and_skip_if(self):
         boot = {"do": "boot"}
