@@ -400,9 +400,9 @@ def target_round(name, fighter, reviver):
         # Ione fc9e195f (1): the window opens on the fighter's selection and settled HP, not merely after them. No
         # Axel hit, claim or selection change between the aligned snapshot and here, so both held at the mark.
         {"do": "assert", "expr": f"saved['{name}_quiet']['aligned'] and {quiet()} == {{k: saved['{name}_quiet'][k] "
-                                 f"for k in ('hits', 'claims', 'targets')}} and {selected(fighter)}",
+                                 f"for k in ('hits', 'claims', 'targets')}} and {selected(fighter)} and {standing()}",
          "message": f"SETUP FAILURE (window), not a targeting result: {name}'s window opened without Axel's selection of "
-                    f"the {seat[fighter]} and settled boss HP"},
+                    f"the {seat[fighter]}, settled boss HP and both seats standing"},
         # The clips run as long as the round can (the step waits for them), so the round's hits are on film.
         {"do": "fight", "instances": [fighter], "seconds": 20, "reach": 120, "as": name,
          "until": f"{selected(fighter)} and {hit} and {landed}",
