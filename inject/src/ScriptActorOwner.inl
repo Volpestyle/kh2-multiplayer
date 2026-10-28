@@ -1050,11 +1050,14 @@ static void __fastcall SmOwnerPlayer(std::uint64_t* args) {
     const auto source=SmOwnerVmSource(netId,objectId);
     enemysync::DownedScope scope;
     if(!source || !SmOwnerScope(scope))return;
+    // VUH-2913: inside Axel II's RC flow, the executor's own actor, not the nearest seat, and never another seat
+    // in its place (R::AxelPlayerRouteFor).
+    std::uint32_t axel=0;
+    const auto route=SmAxelPlayerRoute(source,scope,axel);
+    if(route==R::AxelPlayerRoute::Executor){args[0]=R::Tagged(R::kTagAddress,axel);return;}
+    if(route==R::AxelPlayerRoute::Unresolved)return;
     auto* role=SmOwnerRoleForSource(source);
-    // VUH-2913: inside Axel II's RC flow, the seat that ran it, not the nearest one.
-    const int axel=SmAxelExecutorSlot(source);
-    const auto slot=R::AxelPlayerSlot(axel>=0,static_cast<std::uint8_t>(axel),
-        role && SmOwnerCurrent(*role,scope)?role->slot:SmOwnerNearest(source,scope));
+    const auto slot=role && SmOwnerCurrent(*role,scope)?role->slot:SmOwnerNearest(source,scope);
     const auto actor=slot>=0 && slot<3?SmOwnerSeatActor(static_cast<std::uint8_t>(slot)):0;
     const auto handle=SmOwnHandle(actor);
     if(handle)args[0]=R::Tagged(R::kTagAddress,handle);

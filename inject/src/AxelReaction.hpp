@@ -27,6 +27,12 @@ inline int AxelCommandIndex(std::uint32_t command) noexcept {
 inline bool AxelEncounter(std::uint16_t world,std::uint16_t room,std::uint16_t battle) noexcept {
     return world==kAxelIIWorld && room==kAxelIIRoom && battle==kAxelIIBattle;
 }
+// The host's per-frame mint runs only for the host seat itself, in Axel II's encounter; everywhere else it does
+// nothing (and reads nothing).
+inline bool AxelHostFrameAdmitted(bool hostActive,std::uint8_t localSlot,std::uint16_t world,std::uint16_t room,
+                                  std::uint16_t battle) noexcept {
+    return hostActive && localSlot==0 && AxelEncounter(world,room,battle);
+}
 inline std::uint32_t AxelResource(std::uint16_t command) noexcept { return kAxelResourceBand|command; }
 inline bool AxelResourceFor(std::uint32_t resource,std::uint32_t objectId,std::uint16_t& command) noexcept {
     command=static_cast<std::uint16_t>(resource&0xFFFFu);
@@ -50,23 +56,27 @@ inline bool AxelGroupActive(const AxelGroupMasks& m,unsigned group) noexcept {
 }
 inline constexpr unsigned kOvertakerGroup=20,kBurstFrontierGroupA=23,kBurstFrontierGroupB=24;
 
-// REACTION rows on the root (bone 16384), actor-local. Local -z is Axel's forward (his forward attack rows,
-// group 8 at z=-228); ROT_Y=atan2(vx,vz), so world forward is (sin, cos).
-struct AxelSphere { float x{},y{},z{},r{}; };
-inline constexpr std::array<AxelSphere,1> kOvertakerSpheres{{{0,0,0,2800}}};
+// REACTION rows on the root (bone 16384), actor-local, each with its collision group. Local -z is Axel's forward
+// (his forward attack rows, group 8 at z=-228); ROT_Y=atan2(vx,vz), so world forward is (sin, cos).
+struct AxelSphere { float x{},y{},z{},r{}; unsigned group{}; };
+inline constexpr std::array<AxelSphere,1> kOvertakerSpheres{{{0,0,0,2800,kOvertakerGroup}}};
+// 58A opens group 23 (the line of seven), 59A group 24 (the three above).
 inline constexpr std::array<AxelSphere,10> kBurstFrontierSpheres{{
-    {0,550,-267,400},{0,150,0,400},{0,350,-126,400},
-    {0,0,-150,200},{0,0,-350,200},{0,0,-550,200},{0,0,-750,200},{0,0,-929,200},{0,0,-1178,200},{0,0,-1444,200}}};
+    {0,550,-267,400,kBurstFrontierGroupB},{0,150,0,400,kBurstFrontierGroupB},{0,350,-126,400,kBurstFrontierGroupB},
+    {0,0,-150,200,kBurstFrontierGroupA},{0,0,-350,200,kBurstFrontierGroupA},{0,0,-550,200,kBurstFrontierGroupA},
+    {0,0,-750,200,kBurstFrontierGroupA},{0,0,-929,200,kBurstFrontierGroupA},{0,0,-1178,200,kBurstFrontierGroupA},
+    {0,0,-1444,200,kBurstFrontierGroupA}}};
 inline constexpr float kAxelSeatTolerance=100.0f; // the player's own body, not modeled per row
 inline ReactionPoint AxelSphereWorld(const AxelSphere& s,ReactionPoint origin,float yaw) noexcept {
     const float forward=-s.z,sinYaw=std::sin(yaw),cosYaw=std::cos(yaw);
     return {origin.x+forward*sinYaw+s.x*cosYaw,origin.y+s.y,origin.z+forward*cosYaw-s.x*sinYaw};
 }
-// The seat inside any of the family's spheres that is nearest Axel; equal distance goes to the lower seat.
-// Downed, stale or missing seats never win.
+// The seat inside any of the family's spheres whose group is active now that is nearest Axel; equal distance goes
+// to the lower seat. A sphere in an inactive group offers nothing natively, so it never wins an owner. Downed,
+// stale or missing seats never win.
 template<std::size_t N>
-inline int AxelFamilyWinner(const std::array<AxelSphere,N>& spheres,ReactionPoint origin,float yaw,
-                            const std::array<ReactionSeat,3>& seats) noexcept {
+inline int AxelFamilyWinner(const std::array<AxelSphere,N>& spheres,const AxelGroupMasks& masks,ReactionPoint origin,
+                            float yaw,const std::array<ReactionSeat,3>& seats) noexcept {
     if(!Finite(origin) || !std::isfinite(yaw))return -1;
     int winner=-1;double nearest=0;
     for(unsigned i=0;i<seats.size();++i) {
@@ -74,6 +84,7 @@ inline int AxelFamilyWinner(const std::array<AxelSphere,N>& spheres,ReactionPoin
         if(!seat.connection || !seat.living || !seat.fresh || !seat.capable || !Finite(seat.position))continue;
         bool inside=false;
         for(const auto& sphere:spheres) {
+            if(!AxelGroupActive(masks,sphere.group))continue;
             const auto c=AxelSphereWorld(sphere,origin,yaw);
             const double x=seat.position.x-c.x,y=seat.position.y-c.y,z=seat.position.z-c.z;
             const double reach=static_cast<double>(sphere.r)+kAxelSeatTolerance;
@@ -105,8 +116,36 @@ inline int AxelChainOwner(const AxelExecutorFacts& e) noexcept {
 // occurrence, so a consumed offer is never offered again while it is still up.
 inline constexpr std::uint32_t kAxelHostWindowFrames=0x7FFFFFFFu; // bounded by the activation instead
 inline constexpr std::uint32_t kAxelClientWindowFrames=180;
+// A claim is admitted only on the frame of a successful observation or the one after it (a claim can be handled
+// before that frame's mint runs).
+inline constexpr std::uint32_t kAxelObservationFrames=1;
+// One host frame's facts: whether Axel's masks and transform were read, and per command whether its offer is up
+// and which seat won it.
+struct AxelFrameFacts {
+    bool observed{};
+    std::array<bool,3> active{};
+    std::array<int,3> winners{-1,-1,-1};
+};
 class AxelWindows {
 public:
+    // The whole host frame. An observation that fails withholds every open window: it is no longer claimable, but
+    // its occurrence stays as a tombstone, so the same activation never mints a second one when reads recover; only
+    // an observed end of the offer clears it. Returns the indices opened this frame as bits.
+    unsigned Frame(const AxelFrameFacts& f,std::uint16_t source,std::uint32_t epoch,std::uint32_t frame,
+                   const std::array<ReactionSeat,3>& seats) noexcept {
+        if(!f.observed) {
+            observed_=false;
+            for(auto& w:windows_)if(w.occurrence)w.consumed=true;
+            return 0;
+        }
+        observed_=true;observedFrame_=frame;
+        unsigned opened=0;
+        for(unsigned i=0;i<windows_.size();++i)if(Tick(i,f.active[i],f.winners[i],source,epoch,frame,seats))opened|=1u<<i;
+        return opened;
+    }
+    bool ObservationCurrent(std::uint32_t frame) const noexcept {
+        return observed_ && frame>=observedFrame_ && frame-observedFrame_<=kAxelObservationFrames;
+    }
     // Returns the window opened by this tick, or nullptr.
     const ReactionWindow* Tick(unsigned index,bool active,int winner,std::uint16_t source,std::uint32_t epoch,
                                std::uint32_t frame,const std::array<ReactionSeat,3>& seats) noexcept {
@@ -124,22 +163,31 @@ public:
         const int index=AxelCommandIndex(command);
         return index>=0 && windows_[static_cast<unsigned>(index)].occurrence?&windows_[static_cast<unsigned>(index)]:nullptr;
     }
-    void Reset() noexcept { windows_={}; } // the sequence never rewinds
+    void Reset() noexcept { windows_={};observed_=false;observedFrame_=0; } // the sequence never rewinds
 private:
     std::array<ReactionWindow,3> windows_{};
     std::uint64_t next_{};
+    bool observed_{};
+    std::uint32_t observedFrame_{};
 };
 
-// Client: the host's offers to this seat. The newest occurrence per command; an older one is refused.
+// Client: the host's offers to this seat. The newest occurrence per command; an older one is refused. Order and
+// idempotency hold only within one authority: the host session, its epoch and Axel's netId. A restarted server may
+// reuse an epoch with a fresh sequence, so another session is a new history, never compared with the old one. The
+// adapter also resets these with its room, load, transition and session resets.
 class AxelOffers {
 public:
     bool Apply(std::uint64_t occurrence,std::uint16_t command,std::uint8_t slot,std::uint8_t localSlot,
-               std::uint64_t connection,std::uint16_t source,std::uint32_t epoch,std::uint32_t frame) noexcept {
+               std::uint64_t connection,std::uint16_t source,std::uint32_t epoch,std::uint32_t frame,
+               std::uint64_t session) noexcept {
         const int index=AxelCommandIndex(command);
-        if(index<0 || !occurrence || slot>=3 || !connection || !source || !epoch)return false;
+        if(index<0 || !occurrence || slot>=3 || !connection || !source || !epoch || !session)return false;
         auto& w=windows_[static_cast<unsigned>(index)];
-        if(w.occurrence && w.epoch==epoch && occurrence<w.occurrence)return false;
-        if(w.occurrence==occurrence && w.epoch==epoch)return w.slot==slot && w.connection==connection;
+        auto& from=sessions_[static_cast<unsigned>(index)];
+        const bool sameAuthority=from.session==session && from.epoch==epoch && from.source==source;
+        if(sameAuthority && occurrence<from.occurrence)return false;
+        if(sameAuthority && occurrence==from.occurrence)return from.slot==slot && from.connection==connection;
+        from={session,occurrence,connection,epoch,source,slot};
         if(slot!=localSlot){w={};return true;} // another seat's offer ends ours: one owner per offer
         w={occurrence,connection,epoch,frame,kAxelClientWindowFrames,source,command,slot,false};
         return true;
@@ -148,9 +196,17 @@ public:
         const int index=AxelCommandIndex(command);
         return index>=0 && windows_[static_cast<unsigned>(index)].occurrence?&windows_[static_cast<unsigned>(index)]:nullptr;
     }
-    void Reset() noexcept { windows_={}; }
+    void Reset() noexcept { windows_={};sessions_={}; }
 private:
+    // The last offer seen per command, whoever it named (its high-water mark), and the authority it came from.
+    struct Seen {
+        std::uint64_t session{},occurrence{},connection{};
+        std::uint32_t epoch{};
+        std::uint16_t source{};
+        std::uint8_t slot{0xFF};
+    };
     std::array<ReactionWindow,3> windows_{};
+    std::array<Seen,3> sessions_{};
 };
 
 // A press on either seat: only the seat that owns the live window may act. The host executes its own; a
@@ -163,9 +219,10 @@ inline AxelPress AxelPressDecision(const ReactionWindow* w,std::uint16_t command
     return localSlot==0?AxelPress::Execute:AxelPress::Claim;
 }
 
-// The seat whose actor ran the RC. sysobj_player (1/3) inside Axel's script resolves to it while it is
-// current, instead of the nearest seat. It ends once Axel's attachment and capture of that actor, having been
-// seen, are both gone, or at its lease.
+// The RC's executor: the seat, and the actor on the host, that ran it. It is bound to that actor, not to the seat's
+// eligibility: a downed seat, or one that left the eligible table, still owns the RC its actor is in. It ends only
+// on a confirmed release (Axel's attachment to and capture by that actor both seen, then both read and gone), a new
+// epoch, or, if it never engaged, its lease. An unreadable attachment or capture is unknown, never a release.
 inline constexpr std::uint32_t kAxelExecutorLeaseFrames=1200;
 struct AxelExecutor {
     std::uint16_t command{},source{};
@@ -174,19 +231,27 @@ struct AxelExecutor {
     std::uint32_t epoch{},admittedFrame{};
     bool engaged{};
 };
-inline bool AxelExecutorLive(const AxelExecutor& e,std::uint32_t epoch,std::uint64_t connection,
-                             std::uint32_t frame) noexcept {
-    return e.command && e.slot<3 && e.connection && e.epoch==epoch && e.connection==connection &&
-        frame-e.admittedFrame<kAxelExecutorLeaseFrames;
+inline bool AxelExecutorLive(const AxelExecutor& e,std::uint32_t epoch,std::uint32_t frame) noexcept {
+    return e.command && e.slot<3 && e.connection && e.epoch==epoch &&
+        (e.engaged || frame-e.admittedFrame<kAxelExecutorLeaseFrames);
 }
+struct AxelContact {
+    bool attachedRead{},attached{},capturedRead{},captured{};
+};
 // Returns false once the executor has ended; marks it engaged on first contact.
-inline bool AxelExecutorContinues(AxelExecutor& e,bool attachedToActor,bool capturedByAxel) noexcept {
-    const bool engagedNow=attachedToActor || capturedByAxel;
-    if(engagedNow){e.engaged=true;return true;}
+inline bool AxelExecutorContinues(AxelExecutor& e,const AxelContact& c) noexcept {
+    if((c.attachedRead && c.attached) || (c.capturedRead && c.captured)){e.engaged=true;return true;}
+    if(!c.attachedRead || !c.capturedRead)return true; // not observed this frame: still the RC's
     return !e.engaged;
 }
-inline int AxelPlayerSlot(bool executorLive,std::uint8_t executorSlot,int nearest) noexcept {
-    return executorLive && executorSlot<3?static_cast<int>(executorSlot):nearest;
+// sysobj_player (1/3) inside Axel's script. With no RC bound, the caller's own choice. With one bound, the
+// executor's own actor, whatever its seat's state. If that actor no longer resolves, there is no owner to name:
+// Unresolved, never another seat chosen in its place. 1/3 must still name a live actor (trap 1/18 at 42C576 reads
+// the parent it resolves without a null check), so the adapter keeps the native result and says so.
+enum class AxelPlayerRoute : std::uint8_t { Choice, Executor, Unresolved };
+inline AxelPlayerRoute AxelPlayerRouteFor(bool executorBound,bool executorActorResolves) noexcept {
+    if(!executorBound)return AxelPlayerRoute::Choice;
+    return executorActorResolves?AxelPlayerRoute::Executor:AxelPlayerRoute::Unresolved;
 }
 
 } // namespace kh2coop::inject::scriptmirror::rules

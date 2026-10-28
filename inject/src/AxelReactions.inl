@@ -11,6 +11,7 @@ struct SmAxelState {
     R::AxelExecutor executor{};
     uintptr_t executorActor{};
     std::uint32_t executorHandle{};
+    bool unresolvedLogged{}; // once per executor
     // client
     R::AxelOffers offers{};
     struct Identity { std::uint8_t slot{0xFF};std::uint64_t connection{};std::uint32_t epoch{}; };
@@ -33,35 +34,55 @@ static void SmAxelEndExecutor(const char* why) {
     if(g_axel.executor.command && SmAxelLogBudget())
         Log("[axel-rc] executor end command=%u owner=%u frames=%u engaged=%u reason=%s",g_axel.executor.command,
             g_axel.executor.slot,g_frameCounter-g_axel.executor.admittedFrame,g_axel.executor.engaged?1u:0u,why);
-    g_axel.executor={};g_axel.executorActor=0;g_axel.executorHandle=0;
+    g_axel.executor={};g_axel.executorActor=0;g_axel.executorHandle=0;g_axel.unresolvedLogged=false;
+}
+// Client: the host's offers and identities belong to the room and session they came in; ScriptMirror's room, load,
+// transition and session resets end them.
+static void SmAxelClientReset() {
+    g_axel.offers.Reset();g_axel.identities={};
 }
 static void SmAxelHostReset() {
     if(!g_axel.actor && !g_axel.executor.command)return;
     SmAxelEndExecutor("host-axel-gone");
     g_axel.windows.Reset();g_axel.actor=0;g_axel.handle=0;g_axel.netId=0;g_axel.epoch=0;
 }
-static bool SmAxelExecutorCurrent(const enemysync::DownedScope& scope) {
-    const auto& e=g_axel.executor;
-    return e.slot<3 && R::AxelExecutorLive(e,scope.epoch,scope.connections[e.slot],g_frameCounter) &&
-        g_axel.executorActor && SmOwnHandle(g_axel.executorActor)==g_axel.executorHandle;
+static bool SmAxelExecutorBound(const enemysync::DownedScope& scope) {
+    return g_axel.executor.command && R::AxelExecutorLive(g_axel.executor,scope.epoch,g_frameCounter);
 }
-// 1/3 inside Axel's own script: the seat that ran the current RC, else -1 (the caller keeps its own choice).
-static int SmAxelExecutorSlot(uintptr_t source) {
-    if(!g_sm.hostActive || !source || source!=g_axel.actor || !g_axel.executor.command)return -1;
-    enemysync::DownedScope scope;
-    return SmOwnerScope(scope) && SmAxelExecutorCurrent(scope)?static_cast<int>(g_axel.executor.slot):-1;
+static bool SmAxelExecutorResolves() {
+    return g_axel.executorActor && g_axel.executorHandle && SmOwnHandle(g_axel.executorActor)==g_axel.executorHandle;
+}
+// 1/3 inside Axel's own script (R::AxelPlayerRouteFor): Executor fills handle with the executor's own actor.
+static R::AxelPlayerRoute SmAxelPlayerRoute(uintptr_t source,const enemysync::DownedScope& scope,std::uint32_t& handle) {
+    handle=0;
+    if(!g_sm.hostActive || !source || source!=g_axel.actor)return R::AxelPlayerRoute::Choice;
+    const bool resolves=SmAxelExecutorResolves();
+    const auto route=R::AxelPlayerRouteFor(SmAxelExecutorBound(scope),resolves);
+    if(route==R::AxelPlayerRoute::Executor)handle=g_axel.executorHandle;
+    if(route==R::AxelPlayerRoute::Unresolved && !g_axel.unresolvedLogged && SmAxelLogBudget()) {
+        g_axel.unresolvedLogged=true;
+        Log("[axel-rc] player unresolved command=%u owner=%u: the executor's actor is gone; 1/3 keeps the native result",
+            g_axel.executor.command,g_axel.executor.slot);
+    }
+    return route;
 }
 static void SmAxelExecutorTick(const enemysync::DownedScope& scope) {
     if(!g_axel.executor.command)return;
-    if(!SmAxelExecutorCurrent(scope)){SmAxelEndExecutor("lease-or-seat");return;}
-    std::uint32_t parent=0;uintptr_t capture=0;
-    const bool attached=ReadHitTrace(g_axel.actor+0x6A0,parent) && parent && SmDecode(parent)==g_axel.executorActor;
-    const bool captured=ReadHitTrace(g_axel.executorActor+0x2B0,capture) && capture==g_axel.actor;
+    if(!SmAxelExecutorBound(scope)){SmAxelEndExecutor(g_axel.executor.epoch!=scope.epoch?"epoch":"lease");return;}
+    // A gone actor is captured by no one; Axel's own attachment is still read.
+    R::AxelContact contact{};
+    std::uint32_t parent=0;
+    contact.attachedRead=ReadHitTrace(g_axel.actor+0x6A0,parent);
+    const bool resolves=SmAxelExecutorResolves();
+    contact.attached=contact.attachedRead && parent && (!resolves || SmDecode(parent)==g_axel.executorActor);
+    uintptr_t capture=0;
+    contact.capturedRead=!resolves || ReadHitTrace(g_axel.executorActor+0x2B0,capture);
+    contact.captured=resolves && contact.capturedRead && capture==g_axel.actor;
     const bool was=g_axel.executor.engaged;
-    if(!R::AxelExecutorContinues(g_axel.executor,attached,captured)){SmAxelEndExecutor("released");return;}
+    if(!R::AxelExecutorContinues(g_axel.executor,contact)){SmAxelEndExecutor("released");return;}
     if(!was && g_axel.executor.engaged && SmAxelLogBudget())
         Log("[axel-rc] executor engaged command=%u owner=%u attached=%u captured=%u",g_axel.executor.command,
-            g_axel.executor.slot,attached?1u:0u,captured?1u:0u);
+            g_axel.executor.slot,contact.attached?1u:0u,contact.captured?1u:0u);
 }
 static bool SmAxelMasks(R::AxelGroupMasks& m) noexcept {
     m={};uintptr_t collision=0;
@@ -85,7 +106,7 @@ static bool SmAxelEmit(const R::ReactionWindow& w) {
 }
 // Host, once per frame from SmTickReactions. Three compares leave every other room.
 static void SmAxelFrame(const enemysync::DownedScope& scope) {
-    if(!g_sm.hostActive || !R::AxelEncounter(scope.worldId,scope.roomId,scope.battleProgram) || scope.localSlot!=0) {
+    if(!R::AxelHostFrameAdmitted(g_sm.hostActive,scope.localSlot,scope.worldId,scope.roomId,scope.battleProgram)) {
         SmAxelHostReset();return;
     }
     std::uint16_t netId=0;
@@ -99,35 +120,42 @@ static void SmAxelFrame(const enemysync::DownedScope& scope) {
     SmAxelExecutorTick(scope);
     R::AxelGroupMasks masks{};float xyz[3]{},yaw=0;
     const auto entity=actor+offsets::actor::ENTITY_TRANSFORM;
-    if(!SmAxelMasks(masks) || !ReadHitTraceMemory(entity+offsets::entity::POS_X,xyz,sizeof(xyz)) ||
-       !ReadHitTrace(entity+offsets::entity::ROT_Y,yaw))return;
+    R::AxelFrameFacts facts{};
+    facts.observed=SmAxelMasks(masks) && ReadHitTraceMemory(entity+offsets::entity::POS_X,xyz,sizeof(xyz)) &&
+        ReadHitTrace(entity+offsets::entity::ROT_Y,yaw);
     const auto seats=SmOwnerLivingSeats(scope);
-    const R::ReactionPoint origin{xyz[0],xyz[1],xyz[2]};
-    R::AxelExecutorFacts chain{};
-    if(g_axel.executor.command && SmAxelExecutorCurrent(scope)) {
-        chain.current=true;chain.command=g_axel.executor.command;chain.slot=g_axel.executor.slot;
-        if(!ReadHitTrace(g_axel.executorActor+0x638,chain.followup) || !ReadHitTrace(g_axel.executorActor+0x18C,chain.flags))
-            chain.current=false;
+    if(facts.observed) {
+        const R::ReactionPoint origin{xyz[0],xyz[1],xyz[2]};
+        R::AxelExecutorFacts chain{};
+        if(SmAxelExecutorBound(scope) && SmAxelExecutorResolves()) {
+            chain.current=true;chain.command=g_axel.executor.command;chain.slot=g_axel.executor.slot;
+            if(!ReadHitTrace(g_axel.executorActor+0x638,chain.followup) || !ReadHitTrace(g_axel.executorActor+0x18C,chain.flags))
+                chain.current=false;
+        }
+        const bool overtaker=R::AxelGroupActive(masks,R::kOvertakerGroup);
+        const bool burst=R::AxelGroupActive(masks,R::kBurstFrontierGroupA) || R::AxelGroupActive(masks,R::kBurstFrontierGroupB);
+        const int chainOwner=R::AxelChainOwner(chain);
+        facts.active={overtaker,chainOwner>=0,burst};
+        facts.winners={overtaker?R::AxelFamilyWinner(R::kOvertakerSpheres,masks,origin,yaw,seats):-1,chainOwner,
+            burst?R::AxelFamilyWinner(R::kBurstFrontierSpheres,masks,origin,yaw,seats):-1};
+    } else if(SmAxelLogBudget()) {
+        Log("[axel-rc] observation failed source=%u frame=%u: open windows withheld",netId,g_frameCounter);
     }
-    const bool overtaker=R::AxelGroupActive(masks,R::kOvertakerGroup);
-    const bool burst=R::AxelGroupActive(masks,R::kBurstFrontierGroupA) || R::AxelGroupActive(masks,R::kBurstFrontierGroupB);
-    const int chainOwner=R::AxelChainOwner(chain);
-    const bool active[3]{overtaker,chainOwner>=0,burst};
-    const int winners[3]{overtaker?R::AxelFamilyWinner(R::kOvertakerSpheres,origin,yaw,seats):-1,chainOwner,
-        burst?R::AxelFamilyWinner(R::kBurstFrontierSpheres,origin,yaw,seats):-1};
+    std::array<R::ReactionWindow,3> previous{};
+    for(unsigned i=0;i<3;++i)if(const auto* w=g_axel.windows.Find(R::kAxelCommands[i]))previous[i]=*w;
+    const unsigned opened=g_axel.windows.Frame(facts,netId,scope.epoch,g_frameCounter,seats);
     for(unsigned i=0;i<3;++i) {
         const auto command=R::kAxelCommands[i];
-        const auto* before=g_axel.windows.Find(command);
-        const auto previous=before?*before:R::ReactionWindow{};
-        const auto* opened=g_axel.windows.Tick(i,active[i],winners[i],netId,scope.epoch,g_frameCounter,seats);
-        if(opened) {
-            const bool sent=SmAxelEmit(*opened);
+        const auto* now=g_axel.windows.Find(command);
+        if((opened>>i)&1u) {
+            const bool sent=SmAxelEmit(*now);
             if(SmAxelLogBudget())
                 Log("[axel-rc] offer source=%u resource=%u occurrence=%llu command=%u owner=%u epoch=%u sent=%u",
-                    netId,R::AxelResource(command),opened->occurrence,command,opened->slot,scope.epoch,sent?1u:0u);
-        } else if(previous.occurrence && !g_axel.windows.Find(command) && SmAxelLogBudget()) {
+                    netId,R::AxelResource(command),now->occurrence,command,now->slot,scope.epoch,sent?1u:0u);
+        } else if(previous[i].occurrence && !now && SmAxelLogBudget()) {
             Log("[axel-rc] offer end source=%u occurrence=%llu command=%u owner=%u consumed=%u frames=%u",
-                netId,previous.occurrence,command,previous.slot,previous.consumed?1u:0u,g_frameCounter-previous.openedFrame);
+                netId,previous[i].occurrence,command,previous[i].slot,previous[i].consumed?1u:0u,
+                g_frameCounter-previous[i].openedFrame);
         }
     }
 }
@@ -152,8 +180,10 @@ static bool SmAxelApplyOffer(const R::Call& c,std::uint16_t command,uintptr_t ac
     const auto& identity=g_axel.identities[static_cast<unsigned>(R::AxelCommandIndex(command))];
     if(R::BitsOf(c.values[2])!=command || slot>=3 || identity.slot!=slot || identity.epoch!=scope.epoch ||
        scope.connections[slot]!=identity.connection)return false;
+    std::uint64_t session=0;
+    if(!enemysync::SessionIdentity(session) || !session)return false;
     const bool applied=g_axel.offers.Apply(occurrence,command,static_cast<std::uint8_t>(slot),scope.localSlot,
-        identity.connection,c.netId,scope.epoch,g_frameCounter);
+        identity.connection,c.netId,scope.epoch,g_frameCounter,session);
     if(applied && SmAxelLogBudget())
         Log("[axel-rc] client offer source=%u occurrence=%llu command=%u owner=%u mine=%u epoch=%u",c.netId,occurrence,
             command,slot,slot==scope.localSlot?1u:0u,scope.epoch);
@@ -199,6 +229,7 @@ static bool SmAxelComplete(const enemysync::ScriptReactionCompletionRecord& clai
     };
     std::uint16_t command=0;enemysync::DownedScope scope;
     if(!D::Check(g_smReactionCallback!=nullptr,"callback-ready",why) || !D::Check(SmAxelHostCurrent(),"host-axel",why) ||
+       !D::Check(g_axel.windows.ObservationCurrent(g_frameCounter),"observation-current",why) ||
        !D::Check(SmOwnerScope(scope),"owner-scope",why) || !D::Check(scope.localSlot==0,"local-host-seat",why) ||
        !D::Check(R::AxelResourceFor(claim.resource,claim.objectId,command) && command==claim.command,"axel-resource",why) ||
        !D::Check(claim.netId==g_axel.netId,"axel-source",why))return refused();

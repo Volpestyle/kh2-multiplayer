@@ -84,7 +84,8 @@ static void SmTickReactions();
 static int SmApplyReactionOffer(const R::Call&,uintptr_t);
 static int SmApplyReactionOwner(const R::Call&,uintptr_t);
 static bool SmCompleteReaction(const enemysync::ScriptReactionCompletionRecord&);
-static int SmAxelExecutorSlot(uintptr_t);
+static R::AxelPlayerRoute SmAxelPlayerRoute(uintptr_t,const enemysync::DownedScope&,std::uint32_t&);
+static void SmAxelClientReset();
 static bool SmSetReactionCommand(const ReactionBinding&,std::uint32_t) noexcept;
 static bool SmOwnerInstall();
 static std::uint16_t SmNativeReactionCurrent(std::uint16_t) noexcept;
@@ -650,6 +651,7 @@ static void SmResetRoom(bool retire = true) {
     g_sm.sender.Reset();
     g_sm.retirements.Reset();
     g_sm.occurrences.Reset();g_sm.reactions={};
+    SmAxelClientReset();
     g_sm.hostEffects.Reset();
     g_sm.hostAttacks.Reset();
     g_sm.clientEffects.Reset();
@@ -1714,6 +1716,7 @@ static void OnFrameStart() {
     if (generation!=g_sm.generation && g_sm.role==2) {
         g_sm.occurrences.Reset();g_sm.reactions={};
     }
+    if (generation!=g_sm.generation || role!=2) SmAxelClientReset(); // VUH-2913: offers never cross a session
     SmTickReactions();
     if (generation != g_sm.generation) g_sm.births.Reset(); // whatever the role: rows never cross a session
     if (role != 1 || !generation) {

@@ -229,14 +229,22 @@ Rules: `inject/src/AxelReaction.hpp`. Runtime: `inject/src/AxelReactions.inl`. T
 **How an offer gets its owner:**
 - **Host mint.** While host Axel II is live in 02/14 btl137 (and only then), the host reads his collision masks
   through the `3BA550` rule each frame. For each family:
-  - Overtaker (group 20) and Burst Frontier (group 23 or 24) are owned by the living seat inside the family's
-    spheres that is nearest Axel, using Axel's yaw.
+  - Overtaker (group 20) and Burst Frontier (group 23 or 24) are owned by the living seat nearest Axel that is
+    inside one of the family's spheres, using Axel's yaw. Only spheres whose own group is active count: with 58A
+    open (group 23, the line of seven), a seat inside a group-24 sphere above Axel cannot take the offer.
   - Clear Light is owned by the current Overtaker's seat, while that seat's actor on the host has `+0x638 == 490`
     and `+0x18C` bit 21.
 - **One window per activation.** It keeps its owner while the offer is up, is consumed at most once, and only the
   next activation opens a new occurrence.
+- **A failed observation withholds.** If Axel's masks or transform can't be read in a frame, every open window
+  stops being claimable. Its occurrence stays as a tombstone, so reads recovering while the same activation is up
+  mint nothing new; only an observed end of the offer clears it. The host consumes a claim only on the frame of a
+  successful observation or the frame after it.
 - **Wire.** Windows travel as reaction identity and offer records, with resource `0xFFFF0000|command` on Axel's
   netId. Owner roles stop minting below that band.
+- **Client receipts.** The friend orders offers per command within one authority: the host session, its epoch and
+  Axel's netId. A restarted server reusing an epoch starts a new history. The offers and identities are also
+  dropped with ScriptMirror's room, load, transition and session resets.
 
 **Prompt and press:**
 - Axel II is a host-routed class, so on both seats the existing native RC cache (refresh `408520`, winner
@@ -248,13 +256,26 @@ Rules: `inject/src/AxelReaction.hpp`. Runtime: `inject/src/AxelReactions.inl`. T
 - **Friend press.** On its own window it consumes locally and sends the completion claim. The host consumes that
   occurrence once and runs the callback with the friend's actor on the host.
 
-**sysobj_player (1/3):** inside Axel's script, 1/3 resolves to the executing seat while that executor is current,
-instead of the nearest seat. So `rc_run_up`, `rc_clear_light` and `idle_after_rc` attach to and wait on the seat
-that pressed. The executor ends at its 1200-frame lease, or once Axel's attachment to that actor and its capture
-by Axel have both been seen and are both gone.
+**sysobj_player (1/3):** inside Axel's script, while an RC is bound, 1/3 names the executor's own actor on the
+host, instead of the nearest seat. So `rc_run_up`, `rc_clear_light` and `idle_after_rc` attach to and wait on the
+seat that pressed.
+- The executor is bound to that actor, not to its seat's eligibility. A seat that is downed, or leaves the eligible
+  table, still owns the RC its actor is in.
+- It ends on a confirmed release: Axel's attachment to that actor and its capture of it, having been seen, are
+  both read and gone. An unreadable attachment or capture is unknown, never a release. It also ends on a new epoch,
+  or at its 1200-frame lease if it never engaged.
+- **If the executor's actor no longer resolves** (its seat's actor on the host is gone mid-RC), no other seat is
+  chosen in its place: 1/3 keeps the native result and logs `[axel-rc] player unresolved`. 1/3 must still name a
+  live actor. Trap 1/18 resolves the parent handle at `42C571` and reads `[rax+4]` at `42C576` without a null
+  check, so naming no actor would fault at Axel's attach. Cancelling the RC itself is not in slice 1.
 
-**Logs:** `[axel-rc] offer`, `offer end`, `client offer`, `local completion`, `complete`, `complete refused`,
-`press refused`, `executor engaged` and `executor end`, 256 lines per session.
+**Logs:** `[axel-rc] offer`, `offer end`, `observation failed`, `client offer`, `local completion`, `complete`,
+`complete refused`, `press refused`, `executor engaged`, `executor end` and `player unresolved`, 256 lines per
+session.
+
+**Tests:** `kh2coop_axel_reaction_test` covers the pure rules, including the encounter gate
+(`AxelHostFrameAdmitted`) and the per-frame step (`AxelWindows::Frame`) the adapter calls. It does not exercise
+the adapter's native reads or wiring.
 
 **Known limits after slice 1:**
 - **Prompt gating is by proof, not by native suppression code.**
