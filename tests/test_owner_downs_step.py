@@ -478,10 +478,68 @@ class OwnerDownsTest(unittest.TestCase):
         self.assertIn("HARNESS FAILURE, both seats down", str(error))
         self.assertIsNone(ctx.saved["owner_downs"]["fullParty"])
 
+    def test_no_forced_down_once_the_step_is_out_of_time(self):
+        rig = Rig()  # seat 1, downed at 1.5, is revived at 4.5; seat 0's down is ready at 6.0, past the 5.9 s deadline
+        _, _, error = rig.run(timeoutMs=5900)
+        self.assertIn("no revive within 5900 ms", str(error))
+        self.assertEqual([seat for _, seat in rig.kills], [1])  # the old code forced seat 0 down at 6.0, then failed
+
     def test_other_kill_results_fail(self):
         rig = Rig(kill_result="InEvent")
         _, _, error = rig.run()
         self.assertIn("returned InEvent", str(error))
+
+
+class ClearanceTest(unittest.TestCase):
+    """Ione 0b4cdc89 (2): clearance measures each game's canonical player (Game.state's validated playerPos), not the
+    camera's target, and a changed or unavailable context is unproven (None)."""
+
+    SCOPE = (2, 20, 0, 137, 137, 137)
+    AXEL = [{"objectType": 3, "name": "B_EX110", "hp": 449, "position": {"x": 0.0, "z": 0.0}}]
+
+    def seat(self, player=0xA000, at=(100.0, 0.0, 0.0), camera=(1000.0, 0.0, 0.0), scope=None):
+        return {"player": player, "playerPos": at, "pos": camera, "roomScope": scope or self.SCOPE}
+
+    def measure(self, *seats, actors=None):
+        """Each seat is (before, after): its state on the read before and after the enemies lookup."""
+        games = [SimpleNamespace(state=(lambda rows=list(pair): rows.pop(0))) for pair in seats]
+        ctx = SimpleNamespace(actors=actors or (lambda index: self.AXEL))
+        return RUN.enemy_clearance(ctx, games)
+
+    def test_players_beside_axel_are_not_clear_whatever_the_cameras_target(self):
+        near, other = self.seat(), self.seat(player=0xB000, at=(0.0, 0.0, 150.0))
+        self.assertEqual(self.measure((near, near), (other, other)), 100.0)
+
+    def test_the_nearer_seat_decides(self):
+        far, near = self.seat(at=(900.0, 0.0, 0.0)), self.seat(player=0xB000, at=(0.0, 0.0, 300.0))
+        self.assertEqual(self.measure((far, far), (near, near)), 300.0)
+
+    def test_an_unavailable_canonical_player_is_unproven(self):
+        for bad in ({"playerPos": None}, {"player": 0}):
+            with self.subTest(bad=bad):
+                seat = dict(self.seat(), **bad)
+                ok = self.seat(player=0xB000)
+                self.assertIsNone(self.measure((seat, seat), (ok, ok)))
+
+    def test_a_changed_player_or_room_across_the_lookup_is_unproven(self):
+        ok = self.seat(player=0xB000)
+        for after in (self.seat(player=0xC000), self.seat(scope=(2, 21, 0, 0, 0, 0))):
+            with self.subTest(after=after):
+                self.assertIsNone(self.measure((self.seat(), after), (ok, ok)))
+
+    def test_seats_in_different_rooms_are_unproven(self):
+        here, there = self.seat(), self.seat(player=0xB000, scope=(2, 21, 0, 0, 0, 0))
+        self.assertIsNone(self.measure((here, here), (there, there)))
+
+    def test_a_lookup_past_its_deadline_is_unproven(self):
+        def late(index):
+            raise RUN.subprocess.TimeoutExpired("kh2ctl entities", 0)
+        seat = self.seat()
+        self.assertIsNone(self.measure((seat, seat), (seat, seat), actors=late))
+
+    def test_no_living_enemy_is_clear(self):
+        seat = self.seat()
+        self.assertEqual(self.measure((seat, seat), actors=lambda index: []), float("inf"))
 
 
 if __name__ == "__main__":
