@@ -1967,9 +1967,11 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     the host's: a seat is down while its latest down line follows its latest revive line. A witness is a poll with
     both seats down and no new full-party line in the host's (later) read, so both were down before the request. The
     host's full-party line is then accepted only if it is by the game-over request (`path=game-over-request`, no
-    request FAULT) and both seats still show the witness's down lines with no revive since. Without a witness a standing seat is a PRODUCT FAILURE (VUH-2931 acceptance 3) and an all-down
-    read is ambiguous; a revive or re-down since the witness is unproven; all fail. The request must come within
-    `fullPartyMs` (10000) of the first witness and before `timeoutMs`. Saved `as` (`owner_downs`): per owner
+    request FAULT) and both seats still show the witness's down lines with no revive since, the friend's from a
+    reread after the host read that saw the request, so friend reads bracket it (Ione ad07d1be). Without a witness a
+    standing seat is a PRODUCT FAILURE (VUH-2931 acceptance 3) and an all-down read is ambiguous; a revive, re-down
+    or unreadable log since the witness is unproven; all fail. Acceptance, judged after those reads, must fall
+    within `fullPartyMs` (10000) of the first witness and before `timeoutMs`. Saved `as` (`owner_downs`): per owner
     {kind, seat}, the downing events, both guards' events, how
     many polls `killWhen` deferred a due Kill, and `fullParty` (None, or which seat went down first by each seat's
     own down line `tickMs`, the order, each seat's down kind and when the request came)."""
@@ -2065,15 +2067,23 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
                     if witness is None:
                         raise StepFailed(f"owner_downs: full-party line with no earlier both-down witness: ambiguous, not "
                                          f"proven (events {events})")
+                    # Reread the friend after the host read that saw the request: friend reads then bracket the request.
+                    views[1] = downed_view(sequence(1))
                     changed = [i for i in (0, 1) if not views[i]["down"] or views[i]["mark"] != witness[i]]
                     if changed:
-                        raise StepFailed(f"owner_downs: seat(s) {changed} revived or downed again between the both-down "
-                                         f"witness and the full-party line: not proven (events {events})")
+                        raise StepFailed(f"owner_downs: seat(s) {changed} revived, downed again or unreadable between the "
+                                         f"both-down witness and the full-party line: not proven (events {events})")
                     # The line is new since the witness's host read, which showed the host's down still open: it follows
                     # that down in the host's log.
                     if views[0]["faults"] > host_base["faults"] or fulls[0]["path"] != "game-over-request":
                         raise StepFailed(f"owner_downs: the full-party down was not a game-over request "
                                          f"(lines {fulls}, faults {views[0]['faults'] - host_base['faults']}; events {events})")
+                    # Accept only inside both bounds, judged once every read for this request has ended.
+                    accepted_at = now()
+                    if accepted_at >= min(deadline, both_since + full_bound):
+                        raise StepFailed(f"owner_downs: game-over request accepted at {round(accepted_at - start, 2)} s, past "
+                                         f"the step's {step.get('timeoutMs', 240000)} ms or {step.get('fullPartyMs', 10000)} ms "
+                                         f"after the both-down witness (events {events})")
                     ticks = {i: tick(i) for i in (0, 1)}
                     by = "tickMs" if all(v is not None for v in ticks.values()) else "observed"
                     order = sorted((0, 1), key=lambda i: (ticks[i], i) if by == "tickMs" else (down_at.get(i, 0.0), i))
@@ -2081,7 +2091,7 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
                                   "kinds": {str(i): kinds[i][-1] if kinds[i] else None for i in (0, 1)},
                                   "episodes": {str(i): witness[i][1] for i in (0, 1)},
                                   "downAtS": {str(i): round(down_at[i], 1) if i in down_at else None for i in (0, 1)},
-                                  "witnessAtS": round(both_since - start, 1), "requestAtS": round(now() - start, 1),
+                                  "witnessAtS": round(both_since - start, 1), "requestAtS": round(accepted_at - start, 1),
                                   "path": "game-over-request"}
                     events.append({"fullParty": full_party})
                     break

@@ -379,6 +379,55 @@ class OwnerDownsTest(unittest.TestCase):
         self.assertIn("within 2000 ms", str(error))
         self.assertIsNone(ctx.saved["owner_downs"]["fullParty"])
 
+    # Ione ad07d1be (1): friend reads bracket the request, so a revive after the last pre-request friend read fails.
+    def test_a_friend_revived_after_its_read_and_before_the_request_is_not_proven(self):
+        rig = self.both_down_then_game_over(at=1e9)
+        def revive_then_request(r):
+            if r.t >= 4.0 and not r.counts[(0, FULL)]:
+                r.revived(1)  # after the friend's read, before the host's read
+                r.game_over()
+        rig.on_read[1] = revive_then_request
+        _, ctx, error = rig.run(fullParty="continue")
+        self.assertIn("seat(s) [1] revived, downed again or unreadable", str(error))
+        self.assertIsNone(ctx.saved["owner_downs"]["fullParty"])
+
+    def test_an_unreadable_friend_log_at_the_request_is_not_proven(self):
+        rig = self.both_down_then_game_over()
+        read = rig.read
+        rig.read = lambda seat: [] if seat == 1 and rig.counts[(0, FULL)] else read(seat)
+        _, _, error = rig.run(fullParty="continue")
+        self.assertIn("seat(s) [1] revived, downed again or unreadable", str(error))
+
+    # Ione ad07d1be (2): both bounds hold at acceptance, after the reads that saw the request.
+    def test_a_request_read_across_either_bound_does_not_pass(self):
+        # Both down at 3.0. The request lands in the poll at `starts`; the friend's reread after it ends at `ends`,
+        # past the bound but after the poll's own deadline check.
+        for name, starts, ends, bounds in (("fullPartyMs", 7.75, 8.75, {"fullPartyMs": 5000, "timeoutMs": 20000}),
+                                           ("timeoutMs", 3.75, 4.5, {"fullPartyMs": 5000, "timeoutMs": 4000})):
+            with self.subTest(name):
+                rig = self.both_down_then_game_over(at=1e9)
+                def slow_read(r, starts=starts, ends=ends):
+                    if r.t >= starts and not r.counts[(0, FULL)]:
+                        r.game_over()
+                    elif r.counts[(0, FULL)]:
+                        r.t = ends
+                rig.on_read[1] = slow_read
+                _, ctx, error = rig.run(fullParty="continue", **bounds)
+                self.assertIn(f"accepted at {ends} s, past", str(error))
+                self.assertIsNone(ctx.saved["owner_downs"]["fullParty"])
+
+    def test_a_request_read_that_ends_inside_both_bounds_passes(self):
+        rig = self.both_down_then_game_over(at=1e9)
+        def slow_read(r):
+            if r.t >= 7.75 and not r.counts[(0, FULL)]:
+                r.game_over()
+            elif r.counts[(0, FULL)]:
+                r.t = 7.9
+        rig.on_read[1] = slow_read
+        result, _, error = rig.run(fullParty="continue", fullPartyMs=5000, timeoutMs=20000)
+        self.assertIsNone(error)
+        self.assertEqual((result["fullParty"]["witnessAtS"], result["fullParty"]["requestAtS"]), (3.0, 7.9))
+
     def test_the_parser_reads_each_seats_own_log_order(self):
         host = ("[downed] gate intercept mode=0 episode=90E43BDB00000001 actor=7FF7969BE050 hp=0 tickMs=932101718\n"
                 "[downed] full party down episode=90E43BDB00000001: the host takes the native game over (Continue "
