@@ -128,8 +128,13 @@ adds a verdict to both reports. Either seat's sampled **canonical `playerPos`**
 greater than Y=1000 in TT34 field gameplay fails an otherwise passing scenario.
 The first crossing and worst sample survive later recovery. Existing scenario
 errors/crash status remain intact, with the floor failure also in the report.
-Cameras, other rooms, cinematics and loading are excluded. Missing/invalid
-observations yield `unavailable`, never a floor pass. Non-Thorn runs are unaffected.
+Camera positions, other rooms and explicit non-field loading/cinematic samples
+are excluded. A camera RC admitted by the pilot's named297/298/299 rule is judged
+using the retained initial room scope, menu255, living canonical player and
+offered command. Other in-field event cameras cannot be classified from the
+combined `event` bit: they retain an unavailable coverage interval and its first
+line, never a floor pass after recovery. Missing/invalid observations also yield
+`unavailable`. Non-Thorn runs are unaffected.
 This reports sampled evidence; it does not continuously monitor between samples,
 stop a run immediately, or prove an unsampled/missing seat stayed on the floor.
 
@@ -141,10 +146,10 @@ clankie heavy -- python3 -B tools/scenario/thorn_floor.py \
   --out .local/zr103/thorn_floor.json
 ```
 
-Archive control: **expected FAIL**, 572 canonical field samples (host290,
+Initial `9d63f084` archive control: **expected FAIL**, 572 canonical field samples (host290,
 friend282). Host max Y=0. Friend first exceeds1000 at pilot line492,
 Y=1085.043, about74.9s after fight start; worst Y=87034.672 at line1879.
-Output: `.local/zr103/thorn_floor.json`. The seven new floor tests pass,
+Output: `.local/zr103/thorn_floor.json`. The initial seven floor tests pass,
 including either seat falling and later recovering, the threshold/direction,
 camera/room/event exclusions, unavailable samples and scenario status retention.
 
@@ -167,14 +172,14 @@ Built target kh2coop_script_owner_command_test
 Built target kh2coop_script_mirror_test
 ```
 
-Scoped ctest: **7 passed / 1 unsupported on Mac** (exit8). The three targets
+Initial `9d63f084` scoped ctest: **7 passed / 1 unsupported on Mac** (exit8). The three targets
 above pass, as do `kh2coop_py_test_thorn_floor`, `kh2coop_py_test_scenario_fight`,
 `kh2coop_py_test_scenario_launch` and `kh2coop_py_test_scenario_route_segments`.
 The unchanged `kh2coop_py_test_pilot_thorn` fails at import:
 `AttributeError: module 'ctypes' has no attribute 'WinDLL'` in the native
 route pilot. It was not bypassed or modified. No further full sweep was run.
-Commands/output are retained in `.local/vuh2808-focused-build.log`,
-`.local/vuh2808-ctest.log` and `build/Testing/Temporary/LastTest.log`.
+Commands/output are retained in `.local/vuh2808-focused-build.log` and
+`.local/vuh2808-ctest.log`.
 
 ```sh
 clankie heavy -- cmake --build build --parallel 2 --target \
@@ -182,3 +187,39 @@ clankie heavy -- cmake --build build --parallel 2 --target \
 clankie heavy -- ctest --test-dir build --output-on-failure -j 1 \
   -R '^(kh2coop_thorn_hit_trace_test|kh2coop_script_owner_command_test|kh2coop_script_mirror_test|kh2coop_py_test_(thorn_floor|pilot_thorn|scenario_fight|scenario_launch|scenario_route_segments))$'
 ```
+
+## Ione review revision (e9d50194)
+
+Ione requested changes because the original checker discarded playable camera
+RC samples along with cinematics. The tracing portion had no required finding
+and is unchanged in this revision.
+
+| Finding | Change | Evidence |
+|---|---|---|
+| R1: event=true floor crossing could recover and pass | Judge retained states admitted by the native pilot's pure RC rule (297/298/299, same initial six-field room scope, field, menu255, living canonical player). | New controls assert the real pilot rule admits each middle sample; both seats' Y0→1709 during RC→0 fail evaluation **and automatic closure**, for all three commands. |
+| An event-camera interval may lack classification proof | Retain `unclassifiedEvents` and `firstUnclassifiedEvent`; coverage stays unavailable after recovery. Event-only pilots are retained under any name. | Both-seat unknown-camera recovery controls; incomplete menu/HP/player/command/scope/field/event metadata; automatic report coverage. |
+| Genuine non-gameplay must not become a floor failure | Explicit non-field loading/cinematic samples remain excluded. In-field unclassified cinematics are excluded from height judgment but leave unavailable coverage. | High-Y cinematic/loading controls do not produce `firstFall`; camera positions and other rooms remain excluded. |
+
+Before the fix, the new controls ran10 test methods with **9 failing subcases**:
+six admitted RC fall/recover cases (both seats × three commands), two unknown
+event/recovery cases and the unclassified in-field cinematic coverage case.
+Red output: `.local/vuh2808-r2-red.log`.
+
+After the fix, scoped ctest passes **4/4 suites**: floor12/12, fight4/4,
+launch9/9 and route segments7/7. Output: `.local/vuh2808-r2-ctest.log` and
+`build/Testing/Temporary/LastTest.log`. No native or common source changed, so
+the previous focused C++ build/test evidence and Ione's trace review remain
+applicable; no broad build or Windows-only test retry was run.
+
+The two original Ione counterexample files also return **FAIL** with all six
+samples judged in each case (including both RC samples). Results:
+`.local/vuh2808-r2-host_thorn.json` and `.local/vuh2808-r2-friend_thorn.json`.
+
+The zr103 archive still returns **expected FAIL**, with the same first fall
+Y1085.043 and worst Y87034.672, host maxY0. It now judges573 samples (host291,
+friend282), including one additional qualified host camera RC. It also reports
+17 host and24 friend unclassified camera observations; the known floor failure
+still dominates unavailable coverage. Output: `.local/zr103/thorn_floor-r2.json`.
+
+All commands ran through `clankie heavy`. AC1's native cause, AC2 recovery,
+independent re-review and the authorized PC build/trace remain open.

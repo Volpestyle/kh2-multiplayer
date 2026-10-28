@@ -3607,9 +3607,13 @@ unchanged.
 At scenario closure, VUH-2808 also checks retained `*/pilot.jsonl` canonical
 `playerPos` samples in TT34 field gameplay. Any seat at Y>1000 (floor Y=0,
 positive down) records a failure in `thorn_floor.json` and fails an otherwise
-passing run. Earlier failures/crashes remain intact. Missing/invalid samples
-are `unavailable`; camera positions, other rooms, loading and cinematics are
-excluded. This is a sampled regression, not continuous collision/recovery proof.
+passing run. Earlier failures/crashes remain intact. Qualified camera RCs
+297/298/299 are judged too, using the native pilot's retained initial room scope,
+menu, living canonical player and offered command. Explicit non-field samples
+(loading/cinematics), other rooms and camera positions are excluded. An in-field
+event camera without enough RC proof leaves coverage `unavailable`, even after
+recovery; `event=true` alone cannot establish a cinematic exclusion. Missing/invalid
+samples are also unavailable. This is a sampled regression, not continuous collision/recovery proof.
 The same offline check is `python -B tools/scenario/thorn_floor.py HOST/pilot.jsonl
 FRIEND/pilot.jsonl --out floor.json`. Native tracing for the next authorized run:
 [VUH-2808 trace contract](testing/vuh2808-thorn-floor/README.md).

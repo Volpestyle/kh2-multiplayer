@@ -12,6 +12,28 @@ from pathlib import Path
 
 FLOOR_Y = 0.0
 MAX_BELOW = 1000.0
+CAMERA_REACTIONS = frozenset((297, 298, 299))
+
+
+def room_scope(state: dict) -> tuple | None:
+    scope = state.get("roomScope")
+    if isinstance(scope, list) and len(scope) == 6 and all(type(v) is int for v in scope) \
+            and scope[:2] == [2, 34]:
+        return tuple(scope)
+    return None
+
+
+def camera_reaction_allowed(state: dict, initial_scope: tuple | None) -> bool:
+    """Retained equivalent of pilot.py:event_reaction_allowed for its named Thorn RCs.
+
+    The pilot's event bit includes owned combat cameras. Raw event=true alone
+    proves neither playable RC ownership nor a cinematic exclusion.
+    """
+    return bool(state.get("event") is True and state.get("inField") is True
+                and initial_scope is not None and room_scope(state) == initial_scope and state.get("menu") == 255
+                and type(state.get("player")) is int and state["player"] > 0
+                and type(state.get("hp")) is int and state["hp"] > 0
+                and type(state.get("react")) is int and state["react"] in CAMERA_REACTIONS)
 
 
 def evaluate(paths: list[Path]) -> dict:
@@ -19,11 +41,14 @@ def evaluate(paths: list[Path]) -> dict:
     for path in paths:
         samples, unreadable = 0, 0
         first, worst = None, None
+        camera_samples, unclassified_events = 0, 0
+        first_unclassified, initial_scope, scope_observed = None, None, False
         try:
             stream = path.open(encoding="utf-8", errors="replace")
         except OSError as error:
             seats.append({"pilot": path.parent.name, "path": str(path), "samples": 0,
-                          "unreadable": 1, "firstFall": None, "worst": None, "error": str(error)})
+                          "unreadable": 1, "cameraRcSamples": 0, "unclassifiedEvents": 0,
+                          "firstUnclassifiedEvent": None, "firstFall": None, "worst": None, "error": str(error)})
             continue
         with stream:
             for line, raw in enumerate(stream, 1):
@@ -35,8 +60,22 @@ def evaluate(paths: list[Path]) -> dict:
                 state = row.get("state") if isinstance(row, dict) else None
                 if not isinstance(state, dict) or (state.get("world"), state.get("room")) != (2, 34):
                     continue
-                # Native cinematics/loading do not establish an arena-floor observation.
-                if state.get("inField") is not True or state.get("event") is not False:
+                # Explicit non-field samples (loading/cinematics) are excluded. An unknown
+                # field/event state is a coverage gap, never evidence of a safe interval.
+                if state.get("inField") is False:
+                    continue
+                if state.get("inField") is not True:
+                    unreadable += 1
+                    continue
+                if not scope_observed:
+                    initial_scope, scope_observed = room_scope(state), True
+                event = state.get("event")
+                camera_rc = event is True and camera_reaction_allowed(state, initial_scope)
+                if event is not False and not camera_rc:
+                    unclassified_events += 1
+                    if first_unclassified is None:
+                        first_unclassified = {"line": line, "t": row.get("t"),
+                                              "reason": "event-camera-not-qualified" if event is True else "event-state-unavailable"}
                     continue
                 position = state.get("playerPos")  # never the camera or a clone's streamed pose
                 if not isinstance(position, list) or len(position) != 3 or \
@@ -44,6 +83,7 @@ def evaluate(paths: list[Path]) -> dict:
                     unreadable += 1
                     continue
                 samples += 1
+                camera_samples += camera_rc
                 sample = {"line": line, "t": row.get("t"), "playerPos": position,
                           "belowFloor": position[1] - FLOOR_Y}
                 if worst is None or sample["belowFloor"] > worst["belowFloor"]:
@@ -51,22 +91,24 @@ def evaluate(paths: list[Path]) -> dict:
                 if first is None and sample["belowFloor"] > MAX_BELOW:
                     first = sample
         seats.append({"pilot": path.parent.name, "path": str(path), "samples": samples,
-                      "unreadable": unreadable, "firstFall": first, "worst": worst})
+                      "unreadable": unreadable, "cameraRcSamples": camera_samples,
+                      "unclassifiedEvents": unclassified_events, "firstUnclassifiedEvent": first_unclassified,
+                      "firstFall": first, "worst": worst})
     falls = [s for s in seats if s["firstFall"] is not None]
-    complete = bool(seats) and all(s["samples"] and not s["unreadable"] for s in seats)
+    complete = bool(seats) and all(s["samples"] and not s["unreadable"] and not s["unclassifiedEvents"] for s in seats)
     return {"status": "fail" if falls else "pass" if complete else "unavailable",
             "floorY": FLOOR_Y, "maxBelowFloor": MAX_BELOW,
             "samples": sum(s["samples"] for s in seats), "seats": seats,
-            "limits": "Sampled canonical positions only; missing seats/intervals and native recovery are unproven."}
+            "limits": "Sampled canonical positions only; unclassified event cameras are unavailable. Missing seats/intervals and native recovery are unproven."}
 
 
 def check_run(run_dir: Path, report: dict, artifacts: list[str]) -> dict:
     result = evaluate(sorted(run_dir.glob("*/pilot.jsonl")))
     # Drop unrelated route pilots only from the automatic result; explicit CLI inputs remain required seats.
-    result["seats"] = [s for s in result["seats"] if s["samples"] or "thorn" in s["pilot"]]
+    result["seats"] = [s for s in result["seats"] if s["samples"] or s["unclassifiedEvents"] or "thorn" in s["pilot"]]
     if result["status"] != "fail":
         result["status"] = "pass" if result["seats"] and all(
-            s["samples"] and not s["unreadable"] for s in result["seats"]) else "unavailable"
+            s["samples"] and not s["unreadable"] and not s["unclassifiedEvents"] for s in result["seats"]) else "unavailable"
     if result["seats"] or "twilight_thorn" in report.get("scenario", ""):
         report["thornFloor"] = result
         name = "thorn_floor.json"
