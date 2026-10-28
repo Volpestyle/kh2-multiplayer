@@ -71,13 +71,19 @@ entry's kind is 0); `refused` counts those with a request (the actor update `0x3
 request id 0 when there is none). An HP-only write never reaches it. `reaction` is the first applied entry's kind (`+2`), -1 with none; `reactHooked=0` means the hook
 is not installed (its bytes didn't match), so no count can be read as absent. The ledger does not use them yet.
 After those (lead #76, after vuh2912-hp-09 logged `reactions=0 refused=0` on all 14 Axel hits while each hit's
-motion changed): `callsAll=<n> calls=<n> callRequests=<n> callApplied=<n> lastApplied=<frame> lastKind=<kind>
-lastRequest=<id> callRowsEvicted=<n>`. The hook counts every call per actor (`inject/src/ReactionCalls.hpp`, 16
-rows, the least recently called reused); the first four are the calls since the witness armed, on any actor and
-on the victim (with a nonzero or unread request, and applied). `lastApplied`, `lastKind` and `lastRequest` are the
-victim's last applied reaction whenever it came, -1 for none. So `callsAll=0` means the hook never ran in the
-window, `calls=0` with `callsAll>0` that it never ran on the victim, `calls>0 callRequests=0` that it ran without a
-request, and `lastApplied` at or before `hitFrame` that the reaction was applied before the witness armed.
+motion changed): `callsAll=<n> calls=<n> callRequests=<n> callApplied=<n> callIdentity=ok|unread|changed
+preArm=none|found|unavailable preArmKind=<kind> preArmRequest=<id>` (`inject/src/ReactionCalls.hpp`). Each witness
+counts the calls while it is pending, and no history outlives it (Ione 10d8b494). `callsAll` counts calls on any
+actor. `calls`, `callRequests` (a nonzero or unread request) and `callApplied` count calls on the victim. They read
+-1 unless `callIdentity=ok` and `same=1`. The inject has no native incarnation id, so the victim is its pointer
+plus its objentry pointer (`+0x918`), with the canonical-player bookends at arm and log. A call at that pointer
+with another or an unread objentry gives `changed`, and an objentry unread at arm gives `unread`. A reuse by an
+actor of the same kind within the 4-frame window is not detected. `preArm` looks back only into `hitFrame`, at the
+last 16 applied calls. `found` means the victim's reaction was applied in the hit's frame before the witness
+armed, with its kind and request. `unavailable` means the victim's objentry was unread, that frame applied more
+than 16 reactions, or another or unread objentry applied one at the victim's pointer. So `callsAll=0` means the
+hook never ran in the window, `calls=0` with `callsAll>0` that it never ran on the victim, and `calls>0
+callRequests=0` that it ran without a request.
 `tools/scenario/boss_target_ledger.py` joins the line to the hit's scope, the friend's driven mirror
 hit and the boss-target choice. `net_prologue_mansion_axel_hp.json` is the live check (docs/SCENARIOS.md).
 

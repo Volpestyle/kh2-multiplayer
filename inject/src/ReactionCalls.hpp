@@ -1,88 +1,93 @@
 #pragma once
-// VUH-2912 witness diagnostics (lead #76, run vuh2912-hp-09): per-actor counts of the reaction applier 0x3D6FC0's
-// calls, so a hit's witness can say whether the hook ran at all in its window, ran only on other actors, ran on the
-// victim without a request, or applied the victim's reaction before the witness armed (lastApplied at or before the
-// hit frame). Pure bookkeeping, no game reads: EntityHook.cpp feeds it from the hook and snapshots it per witness.
+// VUH-2912 witness diagnostics (lead #76, run vuh2912-hp-09): 0x3D6FC0's calls as one hit witness sees them, so it
+// can say whether the hook ran at all in its window, ran only on other actors, ran on the victim without a request,
+// or applied the victim's reaction in the hit's frame before the witness armed. Pure bookkeeping, no game reads:
+// EntityHook.cpp feeds it from the hook and logs it per witness.
+//
+// No history outlives a witness (Ione, a8cd4f9 CHANGES 10d8b494). The inject has no native incarnation id for an
+// actor, so the victim is its pointer plus its objentry pointer (actor+0x918), read when the witness arms and on
+// every call at that pointer, with the canonical-player bookends EntityHook checks at arm and log. A call at the
+// victim's pointer with another or an unread identity, or a victim identity unread at arm, makes the window's
+// victim counts unavailable rather than zero. A reuse by an actor of the same kind inside the 4-frame window is not
+// detected. The pre-arm lookback covers only the hit's own frame, from a ring of the last kRecent applied calls; a
+// frame that applied more than the ring holds makes it unavailable.
 #include <cstdint>
 
 namespace kh2coop::inject::reactioncalls {
 
-constexpr unsigned kRows = 16;
 constexpr std::uint32_t kNone = UINT32_MAX;
 
-struct Row {
-    std::uintptr_t actor = 0;
-    std::uint32_t calls = 0;        // every call on this actor
-    std::uint32_t requests = 0;     // calls whose request id read nonzero (or could not be read)
-    std::uint32_t applied = 0;      // calls that returned an entry
-    std::uint32_t lastCallFrame = 0;
-    std::uint32_t lastAppliedFrame = kNone;
-    std::int32_t lastKind = -1;     // the last applied entry's kind (+2), -1 unread
-    std::uint32_t lastRequest = kNone;
-};
+enum class Identity : std::uint8_t { Ok, Unread, Changed };
 
-struct Table {
-    Row rows[kRows] {};
-    std::uint32_t all = 0;          // every call on any actor
-    std::uint32_t evicted = 0;      // rows reused for a new actor (the least recently called one)
-};
-
-inline const Row* Find(const Table& t, std::uintptr_t actor) noexcept {
-    for (const auto& r : t.rows)
-        if (actor && r.actor == actor) return &r;
-    return nullptr;
-}
-
-// One call: `request` is the id read before the call (kNone when unread), `applied` whether it returned an entry and
-// `kind` that entry's kind (-1 when none or unread).
-inline void Note(Table& t, std::uintptr_t actor, std::uint32_t request, bool applied, std::int32_t kind,
-                 std::uint32_t frame) noexcept {
-    ++t.all;
-    if (!actor) return;
-    Row* row = nullptr;
-    for (auto& r : t.rows) {
-        if (r.actor == actor) { row = &r; break; }
-    }
-    if (!row) {
-        for (auto& r : t.rows) {
-            if (!r.actor) { row = &r; break; }
-        }
-    }
-    if (!row) {
-        row = &t.rows[0];
-        for (auto& r : t.rows)
-            if (r.lastCallFrame < row->lastCallFrame) row = &r;
-        ++t.evicted;
-    }
-    if (row->actor != actor) *row = Row{actor};
-    ++row->calls;
-    if (request != 0) ++row->requests;
-    row->lastCallFrame = frame;
-    if (applied) {
-        ++row->applied;
-        row->lastAppliedFrame = frame;
-        row->lastKind = kind;
-        row->lastRequest = request;
-    }
-}
-
-// What a witness keeps when it arms, and what it logs: the calls since then, on any actor and on its victim.
-struct Snapshot {
+// Counted while one witness is pending: every call (all), and the calls on its victim.
+struct Window {
+    std::uintptr_t victim = 0, identity = 0;  // identity 0: unread at arm
     std::uint32_t all = 0, calls = 0, requests = 0, applied = 0;
+    Identity state = Identity::Unread;
 };
 
-inline Snapshot Take(const Table& t, std::uintptr_t victim) noexcept {
-    const Row* r = Find(t, victim);
-    return {t.all, r ? r->calls : 0, r ? r->requests : 0, r ? r->applied : 0};
+inline Window Arm(std::uintptr_t victim, std::uintptr_t identity) noexcept {
+    Window w;
+    w.victim = victim;
+    w.identity = identity;
+    w.state = identity ? Identity::Ok : Identity::Unread;
+    return w;
 }
 
-// The calls between `at` and now. A victim row reused for another actor in between restarts its counts, so the
-// window then counts from zero rather than going negative.
-inline Snapshot Since(const Table& t, std::uintptr_t victim, const Snapshot& at) noexcept {
-    const Snapshot now = Take(t, victim);
-    const auto delta = [](std::uint32_t a, std::uint32_t b) { return a >= b ? a - b : a; };
-    return {now.all - at.all, delta(now.calls, at.calls), delta(now.requests, at.requests),
-            delta(now.applied, at.applied)};
+// One call: `identity` is the actor's objentry pointer (0 unread), `request` the id read before the call (kNone when
+// unread; any id but 0 counts as a request) and `applied` whether it returned an entry.
+inline void Count(Window& w, std::uintptr_t actor, std::uintptr_t identity, std::uint32_t request,
+                  bool applied) noexcept {
+    ++w.all;
+    if (!actor || actor != w.victim) return;
+    if (w.state == Identity::Ok && identity != w.identity) w.state = Identity::Changed;
+    ++w.calls;
+    if (request != 0) ++w.requests;
+    if (applied) ++w.applied;
+}
+
+inline bool Available(const Window& w) noexcept { return w.state == Identity::Ok; }
+
+// The last applied calls, for the lookback into the hit's frame.
+constexpr unsigned kRecent = 16;
+struct Applied {
+    std::uintptr_t actor = 0, identity = 0;
+    std::uint32_t frame = kNone, request = kNone;
+    std::int32_t kind = -1;
+};
+struct Recent {
+    Applied rows[kRecent] {};
+    unsigned next = 0;
+    std::uint32_t frame = kNone, inFrame = 0;  // applied calls in the newest frame seen
+};
+
+inline void Note(Recent& r, std::uintptr_t actor, std::uintptr_t identity, std::uint32_t request, std::int32_t kind,
+                 std::uint32_t frame) noexcept {
+    if (frame != r.frame) {
+        r.frame = frame;
+        r.inFrame = 0;
+    }
+    ++r.inFrame;
+    r.rows[r.next] = {actor, identity, frame, request, kind};
+    r.next = (r.next + 1) % kRecent;
+}
+
+enum class Lookback : std::uint8_t { None, Found, Unavailable };
+// The victim's last reaction applied in `frame` before now: Found (into `out`), None, or Unavailable when its
+// identity is unread, that frame applied more calls than the ring holds, or the newest applied call at its pointer
+// in that frame carries another or an unread identity.
+inline Lookback Before(const Recent& r, std::uintptr_t victim, std::uintptr_t identity, std::uint32_t frame,
+                       Applied& out) noexcept {
+    if (!victim || !identity) return Lookback::Unavailable;
+    if (r.frame == frame && r.inFrame > kRecent) return Lookback::Unavailable;
+    for (unsigned i = 1; i <= kRecent; ++i) {
+        const Applied& a = r.rows[(r.next + kRecent - i) % kRecent];
+        if (a.frame != frame || a.actor != victim) continue;
+        if (a.identity != identity) return Lookback::Unavailable;  // another or an unread actor at that pointer
+        out = a;
+        return Lookback::Found;
+    }
+    return Lookback::None;
 }
 
 } // namespace kh2coop::inject::reactioncalls
