@@ -239,6 +239,8 @@ about 2 minutes serially; `-LE python` skips them. The exception is the harness
 
 | File | What |
 |------|------|
+| `AxelReactionTest.cpp`, `AxelReactionAdapterTest.cpp` | Axel RC rules and the adapter against native memory stand-ins |
+| `run_axel_camera_read_probes.py`, `AxelCameraReadProbe.inl` | Manual Mac check: extract the real camera detours, inject unread identity/argument/scope observations, compare an exported baseline or adapt Ione’s r3 mains; no game or Windows SEH execution |
 | `PrologueSeatsTest.cpp` | Profile/readiness, solo-wait and seat-color pure controls; no native-site or live route acceptance |
 | `ScriptCameraTest.cpp`, `ScriptOwnerCommandTest.cpp`, `ScriptReactionCacheTest.cpp` | Stable camera/owner-command and native-reaction receipt policy controls, including canonical-seat selection and empty client candidate tables; no live boss acceptance. |
 | `SteamBrokerTest.cpp`, `SteamNativeAdapterTest.cpp`, `SteamPipeTest.cpp` | Broker policy, native adapter and authenticated local IPC controls; live two-account evidence is separate |

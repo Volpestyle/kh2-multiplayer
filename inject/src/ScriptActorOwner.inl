@@ -1206,35 +1206,36 @@ static void __fastcall SmOwnerCaptureQuery(std::uint64_t* args) {
 // Host only decides (SmAxelCamera); a skipped start pushes nothing (the slot has no result bit).
 static void __fastcall SmOwnerCameraGlobal(std::uint64_t* args) {
     std::uint64_t before[2]{};
-    if(SmGameThread() && SmCopyArgs(args,before,2) && SmAxelCamera(before))return;
+    if(SmGameThread()?SmAxelCamera(SmCopyArgs(args,before,2)?before:nullptr):SmAxelCameraUnobserved())return;
     reinterpret_cast<TrapFn>(g_smAxelCameraSlot.original)(args);
 }
 // Host only decides (SmAxelCameraWatch); flags 0x1, so a skipped watch pushes nothing.
 static void __fastcall SmOwnerCameraWatch(std::uint64_t* args) {
     std::uint64_t before[1]{};
-    if(SmGameThread() && SmCopyArgs(args,before,1) && SmAxelCameraWatch(before))return;
+    if(SmGameThread()?SmAxelCameraWatch(SmCopyArgs(args,before,1)?before:nullptr):SmAxelCameraUnobserved())return;
     reinterpret_cast<TrapFn>(g_smAxelWatchSlot.original)(args);
 }
 // 2/20 always runs natively; afterwards, inside a friend's callback, SmAxelThreadStarted may adopt D303.
 static void __fastcall SmOwnerThreadStart(std::uint64_t* args) {
     std::uint64_t before[2]{},after[1]{};
-    const bool watched=SmGameThread() && SmAxelThreadWatched() && SmCopyArgs(args,before,2);
+    const bool watched=SmAxelThreadWatched();
+    const bool copied=watched && SmGameThread() && SmCopyArgs(args,before,2);
     reinterpret_cast<TrapFn>(g_smAxelThreadSlot.original)(args);
-    if(watched && SmCopyArgs(args,after,1))SmAxelThreadStarted(before,after);
+    if(watched)SmAxelThreadStarted(copied?before:nullptr,SmGameThread() && SmCopyArgs(args,after,1)?after:nullptr);
 }
 // D303's own ops are withheld (SmAxelFade); the slots have no result bit, so a skipped call pushes nothing.
 static void __fastcall SmOwnerWhiteOut(std::uint64_t* args) {
     std::uint64_t before[1]{};
-    if(SmGameThread() && SmAxelFadePending() && SmCopyArgs(args,before,1) && SmAxelFade(R::AxelCameraKind::WhiteOut,before))return;
+    if(SmAxelFadePending() && (!SmGameThread() || SmAxelFade(R::AxelCameraKind::WhiteOut,SmCopyArgs(args,before,1)?before:nullptr)))return;
     reinterpret_cast<TrapFn>(g_smAxelWhiteOutSlot.original)(args);
 }
 static void __fastcall SmOwnerWhiteIn(std::uint64_t* args) {
     std::uint64_t before[1]{};
-    if(SmGameThread() && SmAxelFadePending() && SmCopyArgs(args,before,1) && SmAxelFade(R::AxelCameraKind::WhiteIn,before))return;
+    if(SmAxelFadePending() && (!SmGameThread() || SmAxelFade(R::AxelCameraKind::WhiteIn,SmCopyArgs(args,before,1)?before:nullptr)))return;
     reinterpret_cast<TrapFn>(g_smAxelWhiteInSlot.original)(args);
 }
 static void __fastcall SmOwnerCameraReset(std::uint64_t* args) {
-    if(SmGameThread() && SmAxelFadePending() && SmAxelFade(R::AxelCameraKind::Reset,nullptr))return;
+    if(SmAxelFadePending() && (!SmGameThread() || SmAxelFade(R::AxelCameraKind::Reset,nullptr)))return;
     reinterpret_cast<TrapFn>(g_smAxelResetSlot.original)(args);
 }
 // The native watch a deferred Burst watch falls back to (SmAxelFlushWatch), on a copy of its argument.

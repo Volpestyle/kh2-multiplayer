@@ -56,20 +56,22 @@ namespace downedspike { static bool down=false;static bool LogicallyDowned() { r
 
 static std::map<uintptr_t,std::vector<unsigned char>> memory;
 static unsigned reads=0,vmLookups=0;
+static uintptr_t readFault=0;
 static std::map<uintptr_t,std::uint32_t> handles;
 template<class T> static void Put(uintptr_t at,const T& value) {
     auto& bytes=memory[at];bytes.resize(sizeof(T));std::memcpy(bytes.data(),&value,sizeof(T));
 }
 static bool ReadHitTraceMemory(uintptr_t at,void* out,std::size_t size) {
     ++reads;
+    if(at==readFault)return false;
     const auto it=memory.find(at);
     if(it==memory.end() || it->second.size()<size)return false;
     std::memcpy(out,it->second.data(),size);return true;
 }
 template<class T> static bool ReadHitTrace(uintptr_t at,T& out) { return ReadHitTraceMemory(at,&out,sizeof(T)); }
-static uintptr_t SmDecode(std::uint32_t handle) { for(const auto& [actor,h]:handles)if(h==handle)return actor;return 0; }
-// ScriptMirror's: a lookup of decodeFault faults (caught), and answers nothing either way.
 static std::uint32_t decodeFault=0;
+static uintptr_t SmDecode(std::uint32_t handle) { if(handle && handle==decodeFault)return 0; for(const auto& [actor,h]:handles)if(h==handle)return actor;return 0; }
+// ScriptMirror's: a lookup of decodeFault faults (caught), and answers nothing either way.
 static bool SmDecodeKnown(std::uint32_t handle,uintptr_t& out) noexcept {
     out=0;
     if(handle && handle==decodeFault)return false;
@@ -218,7 +220,8 @@ static std::uint32_t g_frameCounter=10;
 static struct { bool hostActive=true;unsigned faults=0; } g_sm;
 // The client's native attach (1/18) and detach (1/102) originals, recorded.
 static bool SmOwnerReady() noexcept { return true; }
-static bool SmGameThread() noexcept { return true; }
+static bool gameThread=true;
+static bool SmGameThread() noexcept { return gameThread; }
 namespace warp {
 static bool loading=false;static std::uint32_t serial=0; // serial: CompleteLoad's count
 static bool LoadPending() { return loading; } static bool TransitionPending() { return false; }
@@ -269,7 +272,7 @@ void check(bool ok,const char* label) {
 constexpr uintptr_t kAxel=0x100000,kHostActor=0x200000,kFriendActor=0x300000;
 constexpr std::uint32_t kAxelHandle=1,kHostHandle=2,kFriendHandle=3,kStranger=0x99;
 void Setup(std::uint32_t groups) {
-    g_axel={};memory.clear();handles={{kAxel,kAxelHandle},{kHostActor,kHostHandle},{kFriendActor,kFriendHandle}};
+    g_axel={};readFault=0;gameThread=true;memory.clear();handles={{kAxel,kAxelHandle},{kHostActor,kHostHandle},{kFriendActor,kFriendHandle}};
     enemytarget::g.candidateActor={kHostActor,kFriendActor,0};
     enemysync::scope={};enemysync::session=0xA1;enemysync::sentClaims=0;g_sm.hostActive=true;g_frameCounter=10;
     for(auto& in:g_smAxelCameraHooks.in)in=true;decodeFault=0;warp::serial=0;warp::loading=false;
@@ -718,7 +721,7 @@ int main() {
         check(g_axel.cameraCustody==R::AxelCameraCustody::Owner && !g_axel.fade.thread,
               "a node whose thread handle does not resolve adopts nothing");
         (void)friendClearLight();running(kThread,kAxel);handles[kThread]=0x172; // freed, and another thread at its address
-        check(!fade(Kind::WhiteOut,70.0f) && !g_axel.fade.thread && CameraOps().empty(),
+        check(!fade(Kind::WhiteOut,70.0f) && g_axel.fade.thread==kThread && CameraOps().empty(),
               "once D303's handle no longer resolves to the running thread, that thread is another's and plays natively");
         // Ione's b318dd1b (1): a lookup that faults is not a replacement.
         (void)friendClearLight();running(kThread,kAxel);decodeFault=kThreadHandle;
@@ -786,7 +789,7 @@ int main() {
         (void)friendClearLight();running(kThread,kAxel);g_frameCounter+=R::kAxelFadeLeaseFrames+1;
         check(!fade(Kind::WhiteOut,70.0f) && !g_axel.fade.thread,"a D303 that never whites in expires at its lease");
         (void)friendClearLight();running(kThread,kAxel);++enemysync::scope.epoch;
-        check(!fade(Kind::WhiteOut,70.0f) && !g_axel.fade.thread,"and with its epoch");
+        check(fade(Kind::WhiteOut,70.0f) && g_axel.fade.thread && CameraOps().empty(),"another epoch blocks delivery without retiring custody or restoring native");
         Setup(1u<<R::kOvertakerGroup);Frame();
         handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});node();
         running(kOther,kAxel);duringCallback=queue;emitOk=false;

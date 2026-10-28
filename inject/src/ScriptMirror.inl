@@ -92,6 +92,7 @@ static bool SmAxelRoleHeld(std::uint32_t,std::uint8_t,uintptr_t,uintptr_t);
 static bool SmAxelCamera(const std::uint64_t*);
 static R::AxelAct SmAxelCaptureQuery(const std::uint64_t*);
 static bool SmAxelCameraWatch(const std::uint64_t*);
+static bool SmAxelCameraUnobserved();
 static bool SmAxelThreadWatched() noexcept;
 static void SmAxelThreadStarted(const std::uint64_t*,const std::uint64_t*);
 static bool SmAxelFadePending() noexcept;

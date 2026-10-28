@@ -14,6 +14,7 @@
 // (exe+0x2A250B0) or its VM, so it can run from frame code.
 // Trap names are OpenKH's BdxTraps.cs; the call list follows TCM-Murray's
 // world-mirror research (GPL-3.0, docs/research/PRIOR_ART.md). No code is copied.
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>

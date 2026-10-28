@@ -399,11 +399,15 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
   flag cleared every tick, and the order of that tick against the host's chain read is unproven.
 - **Owner-only camera.** Axel's RC camera ops act on the game's one camera and fade state, not on an
   actor (Kit's `b034e8cf`, `e4a7861e`), so a friend RC's camera sequence goes wholly to its owner or wholly to the
-  host (`AxelCameraStepFor`, custody per executor):
+  host (`AxelCameraStepFor`, with custody retained independently of executor observations):
   - **Who holds it.** The RC's first camera op decides. If it is withheld from the host and sent, the sequence is the
     owner's, and every later Axel camera op of that RC stays off the host: sent if it can be, dropped otherwise. If
-    that first send fails, the sequence is the host's and plays natively, as before. The host's own RCs never take
-    custody, and no camera op that is not Axel's is ever withheld.
+    that first send is positively refused, the sequence is the host's and plays natively, as before. An unread
+    argument, source/handle, scope or camera name reserves owner custody and drops the candidate; recovery cannot
+    split the sequence. Positively unrelated objects stay native. The handoff captures the original role's resource,
+    connection, actor, source incarnation and epoch before later observations can fail. Executor retirement and
+    host Axel reset do not erase that snapshot; late start/watch calls remain sent or dropped until completion or
+    the 600-frame lease. A known new RC takes its own snapshot, while older D303 bindings remain independent.
   - **All six hooks or none** (`AxelCameraHooks`, Ione's `629ab5f1`). Custody needs every slot the sequence's ops
     arrive through: 1/164, 1/207, 0/31, 0/32, 1/295 and 2/20. They install in that order (`SmAxelCameraHooksInstall`),
     stopping at the first refusal, and with any refused no friend executor takes custody: every RC's camera,
@@ -423,23 +427,26 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
       node's first word is the thread's u32 handle (Kit, `e4a7861e`), decoded through `4AD270` to the thread the
       runner makes current (`0x2A25048`) while D303 runs, with Axel as its VM's source (`*(0x2A250B0)+0x60`). Both
       are read raw, so the adoption holds after Axel dies; his death doesn't stop D303. The host keeps the handle
-      too, and the role current at adoption: the one the RC's start went to (Clear Light's begins before the
-      callback), by resource and connection.
-    - **Unread is not an answer** (Ione's `b318dd1b`). Each lookup goes through `SmDecodeKnown`, which tells a lookup
-      that could not be made (no resolver, a caught fault) or an unread node from one that answered. If 2/20's node,
-      its first word or the thread's handle cannot be read, the adoption is *pending*: the node and any handle are
-      kept and resolved on each later op. Until they resolve, an op with Axel as its VM's source is withheld and
-      dropped on both games; once they do, it is D303's or not as above. A node that answers with no thread adopts
-      nothing, and a pending one that resolves to none is released.
-    - **Its three ops** (`AxelFadeMatchFor`). They are recognized by that thread, while the kept handle still resolves
-      to it, and by its source, so no other script's fade or reset is ever taken from the host. A handle that answers
-      with another thread, or none, has ended D303: the thread at its address is another's and plays natively
-      (`camera D303 ended`). A running thread, handle or owner scope that cannot be read is withheld and dropped
-      (`unread: not on any game`), never run on the host. They go as op 17 to the
-      adopted role only, which a continuation keeps (same resource), and are dropped once it is gone: a later RC's
-      role on the same seat and actor never gets them (Ione's `629ab5f1`).
-    - **The end.** White-in ends the adoption; so do a new epoch and, if 3C5440 kills the thread early,
-      `kAxelFadeLeaseFrames` (600).
+      too, and the role captured at handoff: the one the RC's start went to (Clear Light's begins before the
+      callback), by resource and connection. An unread scope, host handle or null role lookup at adoption cannot
+      erase or replace that authority.
+    - **Three read outcomes** (Ione's `b318dd1b`, `7d1375e5`). Known-ours may deliver, known-not-ours stays native,
+      and unread is withheld and dropped without clearing custody. This applies to the VM pointer and source,
+      host handle, object → actor → object-entry chain, node/thread resolver, owner scope, arguments, game-thread
+      observation and camera name. `SmDecodeKnown` separates an answered zero from a failed lookup. If 2/20's
+      node/header/thread is unread, its binding remains pending and resolves again on later ops. An unread label
+      or missing returned node observation holds candidates until the lease, without claiming delivery or completion.
+      An answering unqueued node does not adopt a thread; later proof of an unqueued node makes its ops native
+      without erasing the retained authority.
+    - **Its three ops** (`AxelFadeMatchFor`). Thread identity, handle incarnation and VM source identify D303.
+      A positively unrelated source/thread or a proven replacement remains native and leaves custody intact.
+      Unread identity, scope or arguments cannot restore the host fade. Op 17 uses only the captured role; if that
+      role has ended or its scope is unavailable, the op is dropped on both games. A later RC cannot borrow it.
+      Multiple unfinished D303 bindings keep their own role identities and original leases.
+    - **The end.** Only an identified D303 white-in, with readable arguments and matching scope, retires that
+      binding, or `kAxelFadeLeaseFrames` (600) expires. An unread white-in, executor reset, handle replacement or
+      epoch change does not retire it. Expiry is checked on the frame tick as well as hook entry. **Bound:** the
+      existing lease still permits native execution after expiry; isolation beyond 600 frames is not claimed.
     - **Hooks.** Its four slots are among custody's six: refused, there is no custody, so D303 plays on the host.
   - **The friend's replay** (`SmAxelApplyCameraOp`). Op 17 replays only on the owner's own Axel role, never a
     spectator's, from its Axel clone, against natives resolved at install only when 1/207's, 1/295's, 0/31's and

@@ -22,6 +22,9 @@ struct SmAxelState {
     bool watchPending{};     // Burst's 1/207, waiting for the callback's end (SmAxelFlushWatch)
     R::AxelCameraStep watchStep{};
     std::uint64_t watchArgs[1]{};
+    std::uint64_t cameraSerial{};
+    R::AxelFadeCustody cameraOwner{}; // captured at handoff; independent of executor observations
+    std::vector<R::AxelFadeCustody> olderFades{}; // another D303 can outlive its role and overlap a later RC
     R::AxelFadeCustody fade{}; // D303 under a friend's custody; it outlives its executor and Axel himself
     // client
     bool whiteInOwed{};        // a retired role left this game whited out (SmAxelRetireCamera)
@@ -178,14 +181,6 @@ static bool SmAxelEmitHold(std::uint8_t slot,uintptr_t actor,bool held) {
     const auto* role=SmAxelFriendRole(slot,actor);
     return role && SmEmit(SmAxelHoldRecord(*role,held));
 }
-static bool SmAxelEmitCamera(std::uint8_t slot,uintptr_t actor,std::uint32_t fourcc) {
-    const auto* role=SmAxelFriendRole(slot,actor);
-    return role && SmEmit(SmAxelCameraRecord(*role,fourcc));
-}
-static bool SmAxelEmitCameraOp(std::uint8_t slot,uintptr_t actor,R::AxelCameraKind kind,float argument) {
-    const auto* role=SmAxelFriendRole(slot,actor,true);
-    return role && SmEmit(SmAxelCameraOpRecord(*role,kind,argument));
-}
 // Client: the native camera calls the friend's replay of op 17 makes, resolved from the module base at install
 // (SmAxelCameraNativesInstall). 1/207's body is 3BDA50(&target), 3BEE60(&target, actor, 0), 176310(&target); the
 // others are the traps' own functions.
@@ -338,16 +333,76 @@ static bool SmAxelApplyHold(ScriptActorRole& role,bool hold) noexcept {
         role.axelHeld=false;return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){++g_sm.faults;return false;}
 }
-// R::AxelCameraStepFor on the host for a camera op whose object is this actor.
-// Without every custody hook in, no friend executor takes custody: its camera is the host's.
+// An earlier role's resource/connection/source binding is never lent to a new RC.
+static const ScriptActorRole* SmAxelBoundCameraRole(const R::AxelFadeCustody& c,const enemysync::DownedScope& scope) {
+    if(!c.resource || c.slot>=3 || scope.epoch!=c.epoch)return nullptr;
+    const auto& role=g_smRoles[c.slot];
+    return role.resource==c.resource && role.connection==c.connection && role.objectId==R::kAxelIIObjectId &&
+        role.actor==c.actor && role.source==c.axel && SmOwnerCurrent(role,scope)?&role:nullptr;
+}
+// Camera reads have three outcomes. An unread observation cannot undo an authorized handoff.
+static bool SmAxelOwnerTail() {
+    return g_axel.cameraOwner.axel && (!g_axel.executor.command || g_axel.cameraCustody==R::AxelCameraCustody::Owner);
+}
+using SmAxelRead=R::AxelIdentityRead;
+static SmAxelRead SmAxelCameraHost() {
+    const auto axel=SmAxelOwnerTail()?g_axel.cameraOwner.axel:g_axel.actor;
+    if(!g_sm.hostActive || !axel)return SmAxelRead::Other;
+    std::uint32_t handle=0;uintptr_t resolved=0;
+    if(!ReadHitTrace(axel+4,handle) || !SmDecodeKnown(handle,resolved))return SmAxelRead::Unread;
+    const auto expected=SmAxelOwnerTail()?g_axel.cameraOwner.axelHandle:g_axel.handle;
+    return handle==expected && resolved==axel?SmAxelRead::Ours:SmAxelRead::Other;
+}
+// Same object -> handle -> actor -> ObjEntry path as SmActorOf, preserving every failed read.
+static SmAxelRead SmAxelCameraActor(std::uint64_t arg) {
+    if(R::TagOf(arg)!=R::kTagAddress)return SmAxelRead::Other;
+    uintptr_t object=0,actor=0,entry=0;std::uint32_t handle=0,id=0;
+    if(!SmDecodeKnown(R::BitsOf(arg),object))return SmAxelRead::Unread;
+    if(!object)return SmAxelRead::Other;
+    if(!ReadHitTrace(object+4,handle) || !SmDecodeKnown(handle,actor))return SmAxelRead::Unread;
+    if(!actor)return SmAxelRead::Other;
+    if(!ReadHitTrace(actor+offsets::actor::OBJENTRY_PTR,entry))return SmAxelRead::Unread;
+    if(!entry)return SmAxelRead::Other;
+    if(!ReadHitTrace(entry+offsets::objentry::OBJECT_ID,id))return SmAxelRead::Unread;
+    const auto axel=SmAxelOwnerTail()?g_axel.cameraOwner.axel:g_axel.actor;
+    return actor==axel && id==R::kAxelIIObjectId?SmAxelRead::Ours:SmAxelRead::Other;
+}
+static void SmAxelExpireCamera() {
+    if(g_axel.cameraOwner.axel && static_cast<std::int32_t>(g_axel.cameraOwner.until-g_frameCounter)<0)
+        g_axel.cameraOwner={};
+    if(g_axel.fade.axel && static_cast<std::int32_t>(g_axel.fade.until-g_frameCounter)<0)g_axel.fade={};
+    auto& older=g_axel.olderFades;
+    older.erase(std::remove_if(older.begin(),older.end(),[](const auto& f) {
+        return !f.axel || static_cast<std::int32_t>(f.until-g_frameCounter)<0;
+    }),older.end());
+}
+// A role/scope is captured when custody is taken, never rediscovered from a replacement at adoption.
+static void SmAxelRememberCamera(const ScriptActorRole* captured=nullptr,bool newSequence=false) {
+    auto& c=g_axel.cameraOwner;
+    if(c.axel && !newSequence)return;
+    c={};c.axel=g_axel.actor;c.actor=g_axel.executorActor;c.slot=g_axel.executor.slot;c.epoch=g_axel.executor.epoch;
+    c.until=g_frameCounter+R::kAxelFadeLeaseFrames;c.axelHandle=g_axel.handle;c.custody=++g_axel.cameraSerial;
+    const auto* role=captured?captured:SmGameThread()?SmAxelFriendRole(c.slot,c.actor,true):nullptr;
+    if(role){c.resource=role->resource;c.connection=role->connection;}
+}
 static R::AxelCameraStep SmAxelCameraStep(uintptr_t object) {
+    SmAxelExpireCamera();
     const bool friendExecutor=g_smAxelCameraHooks.Complete() && g_axel.executor.command && g_axel.executor.slot && g_axel.executor.slot<3 && g_axel.executorActor;
+    if(!g_axel.executor.command && g_smAxelCameraHooks.Complete() && g_axel.cameraOwner.axel && object==g_axel.cameraOwner.axel)
+        return R::AxelCameraStep::Withhold;
     return R::AxelCameraStepFor(object && object==g_axel.actor,friendExecutor?g_axel.cameraCustody:R::AxelCameraCustody::Undecided,
         friendExecutor);
 }
-// After an Offer or Withhold step's send. False only for an Offer that did not go: the host plays it, and the rest
-// of the sequence, natively.
-static bool SmAxelCameraSent(R::AxelCameraStep step,bool sent,const char* op,std::uint32_t detail) {
+// Unobservable detour entry: do not read VM/arguments off the game thread. A candidate is dropped, never native.
+static bool SmAxelCameraUnobserved() {
+    if(!g_sm.hostActive || !g_smAxelCameraHooks.Complete())return false;
+    const auto step=SmAxelCameraStep(SmAxelOwnerTail()?g_axel.cameraOwner.axel:g_axel.actor);
+    if(step==R::AxelCameraStep::Native)return false;
+    SmAxelRememberCamera(nullptr,step==R::AxelCameraStep::Offer);g_axel.cameraCustody=R::AxelCameraCustody::Owner;
+    if(SmAxelLogBudget())Log("[axel-rc] camera unread: withheld owner=%u role=%u",g_axel.cameraOwner.slot,g_axel.cameraOwner.resource);
+    return true;
+}
+static bool SmAxelCameraSent(R::AxelCameraStep step,bool sent,const char* op,std::uint32_t detail,const ScriptActorRole* role=nullptr) {
     if(step==R::AxelCameraStep::Offer) {
         g_axel.cameraCustody=sent?R::AxelCameraCustody::Owner:R::AxelCameraCustody::Host;
         if(!sent) {
@@ -355,58 +410,76 @@ static bool SmAxelCameraSent(R::AxelCameraStep step,bool sent,const char* op,std
                 op,g_axel.executor.command,g_axel.executor.slot);
             return false;
         }
+        SmAxelRememberCamera(role,true);
     }
-    if(SmAxelLogBudget())
-        Log("[axel-rc] camera %s %s command=%u owner=%u detail=%X",sent?"forwarded":"dropped",op,g_axel.executor.command,
-            g_axel.executor.slot,detail);
+    if(SmAxelLogBudget())Log("[axel-rc] camera %s %s command=%u owner=%u detail=%X",sent?"forwarded":"dropped",
+        op,g_axel.executor.command,g_axel.executor.slot,detail);
     return true;
 }
-// A camera name argument as the fourcc 3DB2F0 packs, if it is printable.
-static bool SmAxelCameraName(std::uint64_t arg,std::uint32_t& fourcc) {
-    char text[4]{};fourcc=0;
-    const auto name=R::TagOf(arg)==R::kTagAddress?SmDecode(R::BitsOf(arg)):0;
-    if(!name || !ReadHitTraceMemory(name,text,sizeof(text)))return false;
+static SmAxelRead SmAxelCameraNameRead(std::uint64_t arg,std::uint32_t& fourcc) {
+    char text[4]{};fourcc=0;uintptr_t name=0;
+    if(R::TagOf(arg)!=R::kTagAddress)return SmAxelRead::Other;
+    if(!SmDecodeKnown(R::BitsOf(arg),name))return SmAxelRead::Unread;
+    if(!name)return SmAxelRead::Other;
+    if(!ReadHitTraceMemory(name,text,sizeof(text)))return SmAxelRead::Unread;
     for(unsigned i=0;i<4 && text[i];++i) {
-        if(text[i]<0x20 || text[i]>0x7E)return false;
+        if(text[i]<0x20 || text[i]>0x7E)return SmAxelRead::Other;
         fourcc|=static_cast<std::uint32_t>(static_cast<unsigned char>(text[i]))<<(8*i);
     }
-    return fourcc!=0;
+    return fourcc?SmAxelRead::Ours:SmAxelRead::Other;
 }
-// Host 1/164 on its copied arguments ([0] the object, [8] the camera name). True when the hook must skip the native
-// start. An offered start whose name is not a printable fourcc, or that cannot be sent, stays native.
 static bool SmAxelCamera(const std::uint64_t* args) {
-    if(!g_sm.hostActive || !args || !SmAxelHostCurrent())return false;
-    std::uint32_t ignored=0,fourcc=0;
-    const auto step=SmAxelCameraStep(SmActorOf(args[0],ignored));
+    if(!g_sm.hostActive)return false;
+    if(!args)return SmAxelCameraUnobserved();
+    const auto step=SmAxelCameraStep(SmAxelOwnerTail()?g_axel.cameraOwner.axel:g_axel.actor);
     if(step==R::AxelCameraStep::Native)return false;
-    const bool sent=SmAxelCameraName(args[1],fourcc) && SmAxelEmitCamera(g_axel.executor.slot,g_axel.executorActor,fourcc);
-    return SmAxelCameraSent(step,sent,"start",fourcc);
+    const auto host=SmAxelCameraHost(),object=SmAxelCameraActor(args[0]);
+    if(object==SmAxelRead::Other)return false;
+    if(object==SmAxelRead::Unread || host==SmAxelRead::Unread)return SmAxelCameraUnobserved();
+    // A proven source replacement is foreign; the retained sequence is not retired.
+    if(host==SmAxelRead::Other)return false;
+    std::uint32_t fourcc=0;const auto name=SmAxelCameraNameRead(args[1],fourcc);
+    if(name==SmAxelRead::Unread)return SmAxelCameraUnobserved();
+    enemysync::DownedScope scope;
+    if(!SmOwnerScope(scope))return SmAxelCameraUnobserved();
+    const auto* role=SmAxelOwnerTail()?SmAxelBoundCameraRole(g_axel.cameraOwner,scope):
+        SmAxelFriendRole(g_axel.executor.slot,g_axel.executorActor);
+    const bool sent=name==SmAxelRead::Ours && role && SmEmit(SmAxelCameraRecord(*role,fourcc));
+    return SmAxelCameraSent(step,sent,"start",fourcc,role);
 }
-// Host 1/207 camera_watch on its copied argument ([0] the object): Burst's L531 watches Axel. True: the hook skips
-// the native watch. L531 calls it before its 1/112 hooks the player (Kit, e4a7861e), so inside a friend's callback
-// the role it goes on may not exist yet; it then waits for the callback's end (SmAxelFlushWatch).
 static bool SmAxelCameraWatch(const std::uint64_t* args) {
-    if(!g_sm.hostActive || !args || !SmAxelHostCurrent())return false;
-    std::uint32_t ignored=0;
-    const auto step=SmAxelCameraStep(SmActorOf(args[0],ignored));
+    if(!g_sm.hostActive)return false;
+    if(!args)return SmAxelCameraUnobserved();
+    const auto step=SmAxelCameraStep(SmAxelOwnerTail()?g_axel.cameraOwner.axel:g_axel.actor);
     if(step==R::AxelCameraStep::Native)return false;
+    const auto host=SmAxelCameraHost(),object=SmAxelCameraActor(args[0]);
+    if(object==SmAxelRead::Other)return false;
+    if(object==SmAxelRead::Unread || host==SmAxelRead::Unread)return SmAxelCameraUnobserved();
+    if(host==SmAxelRead::Other)return false;
     const auto slot=g_axel.executor.slot;
     if(!SmAxelFriendRole(slot,g_axel.executorActor,true) && g_axel.inFriendCallback && !g_axel.watchPending) {
         g_axel.watchPending=true;g_axel.watchStep=step;g_axel.watchArgs[0]=args[0];return true;
     }
-    return SmAxelCameraSent(step,SmAxelEmitCameraOp(slot,g_axel.executorActor,R::AxelCameraKind::Watch,0),"watch",0);
+    enemysync::DownedScope scope;
+    if(!SmOwnerScope(scope))return SmAxelCameraUnobserved();
+    const auto* role=SmAxelOwnerTail()?SmAxelBoundCameraRole(g_axel.cameraOwner,scope):
+        SmAxelFriendRole(slot,g_axel.executorActor,true);
+    const bool sent=role && SmEmit(SmAxelCameraOpRecord(*role,R::AxelCameraKind::Watch,0));
+    return SmAxelCameraSent(step,sent,"watch",0,role);
 }
-// After the friend's callback: the waiting watch goes on its role (Burst's hook role), or, if this RC's sequence is
-// not already the owner's and it cannot be sent, plays natively now.
 static void SmAxelFlushWatch() {
     if(!g_axel.watchPending)return;
     g_axel.watchPending=false;
     using Custody=R::AxelCameraCustody;
-    const auto step=g_axel.cameraCustody==Custody::Owner?R::AxelCameraStep::Withhold:
+    const auto step=SmAxelOwnerTail() || g_axel.cameraCustody==Custody::Owner?R::AxelCameraStep::Withhold:
         g_axel.cameraCustody==Custody::Host?R::AxelCameraStep::Native:g_axel.watchStep;
-    const bool sent=step!=R::AxelCameraStep::Native &&
-        SmAxelEmitCameraOp(g_axel.executor.slot,g_axel.executorActor,R::AxelCameraKind::Watch,0);
-    if(step==R::AxelCameraStep::Native || !SmAxelCameraSent(step,sent,"watch",0))SmOwnerCameraWatchNative(g_axel.watchArgs);
+    enemysync::DownedScope scope;
+    const bool scoped=SmOwnerScope(scope);
+    const auto* role=!scoped?nullptr:SmAxelOwnerTail()?SmAxelBoundCameraRole(g_axel.cameraOwner,scope):
+        SmAxelFriendRole(g_axel.executor.slot,g_axel.executorActor,true);
+    if(!scoped){(void)SmAxelCameraUnobserved();return;}
+    const bool sent=step!=R::AxelCameraStep::Native && role && SmEmit(SmAxelCameraOpRecord(*role,R::AxelCameraKind::Watch,0));
+    if(step==R::AxelCameraStep::Native || !SmAxelCameraSent(step,sent,"watch",0,role))SmOwnerCameraWatchNative(g_axel.watchArgs);
 }
 // Host: the custody slots in R::AxelCameraHooks order, stopping at the first refusal. swap installs one.
 static void SmAxelCameraHooksInstall(bool(*swap)(R::AxelCameraHook)) {
@@ -425,9 +498,10 @@ static void SmAxelCameraHooksRevoke() { g_smAxelCameraHooks={}; }
 // D303 (R::AxelFadeAdopted, R::AxelFadeOurs). The running VM thread and its program's source actor are read raw, with
 // no liveness or family check: D303 keeps Axel's after he dies.
 static constexpr uintptr_t kSmAxelCurrentThread=0x2A25048,kSmAxelVm=0x2A250B0;
-static uintptr_t SmAxelVmSource() {
-    uintptr_t vm=0,actor=0;
-    return ReadHitTrace(g_exeBase+kSmAxelVm,vm) && vm && ReadHitTrace(vm+0x60,actor)?actor:0;
+static bool SmAxelVmSourceKnown(uintptr_t& actor) {
+    uintptr_t vm=0;actor=0;
+    if(!ReadHitTrace(g_exeBase+kSmAxelVm,vm))return false;
+    return !vm || ReadHitTrace(vm+0x60,actor);
 }
 // Whether the 2/20 hook must look at this call: only inside a friend's callback. Nothing is read otherwise.
 static bool SmAxelThreadWatched() noexcept { return g_sm.hostActive && g_axel.inFriendCallback; }
@@ -446,67 +520,79 @@ static bool SmAxelNodeThread(std::uint32_t nodeHandle,std::uint32_t& threadHandl
 }
 // Host 2/20, after its native call: [0] the label before it, the node handle after it.
 static void SmAxelThreadStarted(const std::uint64_t* before,const std::uint64_t* after) {
-    if(!SmAxelThreadWatched() || !before || !after || R::BitsOf(before[0])!=R::kAxelWhiteOutThread)return;
-    enemysync::DownedScope scope;std::uint32_t threadHandle=0;uintptr_t thread=0;
-    const auto nodeHandle=R::TagOf(after[0])==R::kTagAddress?R::BitsOf(after[0]):0u; // 0: the node was not allocated
-    const bool known=!nodeHandle || SmAxelNodeThread(nodeHandle,threadHandle,thread);
-    const bool axel=SmAxelHostCurrent() && SmAxelVmSource()==g_axel.actor;
-    if(!R::AxelFadeAdopted(true,g_axel.cameraCustody,axel,R::BitsOf(before[0]),thread || !known) || !SmOwnerScope(scope))return;
-    // Owner custody means the RC's start went to this role (Clear Light's begins before the callback); with none, the
-    // fade is still the owner's and is dropped.
-    const auto* role=SmAxelFriendRole(g_axel.executor.slot,g_axel.executorActor,true);
-    g_axel.fade={thread,g_axel.actor,g_axel.executorActor,g_axel.executor.slot,scope.epoch,g_frameCounter+R::kAxelFadeLeaseFrames,
-        threadHandle,role?role->resource:0u,role?role->connection:0u,nodeHandle,!known};
-    if(SmAxelLogBudget())Log("[axel-rc] camera adopted D303 command=%u owner=%u role=%u%s",g_axel.executor.command,
-        g_axel.executor.slot,g_axel.fade.resource,known?"":" pending: its thread unread");
+    if(!SmAxelThreadWatched())return;
+    SmAxelExpireCamera();
+    const auto& c=g_axel.cameraOwner;
+    const bool labelKnown=before!=nullptr;
+    if(labelKnown && R::BitsOf(before[0])!=R::kAxelWhiteOutThread)return;
+    if(!c.axel || (SmGameThread() && SmAxelCameraHost()==SmAxelRead::Other))return;
+    uintptr_t source=0;
+    const bool sourceKnown=SmGameThread() && SmAxelVmSourceKnown(source);
+    if(sourceKnown && source!=c.axel)return;
+    // HostCurrent/scope/role can all become unread after the handoff. The captured authority is sufficient to
+    // retain custody, but only a known D303 with a known running source may deliver or complete it later.
+    std::uint32_t threadHandle=0;uintptr_t thread=0;
+    const auto nodeHandle=after && R::TagOf(after[0])==R::kTagAddress?R::BitsOf(after[0]):0u;
+    const bool known=after && (!nodeHandle || SmAxelNodeThread(nodeHandle,threadHandle,thread));
+    if(!R::AxelFadeAdopted(true,R::AxelCameraCustody::Owner,true,R::kAxelWhiteOutThread,thread || !known))return;
+    // A new callback is not completion of an older D303. Keep its binding and original lease too.
+    if(g_axel.fade.axel)g_axel.olderFades.push_back(g_axel.fade);
+    g_axel.fade=c;auto& f=g_axel.fade;
+    f.until=g_frameCounter+R::kAxelFadeLeaseFrames;g_axel.cameraOwner.until=f.until;
+    f.thread=thread;f.threadHandle=threadHandle;f.nodeHandle=nodeHandle;f.pending=!known;f.unproven=!labelKnown;
+    if(SmAxelLogBudget())Log("[axel-rc] camera adopted D303 owner=%u role=%u pending=%u",f.slot,f.resource,f.pending?1u:0u);
 }
 // The role D303 was adopted with, while it is still that role: never a later RC's on the same seat and actor.
-static const ScriptActorRole* SmAxelFadeRole(const enemysync::DownedScope& scope) {
-    const auto& f=g_axel.fade;
-    if(!f.resource || f.slot>=3)return nullptr;
-    const auto& role=g_smRoles[f.slot];
-    return role.resource==f.resource && role.connection==f.connection && role.objectId==R::kAxelIIObjectId &&
-        role.actor==f.actor && SmOwnerCurrent(role,scope)?&role:nullptr;
+static const ScriptActorRole* SmAxelFadeRole(const enemysync::DownedScope& scope,const R::AxelFadeCustody& f) {
+    return SmAxelBoundCameraRole(f,scope);
 }
 // Whether the fade and reset hooks must look at this call: only while a D303 is adopted.
-static bool SmAxelFadePending() noexcept { return g_sm.hostActive && (g_axel.fade.thread || g_axel.fade.pending); }
+static bool SmAxelFadePending() noexcept { return g_sm.hostActive && (g_axel.fade.thread || g_axel.fade.pending || !g_axel.olderFades.empty()); }
 // Host 0/31, 0/32 and 1/295 (args: the fade's float, or none): one of the adopted D303's ops goes to its owner, or
 // is dropped, and never runs on the host. True: the hook skips it.
-static bool SmAxelFade(R::AxelCameraKind kind,const std::uint64_t* args) {
-    if(!SmAxelFadePending())return false;
-    auto& f=g_axel.fade;
+static bool SmAxelFadeOne(R::AxelFadeCustody& f,R::AxelCameraKind kind,const std::uint64_t* args) {
+    if(!f.axel)return false;
     enemysync::DownedScope scope;uintptr_t thread=0;
     const bool scoped=SmOwnerScope(scope);
-    if((scoped && scope.epoch!=f.epoch) || static_cast<std::int32_t>(f.until-g_frameCounter)<0) {
-        if(SmAxelLogBudget())Log("[axel-rc] camera D303 expired owner=%u",f.slot);
-        f={};return false;
-    }
-    if(f.pending) { // its thread was unread at 2/20: resolve it now if a lookup answers
+    if(f.pending && f.nodeHandle) { // its thread was unread at 2/20: resolve it now if a lookup answers
         uintptr_t resolvedThread=0;
         if(SmAxelNodeThread(f.nodeHandle,f.threadHandle,resolvedThread)) {
-            if(!resolvedThread){f={};return false;} // nothing was queued after all
+            if(!resolvedThread){f.pending=false;return false;} // proven unqueued; keep the authority until its lease
             f.thread=resolvedThread;f.pending=false;
         }
     }
     uintptr_t resolved=0;
     const bool threadKnown=ReadHitTrace(g_exeBase+kSmAxelCurrentThread,thread);
     const bool resolvedKnown=!f.pending && SmDecodeKnown(f.threadHandle,resolved);
-    const auto match=R::AxelFadeMatchFor(f,threadKnown,thread,resolvedKnown,resolved,SmAxelVmSource(),
-        scoped?scope.epoch:f.epoch,g_frameCounter);
+    uintptr_t source=0;const bool sourceKnown=SmGameThread() && SmAxelVmSourceKnown(source);
+    const auto match=R::AxelFadeMatchFor(f,threadKnown,thread,resolvedKnown,resolved,source,
+        f.epoch,g_frameCounter,sourceKnown);
     if(match==R::AxelFadeMatch::Ended) { // another thread at D303's address: D303 itself has ended
         if(SmAxelLogBudget())Log("[axel-rc] camera D303 ended owner=%u",f.slot);
-        f={};return false;
+        return false; // replacement proves this op is foreign, not completion of the retained sequence
     }
     if(match==R::AxelFadeMatch::Other)return false;
     // Ours goes to the adopted role; Unread (the thread or its handle could not be looked up) is withheld from both.
     const float argument=kind==R::AxelCameraKind::Reset || !args?0.0f:R::FloatOf(args[0]);
-    const auto* role=match==R::AxelFadeMatch::Ours && scoped?SmAxelFadeRole(scope):nullptr;
+    const auto* role=match==R::AxelFadeMatch::Ours && !f.unproven && scoped && (kind==R::AxelCameraKind::Reset || args)?SmAxelFadeRole(scope,f):nullptr;
     const bool sent=role && SmEmit(SmAxelCameraOpRecord(*role,kind,argument));
     if(SmAxelLogBudget())Log("[axel-rc] camera %s D303 kind=%u owner=%u role=%u%s",sent?"forwarded":"dropped",
         static_cast<unsigned>(kind),f.slot,f.resource,match==R::AxelFadeMatch::Unread?" unread: not on any game":
         role?"":" ended: not on any game");
-    if(kind==R::AxelCameraKind::WhiteIn)f={};
+    if(kind==R::AxelCameraKind::WhiteIn && match==R::AxelFadeMatch::Ours && !f.unproven && args && scoped && scope.epoch==f.epoch) {
+        const auto& c=g_axel.cameraOwner;
+        if(c.custody==f.custody)g_axel.cameraOwner={};
+        f={};
+    }
     return true;
+}
+static bool SmAxelFade(R::AxelCameraKind kind,const std::uint64_t* args) {
+    SmAxelExpireCamera();
+    if(!SmAxelFadePending())return false;
+    bool withheld=SmAxelFadeOne(g_axel.fade,kind,args);
+    for(auto& f:g_axel.olderFades)withheld=SmAxelFadeOne(f,kind,args) || withheld;
+    SmAxelExpireCamera();
+    return withheld;
 }
 static void SmAxelExecutorTick(const enemysync::DownedScope& scope) {
     if(!g_axel.executor.command)return;
@@ -533,6 +619,7 @@ static bool SmAxelEmit(const R::ReactionWindow& w) {
 }
 // Host, once per frame from SmTickReactions. Three compares leave every other room.
 static void SmAxelFrame(const enemysync::DownedScope& scope) {
+    SmAxelExpireCamera();
     if(!R::AxelHostFrameAdmitted(g_sm.hostActive,scope.localSlot,scope.worldId,scope.roomId,scope.battleProgram)) {
         SmAxelHostReset();return;
     }
