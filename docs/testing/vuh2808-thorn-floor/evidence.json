@@ -24,6 +24,42 @@
       "size": 2437066,
       "sha256": "ff9beae6eed37a84f6b33ef6635cc23d8a689208299ed3e7e294848b5d8c3d99",
       "url": "clankie://evidence/sha256/ff9beae6eed37a84f6b33ef6635cc23d8a689208299ed3e7e294848b5d8c3d99"
+    },
+    {
+      "path": "trace01/friend_inject.log",
+      "size": 20414362,
+      "sha256": "83e4a8c8588c1e4a033d347ae08fdd82b13fd35ce2b098d126fb2fadc9db72a2",
+      "url": "clankie://evidence/sha256/83e4a8c8588c1e4a033d347ae08fdd82b13fd35ce2b098d126fb2fadc9db72a2"
+    },
+    {
+      "path": "trace01/friend_pilot.jsonl",
+      "size": 909429,
+      "sha256": "1c751c135bd73af1eaa767d2099fe5b160830d1a6ce6504187eb1e3edad966e9",
+      "url": "clankie://evidence/sha256/1c751c135bd73af1eaa767d2099fe5b160830d1a6ce6504187eb1e3edad966e9"
+    },
+    {
+      "path": "trace01/host_inject.log",
+      "size": 20714231,
+      "sha256": "a423bbc7d519779e30c75c4c8378cd3f98d11d4c8c35ba1a50715df55462e3d7",
+      "url": "clankie://evidence/sha256/a423bbc7d519779e30c75c4c8378cd3f98d11d4c8c35ba1a50715df55462e3d7"
+    },
+    {
+      "path": "trace01/host_pilot.jsonl",
+      "size": 979041,
+      "sha256": "9b341cab5d1df7e4a34788ff5eca32b574036bfaa0dfa9fef12ec71188d29d5f",
+      "url": "clankie://evidence/sha256/9b341cab5d1df7e4a34788ff5eca32b574036bfaa0dfa9fef12ec71188d29d5f"
+    },
+    {
+      "path": "trace01/metadata.tar",
+      "size": 337920,
+      "sha256": "dab4b35dede0e28f22896a38b44e3a944908662e0295784deb5998952435bb4f",
+      "url": "clankie://evidence/sha256/dab4b35dede0e28f22896a38b44e3a944908662e0295784deb5998952435bb4f"
+    },
+    {
+      "path": "trace01/report.json",
+      "size": 17734,
+      "sha256": "71be11c2037cec415276e62281694dc02fc3f585fa5afaa4db3c418f56131864",
+      "url": "clankie://evidence/sha256/71be11c2037cec415276e62281694dc02fc3f585fa5afaa4db3c418f56131864"
     }
   ]
 }
