@@ -1,0 +1,428 @@
+{
+ "name": "net_prologue_mansion_axel_hp_b1",
+ "description": "VUH-2912, FM-02 rehearsal route into Axel II (02/14 btl137, B_EX110 81), two default dual-wield Roxases, shipped defaults, no protect; KH2COOP_TRACE_HITS and KH2COOP_ENEMY_MIRROR_TRACE are diagnostics only. Lease: no boss damage or boss hit on either seat before the host's admitted release. Then three short rounds, each filmed on both seats for its whole length: friend target (the friend walks in to Axel, the host walks away from him, again if still too close, and, once both seats stand measured apart, only revives; the friend fights, so the host's Axel must choose the friend's seat and the friend's own Roxas takes the native hit from its mirrored Axel), host target (the same, reversed) and interleaved (both fight). The boss HP ledger joins every host Axel HP change to one host native hit or one friend claim, and requires the host Axel's hits on the host's copy of the friend to be complete checked zeros (at least one in the friend round). The boss target ledger requires each round's choice of that seat before a native hit witnessed by its reaction motion and ignore-hit timer (and, on the friend, the driven host motion), never a choice of an ineligible candidate, and, around owner_downs, each downed seat out of Axel's candidates and never chosen. The atk_burst aim and leave distance read the canonical player directly; the friend round's position/motion samples and the host's boss hits measure that, unjudged. PC1's saves are Critical (22-HP Roxas, one Axel hit downs a 5-HP seat). Stops before victory. Rehearsal save, no save. B1 of the split: the host target round, then interleaved, each judged by both ledgers; no downs.",
+ "playerDefaults": true,
+ "protect": [],
+ "steps": [
+  {
+   "do": "boot",
+   "instance": 0,
+   "slotMoves": -1,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+    "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
+    "KH2COOP_TRACE_HITS": "1"
+   }
+  },
+  {
+   "do": "boot",
+   "instance": 1,
+   "slotMoves": -1,
+   "initTimeoutMs": 60000,
+   "env": {
+    "KH2COOP_ENEMY_MIRROR_TRACE": "1",
+    "KH2COOP_DOWNED_SPIKE_FIXTURE": "1",
+    "KH2COOP_TRACE_HITS": "1"
+   }
+  },
+  {
+   "do": "assert",
+   "expr": "room(0)[0] == 2 and room(1)[0] == 2",
+   "message": "the rehearsal save must load Twilight Town on both seats"
+  },
+  {
+   "do": "save",
+   "as": "boot_vitals",
+   "expr": "[{'hp': [a['hp'] for a in actors(i) if int(a['address'],16) == int(peek('0x2A105D0','u64',i),16)][0], 'difficulty': peek('0x9ABD48','u8',i)} for i in (0, 1)]"
+  },
+  {
+   "do": "progress_snapshot",
+   "instances": [
+    0,
+    1
+   ],
+   "as": "save_boot",
+   "extraRanges": [
+    [
+     "forms",
+     13044,
+     560
+    ]
+   ]
+  },
+  {
+   "do": "relay",
+   "port": 27846,
+   "args": [
+    "--bind",
+    "127.0.0.1"
+   ]
+  },
+  {
+   "do": "runtime",
+   "instance": 0,
+   "role": "player"
+  },
+  {
+   "do": "runtime",
+   "instance": 1,
+   "role": "friend1"
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[enemysync] client arrived epoch=', 1) > 0",
+   "timeoutMs": 60000
+  },
+  {
+   "do": "hang_check",
+   "instance": 0,
+   "on": false
+  },
+  {
+   "do": "hang_check",
+   "instance": 1,
+   "on": false
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[prologue] unpinned start', 0) > 0 and log_count('[prologue] unpinned start', 1) > 0",
+   "timeoutMs": 60000,
+   "pollMs": 500
+  },
+  {
+   "do": "pilot",
+   "instance": 0,
+   "route": "tools/rig/route_pilot/routes/fm02_computer_to_hall.json",
+   "seconds": 120,
+   "name": "host_hall",
+   "input": "pad",
+   "allowStuck": true
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('control released at=02/13 evt=134 site=tt19-134', 0) > 0 and log_count('control released at=02/13 evt=134 site=tt19-134', 1) > 0",
+   "timeoutMs": 90000,
+   "pollMs": 500
+  },
+  {
+   "do": "save",
+   "as": "deaths_before",
+   "expr": "log_count('[enemysync] host death epoch', 0)"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1
+   ],
+   "seconds": 240,
+   "reach": 250,
+   "as": "hall",
+   "until": "log_count('[enemysync] host death epoch', 0) >= saved['deaths_before'] + 6"
+  },
+  {
+   "do": "wait_until",
+   "expr": "location(0) == [2, 20, 0, 137, 137, 137] and location(1) == [2, 20, 0, 137, 137, 137]",
+   "timeoutMs": 90000,
+   "pollMs": 250
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[missing-party] born site=tt20-137 bound=1 ', 0) > 0 and log_count('[missing-party] born site=tt20-137 bound=1 ', 1) > 0",
+   "timeoutMs": 30000,
+   "pollMs": 100
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('control released at=02/14 evt=137 site=tt20-137', 0) > 0 and log_count('control released at=02/14 evt=137 site=tt20-137', 1) > 0",
+   "timeoutMs": 60000,
+   "pollMs": 100
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[combat-admission] released admitted ', 0) > 0",
+   "timeoutMs": 30000,
+   "pollMs": 100
+  },
+  {
+   "do": "assert",
+   "expr": "len(log_matches(r'(?P<x>\\[hit\\] [^\\n]*(?:attacker=B_EX110 |victim=B_EX110@)|\\[enemysync\\] host hit claim [^\\n]*objectId=81 )[\\s\\S]*?\\[combat-admission\\] released admitted ', 0)) == 0 and len(log_matches(r'(?P<x>\\[hit\\] [^\\n]*(?:attacker=B_EX110 |victim=B_EX110@)|\\[enemysync\\] client hit claim [^\\n]*objectId=81 )[\\s\\S]*?control released at=02/14 evt=137 site=tt20-137', 1)) == 0",
+   "message": "the VUH-2897/2906 lease: no Axel damage or Axel hit on either seat before both admitted arrivals released the fight"
+  },
+  {
+   "do": "save",
+   "as": "boss_start",
+   "expr": "[[(a['hp'], a.get('maxHp')) for a in actors(i) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] for i in (0, 1)]"
+  },
+  {
+   "do": "assert",
+   "expr": "all(len(seat) == 1 for seat in saved['boss_start'])",
+   "message": "each seat must hold exactly one living Axel"
+  },
+  {
+   "do": "wait_until",
+   "expr": "len(log_matches(r'\\[enemy-mirror\\] take-over frame=\\d+ netId=\\d+ .*?objectId=81', 1)) > 0",
+   "timeoutMs": 20000,
+   "pollMs": 250
+  },
+  {
+   "do": "walk_to",
+   "instance": 0,
+   "body": "self",
+   "x": 0,
+   "z": 0,
+   "targetExpr": "(lambda a, m: (lambda d: (a[0] + 250 * (m[0] - a[0]) / d, a[2] + 250 * (m[1] - a[2]) / d))(max(1.0, ((m[0] - a[0]) ** 2 + (m[1] - a[2]) ** 2) ** 0.5)))(pos('B_EX110', 0), [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0])",
+   "radius": 60,
+   "timeoutMs": 6000,
+   "until": "(lambda s: s['host'] < 350)((lambda a, host, friend: {'host': (lambda p: ((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5)(host), 'friend': (lambda p: ((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5)(friend), 'standing': all(log_count('[downed] gate intercept', i) <= log_count('[downed] revive returned', i) for i in (0, 1))})(pos('B_EX110', 0), [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], [(a['position']['x'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0]))",
+   "as": "host_target_walk_in"
+  },
+  {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "x": 0,
+   "z": 0,
+   "targetExpr": "(lambda a, m: (lambda d: (a[0] + 900 * (m[0] - a[0]) / d, a[2] + 900 * (m[1] - a[2]) / d))(max(1.0, ((m[0] - a[0]) ** 2 + (m[1] - a[2]) ** 2) ** 0.5)))(pos('B_EX110', 1), [(a['position']['x'], a['position']['z']) for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0])",
+   "radius": 60,
+   "timeoutMs": 8000,
+   "as": "host_target_walk_away"
+  },
+  {
+   "do": "walk_to",
+   "instance": 1,
+   "body": "self",
+   "x": 0,
+   "z": 0,
+   "targetExpr": "(lambda a, m: (lambda d: (a[0] + 900 * (m[0] - a[0]) / d, a[2] + 900 * (m[1] - a[2]) / d))(max(1.0, ((m[0] - a[0]) ** 2 + (m[1] - a[2]) ** 2) ** 0.5)))(pos('B_EX110', 1), [(a['position']['x'], a['position']['z']) for a in actors(1) if int(a['address'],16) == int(peek('0x2A105D0','u64',1),16)][0])",
+   "radius": 60,
+   "timeoutMs": 8000,
+   "until": "(lambda s: s['standing'] and s['friend'] - s['host'] > 200)((lambda a, host, friend: {'host': (lambda p: ((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5)(host), 'friend': (lambda p: ((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5)(friend), 'standing': all(log_count('[downed] gate intercept', i) <= log_count('[downed] revive returned', i) for i in (0, 1))})(pos('B_EX110', 0), [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], [(a['position']['x'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0]))",
+   "as": "host_target_walk_away_retry"
+  },
+  {
+   "do": "save",
+   "as": "host_target_separation",
+   "expr": "(lambda a, host, friend: {'host': (lambda p: ((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5)(host), 'friend': (lambda p: ((p[0] - a[0]) ** 2 + (p[1] - a[2]) ** 2) ** 0.5)(friend), 'standing': all(log_count('[downed] gate intercept', i) <= log_count('[downed] revive returned', i) for i in (0, 1))})(pos('B_EX110', 0), [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], [(a['position']['x'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0])"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['host_target_separation']['standing'] and saved['host_target_separation']['friend'] - saved['host_target_separation']['host'] > 200",
+   "message": "SETUP FAILURE, not a targeting result: host_target needs both seats standing and the friend more than 200 units farther from Axel than the host after both walks"
+  },
+  {
+   "do": "save",
+   "as": "host_target_base",
+   "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=0 ', 0)), 'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0], 'hp': [a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'downs': log_count('[downed] gate intercept', 0)}"
+  },
+  {
+   "do": "save",
+   "as": "m_host_target0",
+   "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
+   "do": "revive_guard",
+   "host": 0,
+   "friend": 1,
+   "aside": {
+    "roomScope": [
+     2,
+     20,
+     0,
+     137,
+     137,
+     137
+    ],
+    "center": [
+     39,
+     -27
+    ],
+    "radius": 450
+   }
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0
+   ],
+   "seconds": 20,
+   "reach": 120,
+   "as": "host_target",
+   "until": "(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '0' and ([a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0] < saved['host_target_base']['hp'] or log_count('[downed] gate intercept', 0) > saved['host_target_base']['downs']) and ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0] < saved['host_target_base']['bossHp']",
+   "sample": {
+    "expr": "{'axel': [(a['position']['x'], a['position']['z'], a.get('motionId')) for a in actors(0) if a['name'] == 'B_EX110'], 'host': [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'clone': [(a['position']['x'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0]}",
+    "everyMs": 500
+   },
+   "clips": [
+    {
+     "instance": 0,
+     "seconds": 20,
+     "fps": 30,
+     "name": "host_target_host"
+    },
+    {
+     "instance": 1,
+     "seconds": 20,
+     "fps": 30,
+     "name": "host_target_friend"
+    }
+   ]
+  },
+  {
+   "do": "save",
+   "as": "m_host_target1",
+   "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['host_target']['until']['reached']",
+   "message": "host_target: in 20 s Axel never chose the host with the host hit and landing damage"
+  },
+  {
+   "do": "wait_until",
+   "expr": "log_count('[downed] gate intercept', 0) <= log_count('[downed] revive returned', 0)",
+   "timeoutMs": 60000,
+   "pollMs": 250
+  },
+  {
+   "do": "revive_guard",
+   "on": false,
+   "as": "host_target_guard"
+  },
+  {
+   "do": "save",
+   "as": "m_interleaved0",
+   "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
+   "do": "save",
+   "as": "il_base",
+   "expr": "{'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0]}"
+  },
+  {
+   "do": "fight",
+   "instances": [
+    0,
+    1
+   ],
+   "seconds": 10,
+   "reach": 120,
+   "as": "interleaved",
+   "until": "len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)) > saved['il_base']['claims'] and ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0] < saved['il_base']['bossHp'] - sum(int(r['b']) - int(r['a']) for r in log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*beforeHp=(?P<b>\\d+) afterHp=(?P<a>\\d+) nativeOk=1', 0)[saved['il_base']['claims']:])",
+   "clips": [
+    {
+     "instance": 0,
+     "seconds": 12,
+     "fps": 30,
+     "name": "interleaved_host"
+    },
+    {
+     "instance": 1,
+     "seconds": 12,
+     "fps": 30,
+     "name": "interleaved_friend"
+    }
+   ]
+  },
+  {
+   "do": "save",
+   "as": "m_interleaved1",
+   "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
+   "do": "wait",
+   "ms": 4000
+  },
+  {
+   "do": "save",
+   "as": "boss_settled",
+   "expr": "[[(a['hp'], a.get('maxHp')) for a in actors(i) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] for i in (0, 1)]"
+  },
+  {
+   "do": "capture",
+   "instance": 0,
+   "name": "settled_host"
+  },
+  {
+   "do": "capture",
+   "instance": 1,
+   "name": "settled_friend"
+  },
+  {
+   "do": "hp_ledger",
+   "objectId": 81,
+   "program": 137,
+   "marks": [
+    "m_host_target0",
+    "m_host_target1",
+    "m_interleaved0",
+    "m_interleaved1"
+   ],
+   "as": "ledger",
+   "require": false,
+   "window": [
+    "m_host_target0",
+    "m_interleaved1"
+   ],
+   "phases": [
+    {
+     "name": "host_target",
+     "from": "m_host_target0",
+     "to": "m_host_target1",
+     "host": true,
+     "friend": false,
+     "hitOnHost": true
+    },
+    {
+     "name": "interleaved",
+     "from": "m_interleaved0",
+     "to": "m_interleaved1",
+     "host": true,
+     "friend": true
+    }
+   ]
+  },
+  {
+   "do": "assert",
+   "expr": "len(saved['boss_settled'][0]) == 1 and saved['boss_settled'][0] == saved['boss_settled'][1]",
+   "message": "after delivery settles both seats must show one living Axel with the host's HP and max HP"
+  },
+  {
+   "do": "assert",
+   "expr": "saved['ledger']['pass']",
+   "message": "the boss HP ledger must join every Axel HP change to exactly one hit"
+  },
+  {
+   "do": "assert",
+   "expr": "log_count('[enemy-target] forward ', 0) == 0 and log_count('[enemy-target] remote-hit ', 1) == 0 and log_count('[enemy-target] veto ', 1) == 0",
+   "message": "the boss's hits on the friend must stay native on the friend: no forwarded RemoteHit or vetoed local hit"
+  },
+  {
+   "do": "target_ledger",
+   "objectId": 81,
+   "ledger": "ledger",
+   "as": "targets",
+   "require": false,
+   "rounds": [
+    {
+     "name": "host_target",
+     "from": "m_host_target0",
+     "to": "m_host_target1",
+     "seat": 0
+    }
+   ]
+  },
+  {
+   "do": "assert",
+   "expr": "saved['targets']['pass']",
+   "message": "Axel must choose each round's seat before its witnessed native hit, never choose an ineligible candidate, and drop each downed seat from its candidates"
+  },
+  {
+   "do": "coop_verdict",
+   "as": "verdict",
+   "require": true,
+   "arrivalTimeoutMs": 20000
+  }
+ ]
+}

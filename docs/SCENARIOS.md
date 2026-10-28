@@ -3568,6 +3568,18 @@ reported, not judged. `tests/test_axel_hp_fixture.py` checks the fixture's expre
 negative controls, and fails on the `f31e14b` fixture (`AXEL_HP_FIXTURE`).
 `tests/test_boss_target_ledger.py` reproduces the review's false passes as controls.
 
+**The split (`_b1`, `_b2`).** On PC1's 22-HP saves, Axel's pressure ended the chained rounds and downs of runs
+vuh2912-hp-02/03, after the friend round had passed twice. The generator also writes two split fixtures, each
+built from the full fixture's own steps and judged alone:
+- `net_prologue_mansion_axel_hp_b1.json`: the host target round, then interleaved. The `hp_ledger` window runs
+  from `m_host_target0` to `m_interleaved1`, with those two phases, and the `target_ledger` judges the host round.
+  It has no downs.
+- `net_prologue_mansion_axel_hp_b2.json`: `owner_downs` right after the friend's take-over, with no round. The
+  `hp_ledger` then judges the closed downs window (one phase, `downs`, that asks for no hits) and pins the boss
+  lifetime, and the `target_ledger` judges only the downs.
+
+The full fixture is unchanged. `AxelHpSplitTest` checks the split's structure.
+
 ### Waiting for the friend's arrival before `coop_verdict` (VUH-2898)
 
 `coop_verdict` judges the logs as they are when it runs, and the host's latest

@@ -176,5 +176,54 @@ class AxelHpFixtureTest(unittest.TestCase):
         self.assertFalse(any(s["do"] in ("protect", "warp", "test_enemy_hp") for s in STEPS))
 
 
+SCENARIOS = ROOT / "tools/scenario/scenarios"
+SPLIT = {k: json.loads((SCENARIOS / f"net_prologue_mansion_axel_hp_{k}.json").read_text(encoding="utf-8"))["steps"]
+         for k in ("b1", "b2")}
+FULL = json.loads((SCENARIOS / "net_prologue_mansion_axel_hp.json").read_text(encoding="utf-8"))["steps"]
+
+
+class AxelHpSplitTest(unittest.TestCase):
+    """Lead #37/#49: B1 is the host round plus interleaved, B2 the downs, each judged alone. Every other step is the
+    full fixture's own, unchanged."""
+
+    @staticmethod
+    def named(steps, name):
+        found = [s for s in steps if s.get("as") == name]
+        assert len(found) == 1, (name, len(found))
+        return found[0]
+
+    def test_b1_is_the_host_round_and_interleaved_judged_by_both_ledgers(self):
+        b1 = SPLIT["b1"]
+        self.assertFalse(any(s["do"] == "owner_downs" or str(s.get("as", "")).startswith(("friend_target", "m_friend", "m_downs"))
+                             for s in b1))
+        ledger = self.named(b1, "ledger")
+        self.assertEqual(ledger["window"], ["m_host_target0", "m_interleaved1"])
+        self.assertEqual(ledger["phases"], [p for p in self.named(FULL, "ledger")["phases"] if p["name"] != "friend_target"])
+        targets = self.named(b1, "targets")
+        self.assertEqual(targets["rounds"], [r for r in self.named(FULL, "targets")["rounds"] if r["name"] == "host_target"])
+        self.assertNotIn("downs", targets)
+
+    def test_b2_is_owner_downs_right_after_the_release_judged_over_its_window(self):
+        b2 = SPLIT["b2"]
+        takeover = max(i for i, s in enumerate(b2) if s["do"] == "wait_until" and "take-over" in s["expr"])
+        self.assertFalse(any(s["do"] in ("fight", "walk_to") for s in b2[takeover:]))  # no round: the Hall fights come before
+        self.assertEqual([s.get("as") for s in b2[takeover + 1:takeover + 3]], ["m_downs0", "owner_downs"])
+        ledger, targets = self.named(b2, "ledger"), self.named(b2, "targets")
+        self.assertEqual((ledger["window"], ledger["phases"]),
+                         (["m_downs0", "m_downs1"], [{"name": "downs", "from": "m_downs0", "to": "m_downs1"}]))
+        self.assertEqual((targets["rounds"], targets["downs"]), ([], {"from": "m_downs0", "to": "m_downs1"}))
+        order = [b2.index(self.named(b2, n)) for n in ("m_downs1", "boss_settled", "ledger", "targets")]
+        self.assertEqual(order, sorted(order))  # the ledger judges the closed downs window and pins the boss first
+        self.assertEqual(self.named(b2, "owner_downs"), self.named(FULL, "owner_downs"))
+
+    def test_every_other_split_step_is_the_full_fixtures_own(self):
+        for key, steps in SPLIT.items():
+            with self.subTest(key):
+                others = [s for s in steps if s.get("as") not in ("ledger", "targets")]
+                self.assertTrue(all(s in FULL for s in others), [s for s in others if s not in FULL][:2])
+                self.assertEqual([s for s in steps if s["do"] == "boot"], [s for s in FULL if s["do"] == "boot"])
+                self.assertEqual(steps[-1], FULL[-1])  # the coop verdict
+
+
 if __name__ == "__main__":
     unittest.main()
