@@ -1850,20 +1850,34 @@ class ReviveGuard:
         return bool(s.get("react")) and seen.get("source") == "downed-prompt-v7" and seen.get("promptHide") == 7
 
     @staticmethod
-    def aside_fence(envelope: dict | None, pin: tuple | None, s: dict, h: dict) -> str:
-        """Why an aside may not run now ("" when it may): the reviver `s` and downed seat `h` must both be in the
-        envelope's room scope, in the scope and with the actors pinned when the episode began, and the reviver free."""
+    def episode_fence(pin: tuple | None, s: dict, h: dict) -> str:
+        """Why no input may be sent in this episode now ("" when it may), Ione 796116d1: both seats still in the
+        room scope, and the reviver and downed actors still the ones, pinned at the episode's first free read."""
+        if pin is None:
+            return "unpinned"
+        if tuple(s.get("roomScope") or ()) != pin[0] or tuple(h.get("roomScope") or ()) != pin[0]:
+            return "room"
+        return "" if (s.get("player"), h.get("player")) == pin[1:] else "context"
+
+    @classmethod
+    def aside_fence(cls, envelope: dict | None, pin: tuple | None, s: dict, h: dict) -> str:
+        """Why an aside may not run now ("" when it may): the episode fence, both seats in the envelope's room
+        scope, and the reviver free."""
         if envelope is None:
             return "no-envelope"
-        scope = tuple(s.get("roomScope") or ())
-        if scope != tuple(envelope["roomScope"]) or tuple(h.get("roomScope") or ()) != scope:
+        if tuple(s.get("roomScope") or ()) != tuple(envelope["roomScope"]):
             return "room"
-        if pin is None or pin != (scope, s.get("player"), h.get("player")):
-            return "context"
-        return "" if s.get("free") and s.get("pos") else "not-free"
+        return cls.episode_fence(pin, s, h) or ("" if s.get("free") and s.get("pos") else "not-free")
 
     @staticmethod
-    def revive_move(own, target, react: int, native: bool, enemies: list[dict], reach: float,
+    def aside_inside(own, sx: float, sz: float, envelope: dict, travel: float) -> bool:
+        """Whether the envelope's circle holds the reviver at `own` and the point `travel` along (sx, sz)."""
+        (cx, cz), radius, d = envelope["center"], envelope["radius"], math.hypot(sx, sz)
+        return bool(d) and math.hypot(own[0] - cx, own[2] - cz) <= radius \
+            and math.hypot(own[0] + travel * sx / d - cx, own[2] + travel * sz / d - cz) <= radius
+
+    @classmethod
+    def revive_move(cls, own, target, react: int, native: bool, enemies: list[dict], reach: float,
                     envelope: dict | None = None, travel: float = 300.0) -> tuple:
         """One tick of a revive, from the reviver's and the downed seat's positions: ("walk", dx, dz) toward the
         downed seat, ("hold",) to revive, ("aside", dx, dz) while a proven native RC owns Triangle, or ("wait",).
@@ -1881,12 +1895,8 @@ class ReviveGuard:
             return ("wait",)
         near = min(enemies, key=lambda e: math.hypot(e["x"] - own[0], e["z"] - own[2]))
         ex, ez = own[0] - near["x"], own[2] - near["z"]
-        d = math.hypot(ex, ez)
-        (cx, cz), radius = envelope["center"], envelope["radius"]
-        if not d or math.hypot(own[0] - cx, own[2] - cz) > radius:
-            return ("wait",)
         for sx, sz in ((-ez, ex), (ez, -ex)):
-            if math.hypot(own[0] + travel * sx / d - cx, own[2] + travel * sz / d - cz) <= radius:
+            if cls.aside_inside(own, sx, sz, envelope, travel):
                 return ("aside", sx, sz)
         return ("wait",)
 
@@ -1912,8 +1922,10 @@ class ReviveGuard:
         return not self.stop.is_set() and self.now() + seconds + self.INPUT_SLACK <= end
 
     def step_aside(self, event: dict, s: dict, move: tuple, pin: tuple, end: float, reads, revived) -> None:
-        """Send one aside's pulses, each after a fresh check of both seats (stop, budget, revive, room scope,
-        actors, native yield); the first failed check sends nothing more and is counted in asideStops."""
+        """Send one aside's pulses. Before each: no revive since the last read; and, from the second, fresh reads
+        of both seats (episode and aside fences, native yield) and the reviver's position with the aside's
+        remaining endpoint still inside the circle. The first failed check sends nothing more and is counted in
+        asideStops."""
         event["asides"] = event.get("asides", 0) + 1
         stop = ""
         for pulse in range(self.ASIDE_PULSES):
@@ -1923,10 +1935,13 @@ class ReviveGuard:
                 except Exception:  # a load or menu between samples
                     stop = "read"
                     break
-                stop = "revived" if revived() else self.aside_fence(self.aside, pin, s, h) or \
-                    ("" if self.native_yield(s) else "yield-ended")
-                if stop:
-                    break
+                left = self.ASIDE_TRAVEL * (self.ASIDE_PULSES - pulse) / self.ASIDE_PULSES
+                stop = self.aside_fence(self.aside, pin, s, h) or ("" if self.native_yield(s) else "yield-ended") or \
+                    ("" if self.aside_inside(s["pos"], move[1], move[2], self.aside, left) else "geometry")
+            if not stop and revived():
+                stop = "revived"
+            if stop:
+                break
             if not self.may_send(end, self.ASIDE_MS / 1000):
                 stop = "stopped" if self.stop.is_set() else "budget"
                 break
@@ -1969,6 +1984,10 @@ class ReviveGuard:
                     continue
                 if pin is None and s["free"] and s.get("player") and h.get("player"):
                     pin = (tuple(s.get("roomScope") or ()), s["player"], h["player"])
+                lost = self.episode_fence(pin, s, h) if pin else ""
+                if lost:  # a load, a room apart or a replaced actor ends the episode: no input after it
+                    event["result"] = f"context-lost:{lost}"
+                    break
                 fence = self.aside_fence(self.aside, pin, s, h)
                 enemies = []
                 if self.native_yield(s) and not fence:
@@ -1982,20 +2001,22 @@ class ReviveGuard:
                         event["lastError"] = f"enemies lookup: {error}"
                         self.sleep(0.3)
                         continue
-                    if self.stop.is_set() or self.now() >= end or revived():
-                        continue  # the loop condition or the revive check ends the episode
                     try:  # fresh context after the lookup, before any input
                         h, s = reads()
                     except Exception as error:
                         event["lastError"] = str(error)
                         self.sleep(0.5)
                         continue
+                    # Stop, deadline, a revive (even one during this refresh) or a lost context: the loop top
+                    # ends the episode on each, before any input.
+                    if self.stop.is_set() or self.now() >= end or revived() or self.episode_fence(pin, s, h):
+                        continue
                     fence = self.aside_fence(self.aside, pin, s, h)
                 target = h["pos"]
                 native = self.native_yield(s)
                 event["last"] = {"free": s["free"], "react": s["react"], "native": native, "friend": s["pos"],
                                  "host": target}
-                if not s["free"] or not s["pos"] or not target:
+                if pin is None or not s["free"] or not s["pos"] or not target:
                     self.sleep(0.5)
                     continue
                 event["last"]["distance"] = round(math.hypot(target[0] - s["pos"][0], target[2] - s["pos"][2]), 1)
