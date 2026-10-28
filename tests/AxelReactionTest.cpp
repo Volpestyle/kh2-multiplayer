@@ -488,10 +488,10 @@ int main() {
         check(R::AxelCameraStepFor(false,Custody::Owner,true)==Step::Native && R::AxelCameraStepFor(false,Custody::Undecided,true)==Step::Native,
               "anything not Axel's stays native, whoever holds custody");
         check(R::kAxelCameraNone==2,"the no-target code sits beside op 5's actor (0) and source (1)");
-        check(R::AxelFadeAdopted(true,Custody::Owner,true,303,0x720) && !R::AxelFadeAdopted(false,Custody::Owner,true,303,0x720) &&
-              !R::AxelFadeAdopted(true,Custody::Host,true,303,0x720) && !R::AxelFadeAdopted(true,Custody::Undecided,true,303,0x720) &&
-              !R::AxelFadeAdopted(true,Custody::Owner,false,303,0x720) && !R::AxelFadeAdopted(true,Custody::Owner,true,304,0x720) &&
-              !R::AxelFadeAdopted(true,Custody::Owner,true,303,0),
+        check(R::AxelFadeAdopted(true,Custody::Owner,true,303,true) && !R::AxelFadeAdopted(false,Custody::Owner,true,303,true) &&
+              !R::AxelFadeAdopted(true,Custody::Host,true,303,true) && !R::AxelFadeAdopted(true,Custody::Undecided,true,303,true) &&
+              !R::AxelFadeAdopted(true,Custody::Owner,false,303,true) && !R::AxelFadeAdopted(true,Custody::Owner,true,304,true) &&
+              !R::AxelFadeAdopted(true,Custody::Owner,true,303,false),
               "only Axel's own D303, queued in a friend's callback under the owner's custody, is adopted");
         const R::AxelFadeCustody fade{0x720,0x100,0x300,1,5,700,0x72,0x80000002u,0x2222};
         using Match=R::AxelFadeMatch;
