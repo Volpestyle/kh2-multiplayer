@@ -3509,6 +3509,29 @@ PC1's FM-02 Roxas has 22 HP, so natural downs are expected. `owner_downs` counts
 Kills take `require: false`, so a seat Axel already downed refuses with `WrongState` and the run goes on.
 `docs/ROXAS_DUAL_WIELD_FORM.md` has the design and static RE.
 
+### Axel II's shared HP and targeting (VUH-2912)
+
+`net_prologue_mansion_axel_hp.json`, from the same generator (same FM-02 arrival, two default Roxases,
+`KH2COOP_TRACE_HITS=1` added). After the host's `[combat-admission] released admitted`:
+- **Lease:** no `[hit]` line with Axel as attacker or victim, and no Axel claim, before each seat's release line.
+- **Friend target, then host target:** the other seat walks 900 units past itself, away from Axel, and then
+  only revives (`revive_guard`); the fighting seat runs the `fight` bot. The round ends once the host logs an
+  `[enemy-target] boss-target ... objectId=81 target=<seat>`, the fighter took a hit or was downed, and it
+  landed damage (a friend claim, or a host HP drop). Each round must log at least one boss-target choosing that
+  seat. A downed fighter is revived before the next round.
+- **Interleaved:** both seats fight until a friend claim and a host native hit have both landed.
+- `hp_ledger` (objectId 81, program 137) over the three rounds: `friend_target` wants friend hits only and a
+  native boss hit on the friend's canonical player (`hitOnFriend`), `host_target` the reverse (`hitOnHost`), and
+  `interleaved` both. The ledger also requires each host Axel hit on the host's copy of the friend to be a
+  checked zero with that copy's HP unchanged (`bossHitsOnClone`).
+- Mirror mode only: no `[enemy-target] forward` on the host, and no `remote-hit` or `veto` on the friend.
+- `owner_downs`, after which each seat's candidate bit must have been clear in at least one Axel boss-target line
+  (`valid`: bit 0 the host, bit 1 the friend's clone).
+The `boss-target` lines are saved as `boss_targets`. The host's boss hits during `friend_target` measure
+`atk_burst`'s direct canonical-player aim (`docs/ENEMY_TARGET_REMOTE.md`); they are reported, not judged.
+`tests/test_axel_hp_fixture.py` evaluates the lease, round, walk-away and candidate expressions against
+synthetic logs, with negative controls.
+
 ### Waiting for the friend's arrival before `coop_verdict` (VUH-2898)
 
 `coop_verdict` judges the logs as they are when it runs, and the host's latest

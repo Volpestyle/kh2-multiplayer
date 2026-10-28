@@ -93,28 +93,8 @@ def gone_after_retry(i):
             f"room=02/15 door=99[\\s\\S]*\\[puppet 0\\][^\\n]*actor=0*' + {addr}, {i})) == 0")
 
 
-def steps_for(selection):
-    local = [axel_body(s) for s in selection]           # each seat's own body at Axel II
-    clone = [local[1], local[0]]                         # each seat's clone of the other seat
-    btlf = sum(body == BTLF for body in local)           # dual-wield bodies on each screen
-    sora = sum(body == SORA for body in local)
-    # Each dual-wield body holds one W_EX010_10 and one W_EX010_20 (run vuh2911-axel-02: 2/2 for two bodies);
-    # Sora's own keyblade is a W_EX010_20 too (run vuh2911-sora-01: 1 BTLF + 1 Sora held 1 and 2).
-    w10, w20 = btlf, btlf + sora
-    env = [dict(ENV, **({"KH2COOP_PROFILE": f"0x{s:X}"} if s != ROXAS else {})) for s in selection]
-    born = " and ".join(
-        f"len(log_matches(r'born site=tt20-137 bound=1 clone=\\S+ cloneObject={clone[i]} cloneKey={KEY[clone[i]]} "
-        f"local=\\S+ localKey={KEY[local[i]]} ', {i})) == 1" for i in (0, 1))
-    at_axel = " and ".join(
-        f"saved['census_axel'][{i}]['btlf'] == {btlf} and saved['census_axel'][{i}]['sora'] == {sora} and "
-        f"saved['census_axel'][{i}]['roxas'] == 0 and saved['census_axel'][{i}]['w10'] == {w10} and "
-        f"saved['census_axel'][{i}]['w20'] == {w20} and saved['census_axel'][{i}]['member0'] == {local[i]}" for i in (0, 1))
-    retired = " and ".join(
-        f"saved['retired'][{i}]['btlf'] == 0 and saved['retired'][{i}]['w10'] == 0 and "
-        f"saved['retired'][{i}]['w20'] == {int(selection[i] == SORA)} and "
-        f"saved['retired'][{i}]['roxas'] == {int(selection[i] == ROXAS)} and saved['retired'][{i}]['sora'] == {int(selection[i] == SORA)} and "
-        f"saved['retired'][{i}]['member0'] == {selection[i]} and "
-        f"log_count('[prologue] encounter exit at=02/15', {i}) == {int(selection[i] != ROXAS)}" for i in (0, 1))
+def arrival(env):
+    """FM-02 boot through the Hall pilot and both Dusk waves to Axel II, until both seats built their tt20-137 pair."""
     return [
         {"do": "boot", "instance": 0, "slotMoves": -1, "initTimeoutMs": 60000, "env": env[0]},
         {"do": "boot", "instance": 1, "slotMoves": -1, "initTimeoutMs": 60000, "env": env[1]},
@@ -141,6 +121,33 @@ def steps_for(selection):
         # Both seats built their tt20-137 pair: start the clone-hit window at once, inside the host's hold.
         {"do": "wait_until", "expr": "log_count('[missing-party] born site=tt20-137 bound=1 ', 0) > 0 and "
                                      "log_count('[missing-party] born site=tt20-137 bound=1 ', 1) > 0", "timeoutMs": 30000, "pollMs": 100},
+    ]
+
+
+def steps_for(selection):
+    local = [axel_body(s) for s in selection]           # each seat's own body at Axel II
+    clone = [local[1], local[0]]                         # each seat's clone of the other seat
+    btlf = sum(body == BTLF for body in local)           # dual-wield bodies on each screen
+    sora = sum(body == SORA for body in local)
+    # Each dual-wield body holds one W_EX010_10 and one W_EX010_20 (run vuh2911-axel-02: 2/2 for two bodies);
+    # Sora's own keyblade is a W_EX010_20 too (run vuh2911-sora-01: 1 BTLF + 1 Sora held 1 and 2).
+    w10, w20 = btlf, btlf + sora
+    env = [dict(ENV, **({"KH2COOP_PROFILE": f"0x{s:X}"} if s != ROXAS else {})) for s in selection]
+    born = " and ".join(
+        f"len(log_matches(r'born site=tt20-137 bound=1 clone=\\S+ cloneObject={clone[i]} cloneKey={KEY[clone[i]]} "
+        f"local=\\S+ localKey={KEY[local[i]]} ', {i})) == 1" for i in (0, 1))
+    at_axel = " and ".join(
+        f"saved['census_axel'][{i}]['btlf'] == {btlf} and saved['census_axel'][{i}]['sora'] == {sora} and "
+        f"saved['census_axel'][{i}]['roxas'] == 0 and saved['census_axel'][{i}]['w10'] == {w10} and "
+        f"saved['census_axel'][{i}]['w20'] == {w20} and saved['census_axel'][{i}]['member0'] == {local[i]}" for i in (0, 1))
+    retired = " and ".join(
+        f"saved['retired'][{i}]['btlf'] == 0 and saved['retired'][{i}]['w10'] == 0 and "
+        f"saved['retired'][{i}]['w20'] == {int(selection[i] == SORA)} and "
+        f"saved['retired'][{i}]['roxas'] == {int(selection[i] == ROXAS)} and saved['retired'][{i}]['sora'] == {int(selection[i] == SORA)} and "
+        f"saved['retired'][{i}]['member0'] == {selection[i]} and "
+        f"log_count('[prologue] encounter exit at=02/15', {i}) == {int(selection[i] != ROXAS)}" for i in (0, 1))
+    return [
+        *arrival(env),
         {"do": "save", "as": "window_open", "expr": "[log_count('[combat-admission] deferred group=1 ', 0), "
                                                     "log_count('[combat-admission] released ', 0)]"},
         {"do": "progress_snapshot", "instances": [0, 1], "as": "hit_before", "only": ISOLATION, "extraRanges": [FORM_ROWS]},
@@ -224,6 +231,155 @@ def steps_for(selection):
     ]
 
 
+# ---- VUH-2912: shared HP and ordinary targeting after the form handoff (two default Roxases) ----------------
+HP_NAME = "net_prologue_mansion_axel_hp"
+HP_DESCRIPTION = (
+    "VUH-2912, FM-02 rehearsal route into Axel II (02/14 btl137, B_EX110 81), two default dual-wield Roxases, "
+    "shipped defaults, no protect; KH2COOP_TRACE_HITS and KH2COOP_ENEMY_MIRROR_TRACE are diagnostics only. "
+    "Lease: no boss damage or boss hit on either seat before the host's admitted release. Then three short rounds, "
+    "each filmed on both seats: friend target (the host walks away from Axel and only revives; the friend fights, "
+    "so the host's Axel must choose the friend's seat and the friend's own Roxas takes the native hit from its "
+    "mirrored Axel), host target (the same, reversed) and interleaved (both fight). The boss HP ledger joins every "
+    "host Axel HP change to one host native hit or one friend claim, and checks that the host Axel's hits on the "
+    "host's copy of the friend are checked zeros. Each seat is then downed once and revived (owner_downs): a "
+    "downed seat drops out of Axel's candidates. The atk_burst aim reads the canonical player directly; the host's "
+    "boss hits during the friend-target round are reported, not judged. PC1's saves are Critical (22-HP Roxas, "
+    "one Axel hit downs a 5-HP seat). Stops before victory. Rehearsal save, no save.")
+HP_ENV = dict(ENV, KH2COOP_TRACE_HITS="1")
+AXEL_OBJECT = 81
+
+
+def canonical_xz(i):
+    return (f"[(a['position']['x'], a['position']['z']) for a in actors({i}) "
+            f"if int(a['address'],16) == {canon(i)}][0]")
+
+
+def canonical_hp(i):
+    return f"[a['hp'] for a in actors({i}) if int(a['address'],16) == {canon(i)}][0]"
+
+
+def away_from_axel(i, distance=900):
+    """A point `distance` past seat i's canonical player on the line from Axel (walk_to targetExpr)."""
+    return (f"(lambda a, m: (lambda d: (a[0] + {distance} * (m[0] - a[0]) / d, a[2] + {distance} * (m[1] - a[2]) / d))"
+            f"(max(1.0, ((m[0] - a[0]) ** 2 + (m[1] - a[2]) ** 2) ** 0.5)))(pos('B_EX110', {i}), {canonical_xz(i)})")
+
+
+def targets(target):
+    """Host boss-target lines for Axel naming candidate `target` (0 the host, 1 the friend's clone)."""
+    return f"len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId={AXEL_OBJECT} target={target} ', 0))"
+
+
+def marks(name):
+    return {"do": "save", "as": name, "expr": "[log_count('', 0), log_count('', 1)]"}
+
+
+def host_claims():
+    return f"len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId={AXEL_OBJECT} [^\\n]*nativeOk=1', 0))"
+
+
+def boss_hp(i):
+    return f"([a['hp'] for a in actors({i}) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0]"
+
+
+def target_round(name, fighter, reviver):
+    """The reviver walks away from Axel and then only revives; the fighter fights. Axel must choose the fighter's
+    seat, and the round ends once the fighter took a hit (or was downed) and landed damage. Bounded; the ledger
+    judges the window."""
+    base = f"saved['{name}_base']"
+    landed = f"{host_claims()} > {base}['claims']" if fighter == 1 else f"{boss_hp(0)} < {base}['bossHp']"
+    hit = (f"({canonical_hp(fighter)} < {base}['hp'] or "
+           f"log_count('[downed] gate intercept', {fighter}) > {base}['downs'])")
+    return [
+        {"do": "save", "as": f"{name}_base", "expr": f"{{'chosen': {targets(fighter)}, 'claims': {host_claims()}, "
+                                                    f"'bossHp': {boss_hp(0)}, 'hp': {canonical_hp(fighter)}, "
+                                                    f"'downs': log_count('[downed] gate intercept', {fighter})}}"},
+        marks(f"m_{name}0"),
+        {"do": "walk_to", "instance": reviver, "body": "self", "x": 0, "z": 0, "targetExpr": away_from_axel(reviver),
+         "radius": 60, "timeoutMs": 4000, "as": f"{name}_walk_away"},
+        {"do": "revive_guard", "host": fighter, "friend": reviver},
+        {"do": "fight", "instances": [fighter], "seconds": 20, "reach": 120, "as": name,
+         "until": f"{targets(fighter)} > {base}['chosen'] and {hit} and {landed}",
+         "clips": [{"instance": 0, "seconds": 12, "fps": 30, "name": f"{name}_host"},
+                   {"instance": 1, "seconds": 12, "fps": 30, "name": f"{name}_friend"}]},
+        marks(f"m_{name}1"),
+        # A downed fighter is revived by the reviver before the next round.
+        {"do": "wait_until", "expr": f"log_count('[downed] gate intercept', {fighter}) <= log_count('[downed] revive returned', {fighter})",
+         "timeoutMs": 60000, "pollMs": 250},
+        {"do": "revive_guard", "on": False, "as": f"{name}_guard"},
+        {"do": "save", "as": f"{name}_end", "expr": f"{{'chosen': {targets(fighter)}}}"},
+        {"do": "assert", "expr": f"saved['{name}_end']['chosen'] > {base}['chosen']",
+         "message": f"{name}: the host's Axel never chose seat {fighter} while it alone fought near Axel"},
+    ]
+
+
+def hp_steps():
+    # A boss hit (either way) or an Axel claim anywhere before the seat's release line. The friend anchors on its
+    # own release, which follows the host's admitted release.
+    boss_touch = "\\[hit\\] [^\\n]*(?:attacker=B_EX110 |victim=B_EX110@)"
+    lease_host = (f"len(log_matches(r'(?P<x>{boss_touch}|\\[enemysync\\] host hit claim [^\\n]*objectId={AXEL_OBJECT} )"
+                  f"[\\s\\S]*?\\[combat-admission\\] released admitted ', 0)) == 0")
+    lease_friend = (f"len(log_matches(r'(?P<x>{boss_touch}|\\[enemysync\\] client hit claim [^\\n]*objectId={AXEL_OBJECT} )"
+                    f"[\\s\\S]*?{RELEASED_AXEL}', 1)) == 0")
+    downed_out = " and ".join(
+        f"len([m for m in log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId={AXEL_OBJECT} [^\\n]*valid=(?P<v>\\d+) ', 0) "
+        f"if int(m['v']) & {1 << seat} == 0]) > 0" for seat in (0, 1))
+    claim_drop = (f"sum(int(r['b']) - int(r['a']) for r in log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId={AXEL_OBJECT} "
+                  f"[^\\n]*beforeHp=(?P<b>\\d+) afterHp=(?P<a>\\d+) nativeOk=1', 0)[saved['il_base']['claims']:])")
+    living = "[[(a['hp'], a.get('maxHp')) for a in actors(i) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] for i in (0, 1)]"
+    ledger_marks = ["m_friend_target0", "m_friend_target1", "m_host_target0", "m_host_target1", "m_interleaved0", "m_interleaved1"]
+    return [
+        *arrival([HP_ENV, HP_ENV]),
+        {"do": "wait_until", "expr": f"log_count('{RELEASED_AXEL}', 0) > 0 and log_count('{RELEASED_AXEL}', 1) > 0",
+         "timeoutMs": 60000, "pollMs": 100},
+        {"do": "wait_until", "expr": "log_count('[combat-admission] released admitted ', 0) > 0", "timeoutMs": 30000, "pollMs": 100},
+        {"do": "assert", "expr": f"{lease_host} and {lease_friend}",
+         "message": "the VUH-2897/2906 lease: no Axel damage or Axel hit on either seat before both admitted arrivals released the fight"},
+        {"do": "save", "as": "boss_start", "expr": living},
+        {"do": "assert", "expr": "all(len(seat) == 1 for seat in saved['boss_start'])", "message": "each seat must hold exactly one living Axel"},
+        {"do": "wait_until", "expr": f"len(log_matches(r'\\[enemy-mirror\\] take-over frame=\\d+ netId=\\d+ .*?objectId={AXEL_OBJECT}', 1)) > 0",
+         "timeoutMs": 20000, "pollMs": 250},
+        *target_round("friend_target", 1, 0),
+        *target_round("host_target", 0, 1),
+        marks("m_interleaved0"),
+        {"do": "save", "as": "il_base", "expr": f"{{'claims': {host_claims()}, 'bossHp': {boss_hp(0)}}}"},
+        # Both fight until a friend claim and a host native hit (an HP drop beyond the claims) both landed.
+        {"do": "fight", "instances": [0, 1], "seconds": 10, "reach": 120, "as": "interleaved",
+         "until": f"{host_claims()} > saved['il_base']['claims'] and {boss_hp(0)} < saved['il_base']['bossHp'] - {claim_drop}",
+         "clips": [{"instance": 0, "seconds": 12, "fps": 30, "name": "interleaved_host"},
+                   {"instance": 1, "seconds": 12, "fps": 30, "name": "interleaved_friend"}]},
+        marks("m_interleaved1"),
+        {"do": "wait", "ms": 4000},
+        {"do": "save", "as": "boss_settled", "expr": living},
+        {"do": "capture", "instance": 0, "name": "settled_host"},
+        {"do": "capture", "instance": 1, "name": "settled_friend"},
+        {"do": "hp_ledger", "objectId": AXEL_OBJECT, "program": 137, "marks": ledger_marks, "as": "ledger", "require": False,
+         "window": ["m_friend_target0", "m_interleaved1"], "phases": [
+             {"name": "friend_target", "from": "m_friend_target0", "to": "m_friend_target1", "host": False, "friend": True,
+              "hitOnFriend": True},
+             {"name": "host_target", "from": "m_host_target0", "to": "m_host_target1", "host": True, "friend": False,
+              "hitOnHost": True},
+             {"name": "interleaved", "from": "m_interleaved0", "to": "m_interleaved1", "host": True, "friend": True}]},
+        {"do": "assert", "expr": "len(saved['boss_settled'][0]) == 1 and saved['boss_settled'][0] == saved['boss_settled'][1]",
+         "message": "after delivery settles both seats must show one living Axel with the host's HP and max HP"},
+        {"do": "assert", "expr": "saved['ledger']['pass']", "message": "the boss HP ledger must join every Axel HP change to exactly one hit"},
+        # Mirror mode: target choice only. No HP-only forwarding to the owner, no owner-side cancel.
+        {"do": "assert", "expr": "log_count('[enemy-target] forward ', 0) == 0 and log_count('[enemy-target] remote-hit ', 1) == 0 "
+                                 "and log_count('[enemy-target] veto ', 1) == 0",
+         "message": "the boss's hits on the friend must stay native on the friend: no forwarded RemoteHit or vetoed local hit"},
+        # A downed seat is no candidate: one down and partner revive per owner, after which each seat's candidate
+        # bit must have dropped out of an Axel search.
+        {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000},
+        {"do": "clip_wait"},
+        {"do": "assert", "expr": "all(saved['owner_downs']['owners'][k] for k in ('0', '1'))",
+         "message": "each owner must be downed once and revived by the other seat"},
+        {"do": "save", "as": "boss_targets",
+         "expr": f"[m['l'] for m in log_matches(r'(?P<l>\\[enemy-target\\] boss-target [^\\n]*objectId={AXEL_OBJECT} [^\\n]*)', 0)]"},
+        {"do": "assert", "expr": downed_out,
+         "message": "Axel's search must have seen each downed seat drop out of its candidates (boss-target valid bit clear)"},
+        {"do": "coop_verdict", "as": "verdict", "require": True, "arrivalTimeoutMs": 20000},
+    ]
+
+
 if __name__ == "__main__":
     description = __doc__.split("\n\n", 2)[2].strip().replace("\n", " ")
     for name, selection in VARIANTS.items():
@@ -233,3 +389,7 @@ if __name__ == "__main__":
         out = Path(__file__).with_name(f"{name}.json")
         out.write_text(json.dumps(scenario, indent=1) + "\n", encoding="utf-8")
         print(out)
+    scenario = {"name": HP_NAME, "description": HP_DESCRIPTION, "playerDefaults": True, "protect": [], "steps": hp_steps()}
+    out = Path(__file__).with_name(f"{HP_NAME}.json")
+    out.write_text(json.dumps(scenario, indent=1) + "\n", encoding="utf-8")
+    print(out)

@@ -48,6 +48,10 @@ zero-damage local hit is a native refusal. Every host and friend
 chain, and the last samples after the window must agree. Native guard/i-frame
 and zero-damage outcomes are listed as refusals, not failures.
 
+The host boss's hits on the host's copy of a remote player (VUH-2912, when the boss targets that seat) must be
+checked zeros with the copy's HP unchanged; its owner takes the attack natively from its own mirrored boss. A
+phase with `hitOnHost`/`hitOnFriend` requires a native boss hit on that seat's canonical player.
+
 Also reported: the boss's two-player scale and room lines, the friend's binding and
 brain-skip (enemy-mirror updates == skips, noBrain 0, no retire) through the
 window, each seat's native boss hits on its canonical player (required in a phase
@@ -460,6 +464,16 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
                 e["hpBefore"] > e["hpAfter"]]
     host_taken = boss_hits(hit_events(host, h0, h1), boss_actor)
     friend_taken = boss_hits(hit_events(friend, f0, f1), friend_actor)
+    # VUH-2912: the host boss's hits on the host's copy of a remote player (classes 2/3) must leave it alone: each
+    # is a checked zero (RemoteVictim). Its owner takes that attack natively from its own mirrored copy instead.
+    # An incomplete scope proves nothing either way; it is counted, not judged.
+    clone_hits = [e for e in hit_events(host, h0, h1) if e["victimClass"] in REMOTE_CLASSES and
+                  (e["sourceObject"], e["sourceActor"], e["epoch"]) == (objectId, boss_actor, epoch)]
+    clone_zeroed = [e for e in clone_hits if not e["invalid"]]
+    for e in clone_zeroed:
+        if e["action"] != ZERO_HP or not checked_zero(e) or e["hpBefore"] != e["hpAfter"]:
+            problems.append(f"host boss hit seq {e['seq']} on a remote player's copy was not a checked zero: action "
+                            f"{e['action']} zero {e['zeroResult']} HP {e['hpBefore']}->{e['hpAfter']}")
     # Required per phase where both seats must contribute; a downed solo seat cannot be hit. Without phases, per window.
     if not marks.get("phases") and (not host_taken or not friend_taken):
         problems.append(f"native boss hits on the canonical players: host {len(host_taken)}, friend {len(friend_taken)}")
@@ -488,7 +502,12 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
         row = {"name": p["name"], "host": sum(s["kind"] == "host" for s in hits), "friend": sum(s["kind"] == "friend" for s in hits),
                "decrease": sum(s["before"] - s["after"] for s in hits),
                "bossHitsOnHost": sum(ph0 <= e["line"] < ph1 for e in host_taken),
-               "bossHitsOnFriend": sum(pf0 <= e["line"] < pf1 for e in friend_taken)}
+               "bossHitsOnFriend": sum(pf0 <= e["line"] < pf1 for e in friend_taken),
+               "bossHitsOnClone": sum(ph0 <= e["line"] < ph1 for e in clone_zeroed)}
+        # VUH-2912 targeting phases: the seat the host boss chose must take its native hit in the phase.
+        for seat, key in (("host", "bossHitsOnHost"), ("friend", "bossHitsOnFriend")):
+            if p.get(f"hitOn{seat.title()}") and row[key] == 0:
+                problems.append(f"phase {p['name']}: no native boss hit on the {seat}'s canonical player")
         for seat in ("host", "friend"):
             want = p.get(seat)
             if want is True and row[seat] == 0 or want is False and row[seat] != 0:
@@ -533,6 +552,7 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
                    "friendClaimsUnapplied": len(unapplied), "friendLocalClaimZeros": len(friend_claimed),
                    "friendLocalRefusals": len(friend_refusals),
                    "bossHitsOnHost": len(host_taken), "bossHitsOnFriend": len(friend_taken),
+                   "bossHitsOnClone": len(clone_zeroed), "bossHitsOnCloneUnproven": len(clone_hits) - len(clone_zeroed),
                    "brainSamples": len(in_window)},
         "phases": phases, "timing": timing, "binding": authority,
         "chain": steps, "refusals": refusals + claim_refusals + friend_refusals, "puppet": puppet, "rejects": rejects,

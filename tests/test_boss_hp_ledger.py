@@ -97,9 +97,10 @@ FRIEND_CTZ = {"action": 2, "claim_queued": 1, "zero_attempted": 1, "zero_result"
 def build(host_hit_after=142, puppet_hp_after=None, friend_local_after=None, brain_skips=60, host_contributes=True,
           friend_contributes=True, extra_client_claim=False, strip=(), claim_override=None, friend_actor=BOSS,
           friend_net_id=1, friend_policy=None, claim_before_window=False, phases=None, friend_evidence_actor=None, unrecorded=0, host_taken=True, friend_taken=True, friend_hit=None, host_hit=None,
-          player_hit=None, puppet_hit=None):
+          player_hit=None, puppet_hit=None, clone_hit=None):
     """Host-only then friend-only, as the positive case. The friend's local hit is a sync-dropped claim
-    (zeroResult Changed with the record zeroed), as in run 20261027-101224."""
+    (zeroResult Changed with the record zeroed), as in run 20261027-101224. `clone_hit` (VUH-2912) adds the host
+    boss's hit on the host's copy of the friend in the friend phase: a checked RemoteVictim zero, then the changes."""
     claim_override = claim_override or {}
     bound, friend_actor = friend_actor, friend_evidence_actor or friend_actor
     # The real order: the previous room's one-player scale and arrival, then this room's scale before arrival.
@@ -146,6 +147,10 @@ def build(host_hit_after=142, puppet_hp_after=None, friend_local_after=None, bra
     if friend_taken:
         friend += hit(2, FRIEND_ME, 0, 2229, 22, 16, 1, 5, 0, 0, seat="friend",
                       **{"source": friend_actor, **(player_hit or {})})
+    if clone_hit is not None:
+        zero = {"before": 22, "after": 22, "action": 1, "zero_attempted": 1, "zero_result": 0, **clone_hit}
+        before, after, action = zero.pop("before"), zero.pop("after"), zero.pop("action")
+        host += hit(6, PUPPET, 0, 2229, before, after, 2, 5, action, 7, damage=6, **{"source": BOSS, **zero})
     host += hit(4, BOSS, 2229, 0, hp, hp if puppet_hp_after is None else puppet_hp_after, 5, 2, 1, 8, 1, damage=7,
                 damage_after=0, source=PUPPET, **(puppet_hit or {}))
     host += [native(hp), tick(3000)]
@@ -353,6 +358,31 @@ class BossHpLedgerTest(unittest.TestCase):
 
     def test_claim_sent_before_the_window_fails(self):
         self.fails("outside the friend window", claim_before_window=True)
+
+    # VUH-2912: the host boss's hit on the host's copy of the friend is a checked zero; its owner takes it natively.
+    def test_boss_hit_on_the_remote_copy_zeroes(self):
+        v = run(clone_hit={})
+        self.assertTrue(v["pass"], v["problems"])
+        self.assertEqual((v["counts"]["bossHitsOnClone"], v["counts"]["bossHitsOnCloneUnproven"]), (1, 0))
+        self.assertEqual([p["bossHitsOnClone"] for p in v["phases"]], [0, 1])
+
+    def test_boss_hit_damaging_the_remote_copy_fails(self):
+        self.fails("was not a checked zero", clone_hit={"after": 16, "action": 0, "zero_attempted": 0})
+
+    def test_boss_hit_on_the_remote_copy_with_a_failed_zero_fails(self):
+        self.fails("was not a checked zero", clone_hit={"zero_result": 1})
+
+    def test_incomplete_remote_copy_scope_is_counted_not_judged(self):
+        v = run(clone_hit={"after": 16, "action": 0, "victim_mask": 7})
+        self.assertTrue(v["pass"], v["problems"])
+        self.assertEqual((v["counts"]["bossHitsOnClone"], v["counts"]["bossHitsOnCloneUnproven"]), (0, 1))
+
+    def test_targeting_phase_requires_the_chosen_seat_to_be_hit(self):
+        target = [{"name": "host_only", "from": "start", "to": "m1", "host": True, "friend": False, "hitOnHost": True},
+                  {"name": "friend_only", "from": "m1", "to": "end", "host": False, "friend": True, "hitOnFriend": True}]
+        self.assertTrue(run(phases=target)["pass"])
+        self.fails("phase friend_only: no native boss hit on the friend's canonical player", phases=target, friend_taken=False)
+        self.fails("phase host_only: no native boss hit on the host's canonical player", phases=target, host_taken=False)
 
 
 if __name__ == "__main__":
