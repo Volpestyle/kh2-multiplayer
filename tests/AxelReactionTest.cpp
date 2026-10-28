@@ -353,6 +353,66 @@ int main() {
     check(R::AxelPlayerRouteFor(true,false)==R::AxelPlayerRoute::Unresolved,
           "if that actor is gone, no other seat is chosen in its place");
     {
+        // Ione's probe (8e7e901f): the host's Burst Frontier engages by capture alone (Axel unparented), then only the
+        // host actor's handle word fails to read. The RC stays the host's: no release, and 1/3 never reaches the
+        // nearest-seat choice.
+        Memory mem;
+        mem.words={{kSeatActor+R::kAxelHandleWord,kSeatHandle},{kSeatActor+R::kAxelCapture,kAxelActor},
+                   {kAxelActor+R::kAxelParent,0}};
+        R::AxelExecutor e{R::kBurstFrontier,kSource,0,kHost,kEpoch,200,false};
+        std::uint32_t at=201;
+        R::AxelActorState state{};
+        const auto tick=[&]() {
+            state=R::AxelReadActor(mem,Decode,kSeatActor,kSeatHandle);
+            const bool held=R::AxelExecutorContinues(e,R::AxelReadContact(mem,Decode,kAxelActor,kSeatActor,state));
+            if(!held)e={};
+            return R::AxelPlayerRouteFor(R::AxelExecutorLive(e,kEpoch,at++),state==R::AxelActorState::Resolves);
+        };
+        check(tick()==R::AxelPlayerRoute::Executor && e.engaged,"capture alone engages the host's Burst Frontier");
+        mem.fail=kSeatActor+R::kAxelHandleWord;
+        bool kept=true;
+        for(int i=0;i<3;++i)kept=kept && tick()==R::AxelPlayerRoute::Unresolved && e.command==R::kBurstFrontier;
+        check(kept && state==R::AxelActorState::Unknown,
+              "an unread handle word keeps the binding; 1/3 keeps the host's own native result, never the nearest seat");
+        mem.fail=0;
+        check(tick()==R::AxelPlayerRoute::Executor,"on recovery 1/3 names the host's actor again");
+        mem.words[kSeatActor+R::kAxelHandleWord]=0x456;
+        check(R::AxelReadActor(mem,Decode,kSeatActor,kSeatHandle)==R::AxelActorState::Gone,
+              "a handle word read and naming another actor is gone, not unread");
+        mem.words[kSeatActor+R::kAxelHandleWord]=kSeatHandle;mem.words[kSeatActor+R::kAxelCapture]=0;
+        check(tick()==R::AxelPlayerRoute::Choice && !e.command,"a capture read and gone, Axel unparented, releases it");
+    }
+    {
+        // The same failure under an Overtaker held by capture alone: Clear Light keeps its consumed tombstone.
+        Memory mem;
+        mem.words={{kSeatActor+R::kAxelHandleWord,kSeatHandle},{kSeatActor+R::kAxelCapture,kAxelActor},
+                   {kAxelActor+R::kAxelParent,0},{kSeatActor+R::kAxelFollowup,R::kOvertaker},{kSeatActor+R::kAxelFlags,1u<<21}};
+        R::AxelExecutor e{R::kOvertaker,kSource,0,kHost,kEpoch,300,false};
+        R::AxelWindows w;const auto s=R::AxelOfferSeats(Seats({100,0,600},{100,0,1100}));
+        std::uint32_t at=301;
+        const auto frame=[&]() {
+            const auto state=R::AxelReadActor(mem,Decode,kSeatActor,kSeatHandle);
+            if(!R::AxelExecutorContinues(e,R::AxelReadContact(mem,Decode,kAxelActor,kSeatActor,state)))e={};
+            R::AxelExecutorFacts chain{};
+            if(e.command){chain.current=true;chain.command=e.command;chain.slot=e.slot;}
+            R::AxelFrameFacts f{};f.observed=true;
+            f.known[1]=R::AxelReadChain(mem,Decode,kSeatActor,kSeatHandle,chain);
+            const int owner=R::AxelChainOwner(chain);
+            f.active={false,owner>=0,false};f.winners={-1,owner,-1};
+            (void)w.Frame(f,kSource,kEpoch,at++,s);
+            const auto* c=w.Find(R::kClearLight);
+            return c?c->occurrence:std::uint64_t{0};
+        };
+        const auto opening=frame();
+        mem.fail=kSeatActor+R::kAxelHandleWord;
+        const auto during=frame();
+        const auto* held=w.Find(R::kClearLight);
+        const bool withheld=held && held->consumed && e.command==R::kOvertaker;
+        mem.fail=0;
+        check(opening && during==opening && withheld && frame()==opening,
+              "an unread handle word under a capture-only Overtaker keeps the executor and Clear Light's tombstone");
+    }
+    {
         // Ione's probe (694ad7cd): seat 1's Overtaker consumed, then its actor lost before contact, made 1/3 name the
         // host. Slice 1 parks friend execution, so no friend RC is ever consumed or run.
         check(R::AxelExecutionAdmitted(0) && !R::AxelExecutionAdmitted(1) && !R::AxelExecutionAdmitted(2),

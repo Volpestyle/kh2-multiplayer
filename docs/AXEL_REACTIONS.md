@@ -276,8 +276,14 @@ seat that pressed.
 - The executor is bound to that actor, not to its seat's eligibility. A seat that is downed, or leaves the eligible
   table, still owns the RC its actor is in.
 - It ends on a confirmed release: Axel's attachment to that actor and its capture of it, having been seen, are
-  both read and gone. An unreadable attachment or capture is unknown, never a release. It also ends on a new epoch,
-  or at its 1200-frame lease if it never engaged.
+  both read and gone. It also ends on a new epoch, or at its 1200-frame lease if it never engaged.
+- An unreadable attachment or capture is unknown, never a release. So is an unreadable executor identity, meaning
+  the actor's handle word at `+4` (`AxelReadActor`):
+  - the binding stays;
+  - the capture counts as unknown (`AxelReadContact`);
+  - Clear Light's window is withheld with its tombstone;
+  - 1/3 keeps the native result and never falls back to nearest-seat routing.
+- Only a handle word that is read and names another actor, or none, makes the actor gone.
 - **If the executor's actor no longer resolves** (its seat's actor on the host is gone mid-RC), no other seat is
   chosen in its place: 1/3 keeps the native result and logs `[axel-rc] player unresolved`. 1/3 must still name a
   live actor. Trap 1/18 resolves the parent handle at `42C571` and reads `[rax+4]` at `42C576` without a null
@@ -295,8 +301,8 @@ seat that pressed.
 - the pure rules, including the encounter gate (`AxelHostFrameAdmitted`), the parked friend execution
   (`AxelExecutionAdmitted`, `AxelOfferSeats`, `AxelConsume`) and the per-frame step (`AxelWindows::Frame`) the
   adapter calls;
-- the adapter's mask and chain reads (`AxelReadMasks`, `AxelReadChain`), against simulated memory with a failure
-  at each field.
+- the adapter's reads, against simulated memory with a failure at each field: masks (`AxelReadMasks`), executor
+  identity and contact (`AxelReadActor`, `AxelReadContact`), and the chain (`AxelReadChain`).
 
 The rest of the adapter's wiring is not exercised.
 

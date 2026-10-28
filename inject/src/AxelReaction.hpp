@@ -126,16 +126,26 @@ inline int AxelChainOwner(const AxelExecutorFacts& e) noexcept {
         static_cast<int>(e.slot) : -1;
 }
 inline constexpr std::uintptr_t kAxelHandleWord=4,kAxelFollowup=0x638,kAxelFlags=0x18C;
-// Fills a bound executor's chain facts (e.current set by the caller) from its actor, through read(address, value&)
-// and decode(handle). False when they could not be read (the actor's handle word or either follow-up field): Clear
-// Light's offer is then unknown, not ended. A handle read and no longer naming that actor is a gone actor: no chain.
+// The executor's actor this frame, through read(address, value&) and decode(handle): its handle word read and still
+// naming it (Resolves), read and naming another actor or none (Gone), or unread (Unknown). Unknown is never Gone.
+enum class AxelActorState : std::uint8_t { Resolves, Gone, Unknown };
+template<class Read,class Decode>
+AxelActorState AxelReadActor(const Read& read,const Decode& decode,std::uintptr_t actor,std::uint32_t handle) noexcept {
+    if(!actor || !handle)return AxelActorState::Gone;
+    std::uint32_t now=0;
+    if(!read(actor+kAxelHandleWord,now))return AxelActorState::Unknown;
+    return now==handle && decode(now)==actor?AxelActorState::Resolves:AxelActorState::Gone;
+}
+// Fills a bound executor's chain facts (e.current set by the caller) from its actor. False when they could not be
+// read (the actor's identity or either follow-up field): Clear Light's offer is then unknown, not ended. A gone
+// actor has no chain.
 template<class Read,class Decode>
 bool AxelReadChain(const Read& read,const Decode& decode,std::uintptr_t actor,std::uint32_t handle,
                    AxelExecutorFacts& e) noexcept {
     if(!e.current)return true;
-    std::uint32_t now=0;
-    if(!read(actor+kAxelHandleWord,now))return false;
-    if(!handle || now!=handle || decode(now)!=actor){e.current=false;return true;}
+    const auto state=AxelReadActor(read,decode,actor,handle);
+    if(state==AxelActorState::Unknown)return false;
+    if(state==AxelActorState::Gone){e.current=false;return true;}
     return read(actor+kAxelFollowup,e.followup) && read(actor+kAxelFlags,e.flags);
 }
 
@@ -274,7 +284,8 @@ inline bool AxelConsume(ReactionWindow& w,const ReactionCompletion& c,std::uint3
 // The RC's executor: the seat, and the actor on the host, that ran it. It is bound to that actor, not to the seat's
 // eligibility: a downed seat, or one that left the eligible table, still owns the RC its actor is in. It ends only
 // on a confirmed release (Axel's attachment to and capture by that actor both seen, then both read and gone), a new
-// epoch, or, if it never engaged, its lease. An unreadable attachment or capture is unknown, never a release.
+// epoch, or, if it never engaged, its lease. An unreadable attachment, capture or executor identity is unknown, never
+// a release.
 inline constexpr std::uint32_t kAxelExecutorLeaseFrames=1200;
 struct AxelExecutor {
     std::uint16_t command{},source{};
@@ -295,6 +306,24 @@ inline bool AxelExecutorContinues(AxelExecutor& e,const AxelContact& c) noexcept
     if((c.attachedRead && c.attached) || (c.capturedRead && c.captured)){e.engaged=true;return true;}
     if(!c.attachedRead || !c.capturedRead)return true; // not observed this frame: still the RC's
     return !e.engaged;
+}
+inline constexpr std::uintptr_t kAxelParent=0x6A0,kAxelCapture=0x2B0;
+// The executor's contact this frame, from Axel's parent and the executor actor's capture, given that actor's state
+// (AxelReadActor). A gone actor is captured by no one, and Axel is held only while he is still parented. An actor
+// whose identity is unread leaves its capture unknown, never a confirmed absence.
+template<class Read,class Decode>
+AxelContact AxelReadContact(const Read& read,const Decode& decode,std::uintptr_t axel,std::uintptr_t actor,
+                            AxelActorState state) noexcept {
+    AxelContact c{};
+    std::uint32_t parent=0;
+    c.attachedRead=read(axel+kAxelParent,parent);
+    c.attached=c.attachedRead && parent && (state==AxelActorState::Gone || decode(parent)==actor);
+    if(state==AxelActorState::Unknown)return c;
+    if(state==AxelActorState::Gone){c.capturedRead=true;return c;}
+    std::uintptr_t capture=0;
+    c.capturedRead=read(actor+kAxelCapture,capture);
+    c.captured=c.capturedRead && capture==axel;
+    return c;
 }
 // sysobj_player (1/3) inside Axel's script. With no RC bound, the caller's own choice. With one bound, the
 // executor's own actor, whatever its seat's state. If that actor no longer resolves, there is no owner to name:

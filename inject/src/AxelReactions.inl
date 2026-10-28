@@ -51,46 +51,39 @@ static void SmAxelHostReset() {
 static bool SmAxelExecutorBound(const enemysync::DownedScope& scope) {
     return g_axel.executor.command && R::AxelExecutorLive(g_axel.executor,scope.epoch,g_frameCounter);
 }
-static bool SmAxelExecutorResolves() {
-    return g_axel.executorActor && g_axel.executorHandle && SmOwnHandle(g_axel.executorActor)==g_axel.executorHandle;
+// The native side of R::AxelReadMasks, R::AxelReadActor, R::AxelReadContact and R::AxelReadChain.
+struct SmAxelReader {
+    template<class T> bool operator()(uintptr_t address,T& value) const { return ReadHitTrace(address,value); }
+};
+static uintptr_t SmAxelDecode(std::uint32_t handle) noexcept { return SmDecode(handle); }
+static R::AxelActorState SmAxelExecutorActor() {
+    return R::AxelReadActor(SmAxelReader{},SmAxelDecode,g_axel.executorActor,g_axel.executorHandle);
 }
 // 1/3 inside Axel's own script (R::AxelPlayerRouteFor): Executor fills handle with the executor's own actor.
 static R::AxelPlayerRoute SmAxelPlayerRoute(uintptr_t source,const enemysync::DownedScope& scope,std::uint32_t& handle) {
     handle=0;
     if(!g_sm.hostActive || !source || source!=g_axel.actor)return R::AxelPlayerRoute::Choice;
-    const bool resolves=SmAxelExecutorResolves();
-    const auto route=R::AxelPlayerRouteFor(SmAxelExecutorBound(scope),resolves);
+    const auto state=SmAxelExecutorActor();
+    const auto route=R::AxelPlayerRouteFor(SmAxelExecutorBound(scope),state==R::AxelActorState::Resolves);
     if(route==R::AxelPlayerRoute::Executor)handle=g_axel.executorHandle;
     if(route==R::AxelPlayerRoute::Unresolved && !g_axel.unresolvedLogged && SmAxelLogBudget()) {
         g_axel.unresolvedLogged=true;
-        Log("[axel-rc] player unresolved command=%u owner=%u: the executor's actor is gone; 1/3 keeps the native result",
-            g_axel.executor.command,g_axel.executor.slot);
+        Log("[axel-rc] player unresolved command=%u owner=%u actor=%s: 1/3 keeps the native result",
+            g_axel.executor.command,g_axel.executor.slot,state==R::AxelActorState::Unknown?"unread":"gone");
     }
     return route;
 }
 static void SmAxelExecutorTick(const enemysync::DownedScope& scope) {
     if(!g_axel.executor.command)return;
     if(!SmAxelExecutorBound(scope)){SmAxelEndExecutor(g_axel.executor.epoch!=scope.epoch?"epoch":"lease");return;}
-    // A gone actor is captured by no one; Axel's own attachment is still read.
-    R::AxelContact contact{};
-    std::uint32_t parent=0;
-    contact.attachedRead=ReadHitTrace(g_axel.actor+0x6A0,parent);
-    const bool resolves=SmAxelExecutorResolves();
-    contact.attached=contact.attachedRead && parent && (!resolves || SmDecode(parent)==g_axel.executorActor);
-    uintptr_t capture=0;
-    contact.capturedRead=!resolves || ReadHitTrace(g_axel.executorActor+0x2B0,capture);
-    contact.captured=resolves && contact.capturedRead && capture==g_axel.actor;
+    // An unread identity leaves the capture unknown, so it never releases the RC (R::AxelReadContact).
+    const auto contact=R::AxelReadContact(SmAxelReader{},SmAxelDecode,g_axel.actor,g_axel.executorActor,SmAxelExecutorActor());
     const bool was=g_axel.executor.engaged;
     if(!R::AxelExecutorContinues(g_axel.executor,contact)){SmAxelEndExecutor("released");return;}
     if(!was && g_axel.executor.engaged && SmAxelLogBudget())
         Log("[axel-rc] executor engaged command=%u owner=%u attached=%u captured=%u",g_axel.executor.command,
             g_axel.executor.slot,contact.attached?1u:0u,contact.captured?1u:0u);
 }
-// The native side of R::AxelReadMasks and R::AxelReadChain.
-struct SmAxelReader {
-    template<class T> bool operator()(uintptr_t address,T& value) const { return ReadHitTrace(address,value); }
-};
-static uintptr_t SmAxelDecode(std::uint32_t handle) noexcept { return SmDecode(handle); }
 static bool SmAxelEmit(const R::ReactionWindow& w) {
     R::Call identity{};identity.netId=g_axel.netId;identity.objectId=R::kAxelIIObjectId;
     identity.effect=R::AxelResource(w.command);identity.trap=static_cast<std::uint8_t>(R::FindTrap(255,12));
