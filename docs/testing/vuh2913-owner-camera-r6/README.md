@@ -1,7 +1,8 @@
 # VUH-2913: preserve proven native D303 identity (Sorrel, round 6)
 
-This revision extends `544a40b` on `vuh-2913-owner-camera`; current main
-`d430634` remains included. Protocol stays 40. Mac only, no PC/game access.
+Product `c06a26b` extends `544a40b` on `vuh-2913-owner-camera`. Current main
+`c615c7d` is merged without rewriting history. All pinned camera compilation
+inputs are byte-identical across that merge (`merge-input-proof.json` in the archive). Protocol stays 40. Mac only, no PC/game access.
 
 R5 retained an unread earlier Owner D303 but discarded a later positively Host
 D303's readable identity. The older ambiguous matcher then suppressed the later
