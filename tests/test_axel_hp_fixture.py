@@ -58,7 +58,8 @@ def roxas(address, x, hp=22):
 
 def assert_background_films(test, steps):
     """Every filmed fight films in the background, and a clip_wait collects it before the next still, filmed fight,
-    clip or owner_downs, and before the run ends."""
+    clip or owner_downs, and before the run ends. That clip_wait requires a finalized pair, as the fight's evidence;
+    one collecting only owner_downs' diagnostic clips does not (Ione 2990c3d8)."""
     pending = False
     for i, s in enumerate(steps):
         if s["do"] == "fight" and s.get("clips"):
@@ -68,6 +69,7 @@ def assert_background_films(test, steps):
         elif s["do"] in ("capture", "owner_downs", "clip"):
             test.assertFalse(pending, (i, s["do"], s.get("name")))
         elif s["do"] == "clip_wait":
+            test.assertIs(s.get("require") is True, pending, (i, s))
             pending = False
     test.assertFalse(pending, "a run must collect its last fight's clips")
 

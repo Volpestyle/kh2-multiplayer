@@ -50,8 +50,9 @@ and zero-damage outcomes are listed as refusals, not failures.
 
 The host boss's hits on the host's copy of a remote player (VUH-2912, when the boss targets that seat) must be
 complete checked zeros with the copy's HP unchanged; its owner takes the attack natively from its own mirrored
-boss. An incomplete scope with the boss as source fails. A phase with `cloneZero` requires at least one such
-checked zero, and `hitOnHost`/`hitOnFriend` a native boss hit on that seat's canonical player (which seat the
+boss. Two native no-ops also pass, each counted on its own (lead #60, VUH-2912 ae58b1fc): AlreadyApplied (the hit
+record's applied bit already set) and ZeroAmount (amount 0), both left Native with the copy's HP unchanged. An
+incomplete scope with the boss as source fails. A phase with `cloneZero` requires at least one real checked zero, and `hitOnHost`/`hitOnFriend` a native boss hit on that seat's canonical player (which seat the
 boss chose, and the hit's reaction, are boss_target_ledger.py's).
 
 Also reported: the boss's two-player scale and room lines, the friend's binding and
@@ -102,6 +103,8 @@ CLAIM_KEY = ("connection", "seq", "epoch", "netId", "objectId", "attackId", "dam
 REJECT_KEY = ("connection", "seq", "epoch", "netId", "objectId", "damage")  # LogClaim carries no attackId
 # DamagePolicy enums (inject/src/DamagePolicy.hpp).
 LOCAL_AVATAR, REMOTE_CLASSES, NATIVE, ZERO_HP, CLAIM_THEN_ZERO, ZEROED, CHANGED = 1, (2, 3), 0, 1, 2, 0, 2
+ALREADY_APPLIED, ZERO_AMOUNT = 4, 6  # Reason
+APPLIED = 0x2  # the hit record's +0x18 flag that ApplyHitDamage sets
 
 
 def fields(line: str) -> dict:
@@ -223,7 +226,7 @@ def hit_events(lines: list[str], lo: int, hi: int) -> list[dict]:
         ctx0, p = get("hittrace", "context", 0), parts.get(POLICY, {})
         out.append({"seq": seq, "line": line, "frame": num(ctx0, "frame"),
                     "invalid": scope_problem(parts, s["duplicates"]),
-                    "epoch": num(ctx0, "epoch"), "attackId": num(hit0, "attackId"),
+                    "epoch": num(ctx0, "epoch"), "attackId": num(hit0, "attackId"), "flags": num(hit0, "flags"),
                     "syncDrop": hit0.get("syncDrop") == "1", "damageBefore": num(hit0, "damage"),
                     "damageAfter": num(hit1, "damage"),
                     "victimObject": num(victim, "objectId", None), "victimActor": victim.get("actor"),
@@ -244,6 +247,24 @@ def checked_zero(e: dict) -> bool:
     return not e["invalid"] and e["zeroAttempted"] and (
         e["zeroResult"] == ZEROED or
         e["zeroResult"] == CHANGED and e["syncDrop"] and e["damageBefore"] > 0 and e["damageAfter"] == 0)
+
+
+def native_noop(e: dict) -> str | None:
+    """A valid scope DamagePolicy left Native that the native call cannot have written HP through, with HP
+    unchanged: "alreadyApplied" or "zeroAmount", else None (lead #60; evidence VUH-2912 comment ae58b1fc).
+
+    AlreadyApplied: the hit record's input flags have APPLIED set and the reason is AlreadyApplied, any amount.
+    ApplyHitDamage 0x3D3BA0 (pinned exe 9002b2de) tests that bit first and at 0x3D3BB9 jumps to its epilogue
+    0x3D3CDA, before it reads the amount at +0x28 or the victim's status. hp-06 logged amount 1 on this path
+    (seqs 218/219) with HP 4->4. ZeroAmount: amount 0 in the policy decision and in the input record, reason
+    ZeroAmount; the native call applies 0."""
+    if e["action"] != NATIVE or e["hpBefore"] < 0 or e["hpBefore"] != e["hpAfter"]:
+        return None
+    if e["reason"] == ALREADY_APPLIED and e["flags"] >= 0 and e["flags"] & APPLIED:
+        return "alreadyApplied"
+    if e["reason"] == ZERO_AMOUNT and e["amount"] == 0 and e["damageBefore"] == 0:
+        return "zeroAmount"
+    return None
 
 
 def claims(lines: list[str], pattern: re.Pattern, objectId: int, lo: int = 0, hi: int | None = None) -> list[dict]:
@@ -467,8 +488,9 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
     host_taken = boss_hits(hit_events(host, h0, h1), boss_actor)
     friend_taken = boss_hits(hit_events(friend, f0, f1), friend_actor)
     # VUH-2912: the host boss's hits on the host's copy of a remote player (classes 2/3) must leave it alone: each
-    # is a checked zero (RemoteVictim). Its owner takes that attack natively from its own mirrored copy instead.
-    # An incomplete scope whose source is the boss cannot prove that, so it fails (Ione 24860051).
+    # is a checked zero (RemoteVictim), or a native no-op counted apart (native_noop). Its owner takes that attack
+    # natively from its own mirrored copy instead. An incomplete scope whose source is the boss cannot prove that,
+    # so it fails (Ione 24860051).
     clone_hits = [e for e in hit_events(host, h0, h1) if e["victimClass"] in REMOTE_CLASSES and
                   (e["sourceObject"] == objectId or e["sourceActor"] == boss_actor)]
     for e in clone_hits:
@@ -476,12 +498,18 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
             problems.append(f"host boss hit seq {e['seq']} on a remote player's copy has incomplete proof: {e['invalid']}")
         elif (e["sourceObject"], e["sourceActor"], e["epoch"]) != (objectId, boss_actor, epoch):
             problems.append(f"host boss hit seq {e['seq']} on a remote player's copy is not from the boss lifetime")
-    clone_zeroed = [e for e in clone_hits if not e["invalid"] and
-                    (e["sourceObject"], e["sourceActor"], e["epoch"]) == (objectId, boss_actor, epoch)]
-    for e in clone_zeroed:
-        if e["action"] != ZERO_HP or not checked_zero(e) or e["hpBefore"] != e["hpAfter"]:
-            problems.append(f"host boss hit seq {e['seq']} on a remote player's copy was not a checked zero: action "
-                            f"{e['action']} zero {e['zeroResult']} HP {e['hpBefore']}->{e['hpAfter']}")
+    clone_zeroed, clone_noops = [], {"alreadyApplied": [], "zeroAmount": []}
+    for e in clone_hits:
+        if e["invalid"] or (e["sourceObject"], e["sourceActor"], e["epoch"]) != (objectId, boss_actor, epoch):
+            continue
+        if e["action"] == ZERO_HP and checked_zero(e) and e["hpBefore"] == e["hpAfter"]:
+            clone_zeroed.append(e)
+        elif noop := native_noop(e):
+            clone_noops[noop].append(e)
+        else:
+            problems.append(f"host boss hit seq {e['seq']} on a remote player's copy was not a checked zero or a "
+                            f"native no-op: action {e['action']} reason {e['reason']} flags {e['flags']} amount "
+                            f"{e['amount']} zero {e['zeroResult']} HP {e['hpBefore']}->{e['hpAfter']}")
     # Required per phase where both seats must contribute; a downed solo seat cannot be hit. Without phases, per window.
     if not marks.get("phases") and (not host_taken or not friend_taken):
         problems.append(f"native boss hits on the canonical players: host {len(host_taken)}, friend {len(friend_taken)}")
@@ -511,7 +539,9 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
                "decrease": sum(s["before"] - s["after"] for s in hits),
                "bossHitsOnHost": sum(ph0 <= e["line"] < ph1 for e in host_taken),
                "bossHitsOnFriend": sum(pf0 <= e["line"] < pf1 for e in friend_taken),
-               "bossHitsOnClone": sum(ph0 <= e["line"] < ph1 for e in clone_zeroed)}
+               "bossHitsOnClone": sum(ph0 <= e["line"] < ph1 for e in clone_zeroed),
+               "bossHitsOnCloneAlreadyApplied": sum(ph0 <= e["line"] < ph1 for e in clone_noops["alreadyApplied"]),
+               "bossHitsOnCloneZeroAmount": sum(ph0 <= e["line"] < ph1 for e in clone_noops["zeroAmount"])}
         # VUH-2912 targeting phases: the seat the host boss chose must take its native hit in the phase.
         for seat, key in (("host", "bossHitsOnHost"), ("friend", "bossHitsOnFriend")):
             if p.get(f"hitOn{seat.title()}") and row[key] == 0:
@@ -564,10 +594,13 @@ def ledger(host_text: str, friend_text: str, objectId: int, marks: dict) -> dict
                    "friendLocalRefusals": len(friend_refusals),
                    "bossHitsOnHost": len(host_taken), "bossHitsOnFriend": len(friend_taken),
                    "bossHitsOnClone": len(clone_zeroed),
+                   "bossHitsOnCloneAlreadyApplied": len(clone_noops["alreadyApplied"]),
+                   "bossHitsOnCloneZeroAmount": len(clone_noops["zeroAmount"]),
                    "brainSamples": len(in_window)},
         "phases": phases, "timing": timing, "binding": authority,
         "chain": steps, "refusals": refusals + claim_refusals + friend_refusals, "puppet": puppet, "rejects": rejects,
         "unapplied": unapplied, "unexplained": unexplained,
+        "cloneNoops": {k: [e["seq"] for e in v] for k, v in clone_noops.items()},
     }
 
 

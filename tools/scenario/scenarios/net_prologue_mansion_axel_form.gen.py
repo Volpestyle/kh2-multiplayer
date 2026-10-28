@@ -452,7 +452,8 @@ def target_round(name, fighter, reviver, last=False):
             {"do": "wait_until", "expr": f"log_count('[downed] gate intercept', {fighter}) <= log_count('[downed] revive returned', {fighter})",
              "timeoutMs": 60000, "pollMs": 250},
             {"do": "revive_guard", "on": False, "as": f"{name}_guard"},
-            {"do": "clip_wait"},
+            # The round's films are its evidence: a failed or unfinalized pair fails the run (Ione 2990c3d8).
+            {"do": "clip_wait", "require": True},
         ]),
     ]
 
@@ -512,7 +513,7 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
              "clips": [{"instance": 0, "seconds": 12, "fps": 30, "name": "interleaved_host", "background": True},
                        {"instance": 1, "seconds": 12, "fps": 30, "name": "interleaved_friend", "background": True}]},
             marks("m_interleaved1"),
-            *([] if single else [{"do": "clip_wait"}]),
+            *([] if single else [{"do": "clip_wait", "require": True}]),
         ]
     captures = [{"do": "capture", "instance": 0, "name": "settled_host"},
                 {"do": "capture", "instance": 1, "name": "settled_friend"}]
@@ -556,7 +557,7 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
         # Judged, then the guard off and the round's clips and stills collected: nothing after the verdict can fail
         # on a party down or game over.
         tail = [*([{"do": "revive_guard", "on": False, "as": f"{rounds[0]}_guard"}] if rounds else []),
-                {"do": "clip_wait"}, *captures]
+                {"do": "clip_wait", "require": True}, *captures]
         return opening + fighting + settle + judging + tail
     middle = fighting + settle + downing if fought else downing + settle
     return opening + middle + judging

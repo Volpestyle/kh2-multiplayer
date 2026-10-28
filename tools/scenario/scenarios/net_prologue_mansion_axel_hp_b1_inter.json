@@ -281,7 +281,8 @@
    "arrivalTimeoutMs": 20000
   },
   {
-   "do": "clip_wait"
+   "do": "clip_wait",
+   "require": true
   },
   {
    "do": "capture",

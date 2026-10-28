@@ -19,7 +19,8 @@ class StepFailed(Exception):
 
 
 class FightTest(unittest.TestCase):
-    def run_fight(self, seconds, until=None, birth_at=40, player='P_EX100', clips=None, encode=None):
+    def run_fight(self, seconds, until=None, birth_at=40, player='P_EX100', clips=None, encode=None,
+                  clip_error=None):
         # Virtual time advances only at simulated input/wait boundaries. Real
         # threads yield cooperatively; no wall-clock thresholds decide the test.
         clock_lock = threading.Lock()
@@ -63,6 +64,8 @@ class FightTest(unittest.TestCase):
 
         def kh2ctl(command, *args, **kwargs):
             if command == 'clip':  # recording and encoding: held until the test releases it
+                if clip_error:
+                    raise clip_error
                 encode.wait(10)
                 return {'ok': True}
             if command == 'peek':
@@ -73,7 +76,7 @@ class FightTest(unittest.TestCase):
             return {}
 
         tree = ast.parse((ROOT / 'tools/scenario/run.py').read_text(encoding='utf-8'))
-        tree.body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'step_fight']
+        tree.body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ('step_fight', 'film_into')]
         env = dict(Context=Context, threading=threading, time=types.SimpleNamespace(monotonic=monotonic, sleep=sleep),
                    math=math, kh2ctl=kh2ctl, StepFailed=StepFailed, subprocess=subprocess, Path=Path, json=json,
                    clip_receipt=lambda ctx, out, result: {**result, 'path': out.name})
@@ -142,6 +145,12 @@ class FightTest(unittest.TestCase):
         self.assertFalse(returned)
         self.assertEqual([c['path'] for c in result['clips']], ['round_0_0.mp4', 'round_1_1.mp4'])
         self.assertNotIn('_background_clips', saved)
+
+    def test_a_clip_worker_exception_is_a_failed_receipt(self):  # Ione 2990c3d8 (2): never an empty receipt
+        clips = [dict(instance=i, seconds=20, fps=30, name=f'round_{i}') for i in (0, 1)]
+        result, _, _ = self.run_fight(30, clips=clips, clip_error=subprocess.TimeoutExpired('kh2ctl clip', 180))
+        self.assertEqual([(c['path'], c['ok']) for c in result['clips']], [('round_0_0.mp4', False), ('round_1_1.mp4', False)])
+        self.assertTrue(all(c['error'].startswith('TimeoutExpired: ') for c in result['clips']))
 
     def test_missing_ticket_still_stops_at_the_deadline(self):
         result, elapsed, _ = self.run_fight(120, self.milestone(), birth_at=1000)

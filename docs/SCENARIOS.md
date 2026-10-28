@@ -1943,7 +1943,7 @@ fails the step (VUH-2931). Use it only for steps a recorded earlier result makes
 | `protect` | `on`, `afterPilot` | Start/stop team-0 protection polling; stopping does not restore the previous team. `afterPilot: true` is required for, and only accepted on, a seat whose route pilot has finished (VUH-2901) |
 | `capture` | `name` | PNG from inside the renderer; retain the actual CLI response under `receipt` alongside the relative artifact `path` |
 | `clip` | `name seconds fps background` | MP4 → artifact with full CLI receipt and adjacent `.receipt.json` / `.capture-time.jsonl` sidecars. `background: true` films while the next steps run; `clip_wait` collects every background clip (do it before a `capture` on that instance) |
-| `clip_wait` | | Waits for the background clips and records their receipts |
+| `clip_wait` | `require` | Waits for the background clips and records their receipts. They stay registered until all have finished, so a failure while waiting leaves them to the runner's teardown drain. With `require`, every clip must report ok with a finalized MP4 (a top-level `moov` box), and at least one must exist; otherwise the step fails as `EVIDENCE FAILURE (clips)` with every receipt in its `details`. A clip worker that raises is a failed receipt |
 | `avatar_stall` | none | Two-player `net_avatar_stall.json`: suspend the original sender runtime handle for 2 s, move its Sora 150 units in RAM, resume in `finally`; both games and viewer keep running. Six-second viewer clip and bridge samples check active/held/live states. Native `[ptrace]` logs retain per-frame hold and resume positions |
 | `crash`, `freeze` | | Runner self-tests: fault or suspend the instance |
 | `relay` | `port build content mod args` | Start `kh2coop_server` on loopback for this run; the version gate defaults to what the runtime sends |
@@ -3558,8 +3558,12 @@ Kills take `require: false`, so a seat Axel already downed refuses with `WrongSt
 - `hp_ledger` (objectId 81, program 137) over the three rounds: `friend_target` wants friend hits only, a native
   boss hit on the friend's canonical player (`hitOnFriend`) and at least one complete checked zero of an Axel hit
   on the host's copy of the friend (`cloneZero`). `host_target` is the reverse (`hitOnHost`), and `interleaved`
-  wants both. Any Axel hit on that copy must be a complete checked zero with the copy's HP unchanged; an incomplete
-  scope fails.
+  wants both. Any Axel hit on that copy must be a complete checked zero with the copy's HP unchanged, or one of two
+  native no-ops that DamagePolicy leaves Native with the copy's HP unchanged (lead #60, VUH-2912 comment ae58b1fc).
+  The first is AlreadyApplied, with the hit record's applied bit already set at entry, at any amount: ApplyHitDamage
+  `0x3D3BA0` returns at `0x3D3BB9` before it reads the amount or the victim. The second is ZeroAmount, with amount 0.
+  Each no-op is counted on its own (`bossHitsOnCloneAlreadyApplied`, `bossHitsOnCloneZeroAmount`, and `cloneNoops`
+  by seq) and never satisfies `cloneZero`. An incomplete scope fails.
 - Mirror mode only: no `[enemy-target] forward` on the host, and no `remote-hit` or `veto` on the friend.
 - `owner_downs`, bracketed by marks, then `target_ledger` (`tools/scenario/boss_target_ledger.py`, the
   `hp_ledger`'s pinned boss lifetime). It checks each round in turn:
@@ -3602,15 +3606,19 @@ fighting split now judges one round, and its ledgers run right after it:
 
 In the two single-round splits, nothing waits for a revive after the round. The settle, `hp_ledger`,
 `target_ledger` and `coop_verdict` follow the end mark directly. Only then does the run stop the revive guard,
-collect the round's clips and take the stills, none of which can fail on a later party down or game over.
+collect the round's clips and take the stills. A later party down or game over can't fail the run there, but a
+failed or unfinalized clip pair does (below).
 
 Every fight films in the background (`"background": true` on its clips) and a `clip_wait` collects the clips before
 the next still or filmed step. In vuh2912-hp-06 the fight step held the round open about 70 s past its milestone
 while its 20 s clips encoded, and Axel downed both idle seats inside the window. The full fixture differs from its
 earlier form only in that and in the interleaved standing check. `AxelHpSplitTest` checks the split's structure.
+A fight's clips are its evidence, so the `clip_wait` that collects them sets `require` (Ione 2990c3d8): an encoder
+failure, a missing file or an MP4 without its `moov` fails the run as an evidence failure, never as a game result.
+The downs window's `clip_wait` collects only `owner_downs`' diagnostic clips and doesn't require them.
 
-**Diagnostics on failure (vuh2912-hp-05).** The runner finishes any background clip a failed run left uncollected
-before it kills the games (`clipDrain` in the report, at most 185 s in all). A failed `owner_downs` puts both
+**Diagnostics on failure (vuh2912-hp-05).** The runner finishes any background clip a failed run left uncollected,
+including one whose `clip_wait` was interrupted, before it kills the games (`clipDrain` in the report, at most 185 s in all). A failed `owner_downs` puts both
 ReviveGuard event lists into its step error and its report entry (`details`). A guard stopped mid-episode marks that
 episode `stopped`.
 

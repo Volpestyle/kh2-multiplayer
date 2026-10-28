@@ -17,13 +17,14 @@ SOURCE = HOST_ME  # the attacking canonical player
 def hit(seq, victim, victim_object, source_object, before, after, victim_class, source_class, action, reason,
         zero_attempted=0, claim_queued=0, zero_result=0, sync_drop=0, damage=None, damage_after=None, attack_id=1,
         epoch=2, frame=4000, source=SOURCE, after_actor=None, after_epoch=None, hit_mask_after=255,
-        victim_mask=511, event=None, seat="host"):
+        victim_mask=511, event=None, seat="host", input_flags=0):
     """One ApplyHitDamage scope in the order and shape run 20261027-101224 logged: the hittrace event, both
     phases' context/actors/hit record with complete reads (context 127, actors 511, hit record 255) and stable
     identity, then the damagepolicy event and its authority rows (the phase-0 capture). Context and policy role,
     slot and connection are the seat's (host role 1 slot 0, friend role 2 slot 1). `damage`/`damage_after` are
     the hit record's amount before and after the call; a sync-dropped claim zeroes it before DamagePolicy,
-    which then reports Changed. The remaining keywords break one piece of that proof."""
+    which then reports Changed. `input_flags` are the record's flags at entry (the call sets bit 1, applied).
+    The remaining keywords break one piece of that proof."""
     damage = before - after if damage is None else damage
     damage_after = damage if damage_after is None else damage_after
     role, slot, connection = (1, 0, 1) if seat == "host" else (2, 1, 2)
@@ -46,7 +47,7 @@ def hit(seq, victim, victim_object, source_object, before, after, victim_class, 
                     "namePrefix": "5F50"}
         record = {"phase": phase, "hit": "7FF6089949F0", "attack": "7FF6085E07A0", "owner": source,
                   "canonicalPlayer": "7FF60847A1D0", "head": "7FF60847A1D0", "tracked": "7FF60847A1D0",
-                  "flags": 2 * phase, "attackHandle": 2220754848, "atkpHandle": 2224983944, "ownerHandle": 2219286992,
+                  "flags": input_flags | 2 * phase, "attackHandle": 2220754848, "atkpHandle": 2224983944, "ownerHandle": 2219286992,
                   "attackId": attack_id, "readMask": hit_mask_after if phase else 255, "damage": amount, "stat": 0,
                   "kind": 0, "syncDrop": sync_drop, "manualFilterOn": 0, "manualDrop": 0}
         lines += [row("hittrace", "context", context), row("hittrace", "actor", target),
@@ -55,7 +56,7 @@ def hit(seq, victim, victim_object, source_object, before, after, victim_class, 
             captured = {"context": context, "victim": target, "source": attacker, "input": {**record, "syncDrop": 0}}
     lines.append(row("damagepolicy", "event", {
         "recorded": 1, "role": role, "ownerThread": 1, "contextAvailable": 1, "victimClass": victim_class,
-        "sourceClass": source_class, "flags": 0, "readMask": 15, "amount": damage, "stat": 0, "kind": 0,
+        "sourceClass": source_class, "flags": input_flags, "readMask": 15, "amount": damage, "stat": 0, "kind": 0,
         "action": action, "reason": reason, "supported": 1, "roster0": 1, "roster1": 2, "roster2": 0,
         "revalidationAttempted": 1, "revalidationPassed": 1, "zeroAttempted": zero_attempted,
         "zeroResult": zero_result, "claimAttempted": claim_queued, "claimQueued": claim_queued}))
@@ -150,7 +151,8 @@ def build(host_hit_after=142, puppet_hp_after=None, friend_local_after=None, bra
     if clone_hit is not None:
         zero = {"before": 22, "after": 22, "action": 1, "zero_attempted": 1, "zero_result": 0, **clone_hit}
         before, after, action = zero.pop("before"), zero.pop("after"), zero.pop("action")
-        host += hit(6, PUPPET, 0, 2229, before, after, 2, 5, action, 7, damage=6, **{"source": BOSS, **zero})
+        reason, damage = zero.pop("reason", 7), zero.pop("damage", 6)
+        host += hit(6, PUPPET, 0, 2229, before, after, 2, 5, action, reason, damage=damage, **{"source": BOSS, **zero})
     host += hit(4, BOSS, 2229, 0, hp, hp if puppet_hp_after is None else puppet_hp_after, 5, 2, 1, 8, 1, damage=7,
                 damage_after=0, source=PUPPET, **(puppet_hit or {}))
     host += [native(hp), tick(3000)]
@@ -383,6 +385,54 @@ class BossHpLedgerTest(unittest.TestCase):
         self.assertTrue(run(phases=zero, clone_hit={})["pass"])
         self.fails("phase friend_only: no complete checked zero", phases=zero)
         self.fails("has incomplete proof", phases=zero, clone_hit={"victim_mask": 7})
+
+    # Lead #60 (evidence ae58b1fc): two native no-ops on the copy pass, each counted apart from the checked zeros.
+    # AlreadyApplied as hp-06 logged it (seqs 218/219: input flags 3, Native, amount 1, HP 4->4); ZeroAmount as
+    # seqs 215/224 (flags 0, amount 0).
+    ALREADY = {"action": 0, "reason": 4, "zero_attempted": 0, "zero_result": 1, "input_flags": 3, "damage": 1}
+    ZERO = {"action": 0, "reason": 6, "zero_attempted": 0, "zero_result": 1, "damage": 0}
+
+    def test_native_noops_on_the_remote_copy_pass_and_are_counted_apart(self):
+        for noop, key, listed in ((self.ALREADY, "bossHitsOnCloneAlreadyApplied", "alreadyApplied"),
+                                  (self.ZERO, "bossHitsOnCloneZeroAmount", "zeroAmount"),
+                                  ({**self.ALREADY, "damage": 0}, "bossHitsOnCloneAlreadyApplied", "alreadyApplied")):
+            v = run(clone_hit=noop)
+            self.assertTrue(v["pass"], (noop, v["problems"]))
+            counts = {k: v["counts"][k] for k in ("bossHitsOnClone", "bossHitsOnCloneAlreadyApplied", "bossHitsOnCloneZeroAmount")}
+            self.assertEqual(counts, {"bossHitsOnClone": 0, "bossHitsOnCloneAlreadyApplied": 0,
+                                      "bossHitsOnCloneZeroAmount": 0, key: 1})
+            self.assertEqual([p[key] for p in v["phases"]], [0, 1])
+            self.assertEqual(v["cloneNoops"][listed], [6])
+        self.assertEqual(run(clone_hit={})["cloneNoops"], {"alreadyApplied": [], "zeroAmount": []})
+
+    def test_a_clone_zero_phase_needs_a_real_checked_zero_not_a_noop(self):
+        zero = [{"name": "host_only", "from": "start", "to": "m1", "host": True, "friend": False},
+                {"name": "friend_only", "from": "m1", "to": "end", "host": False, "friend": True, "cloneZero": True}]
+        for noop in (self.ALREADY, self.ZERO):
+            self.fails("phase friend_only: no complete checked zero", phases=zero, clone_hit=noop)
+
+    def test_native_noop_negative_controls_fail(self):
+        controls = {
+            "AlreadyApplied with the copy's HP changed": {**self.ALREADY, "after": 16},
+            "AlreadyApplied without the input bit": {**self.ALREADY, "input_flags": 0},
+            "ZeroAmount with the copy's HP changed": {**self.ZERO, "after": 16},
+            "a nonzero amount labelled ZeroAmount": {**self.ZERO, "damage": 6},
+            "Native, nonzero amount, another reason": {**self.ALREADY, "reason": 7, "input_flags": 0, "damage": 6},
+            "the input bit with another reason": {**self.ALREADY, "reason": 7},
+            "AlreadyApplied not left Native": {**self.ALREADY, "action": 1},
+            "amount 0 with another reason": {**self.ZERO, "reason": 7},
+        }
+        for name, change in controls.items():
+            with self.subTest(name):
+                v = self.fails("was not a checked zero or a native no-op", clone_hit=change)
+                self.assertEqual(v["cloneNoops"], {"alreadyApplied": [], "zeroAmount": []})
+        with self.subTest("incomplete proof"):
+            for noop in (self.ALREADY, self.ZERO):
+                self.fails("has incomplete proof", clone_hit={**noop, "victim_mask": 7})
+        with self.subTest("another boss lifetime"):
+            for noop in (self.ALREADY, self.ZERO):
+                v = self.fails("is not from the boss lifetime", clone_hit={**noop, "epoch": 3})
+                self.assertEqual(v["cloneNoops"], {"alreadyApplied": [], "zeroAmount": []})
 
     def test_targeting_phase_requires_the_chosen_seat_to_be_hit(self):
         target = [{"name": "host_only", "from": "start", "to": "m1", "host": True, "friend": False, "hitOnHost": True},
