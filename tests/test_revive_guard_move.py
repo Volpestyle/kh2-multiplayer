@@ -223,6 +223,57 @@ class GuardLoopTest(unittest.TestCase):
                     self.assertEqual([i["ms"] for i in rig.inputs], [400])  # the first walk only
                     self.assertTrue(events[0]["result"].startswith("context-lost:"), events[0])
 
+    # Ione a3b07b72: one mismatching read retires the episode, even when the next read matches the pin again.
+    MISMATCHES = {"room": lambda r, scope: (r.friend.update(roomScope=scope), r.host.update(roomScope=scope)),
+                  "context": lambda r, actor: r.host.update(player=actor)}
+
+    @classmethod
+    def mismatch_once(cls, r, reason):
+        """Change the seats' room or the downed actor for exactly one read pair (host, then friend)."""
+        cls.MISMATCHES[reason](r, CHECKPOINT if reason == "room" else 0xC000)
+        reads = [0]
+        def restore(rr):
+            reads[0] += 1
+            if reads[0] > 2:  # the read after the mismatching pair sees the pinned values again
+                cls.MISMATCHES[reason](rr, SCOPE if reason == "room" else 0xB000)
+                rr.on_read = None
+        r.on_read = restore
+
+    def test_a_context_lost_in_the_post_lookup_refresh_retires_the_episode(self):
+        for reason in self.MISMATCHES:
+            with self.subTest(reason):
+                rig = Rig(lookup=lambda r, reason=reason: r.lookups == 1 and self.mismatch_once(r, reason))
+                events = rig.run()
+                self.assertEqual(rig.inputs, [])  # nothing after the mismatch, and nothing once it is restored
+                self.assertEqual(events[0]["result"], f"context-lost:{reason}")
+
+    def test_a_context_lost_during_an_aside_retires_the_episode(self):
+        for reason in self.MISMATCHES:
+            with self.subTest(reason):
+                rig = Rig(on_input=lambda r, reason=reason: len(r.inputs) == 1 and self.mismatch_once(r, reason))
+                events = rig.run()
+                self.assertEqual(len(rig.inputs), 1)  # the first pulse only
+                self.assertEqual(events[0]["asideStops"], {reason: 1})
+                self.assertEqual(events[0]["result"], f"context-lost:{reason}")
+
+    def test_a_geometry_stop_stays_resumable(self):
+        # A push out of the circle for one read pair ends that aside only; back inside, the episode steps aside again.
+        def push_once(r):
+            if len(r.inputs) != 1:
+                return
+            r.friend["pos"] = (0.0, 0.0, 1000.0)
+            reads = [0]
+            def back(rr):
+                reads[0] += 1
+                if reads[0] > 2:
+                    rr.friend["pos"], rr.on_read = (0.0, 0.0, 500.0), None
+            r.on_read = back
+        rig = Rig(on_input=push_once)
+        events = rig.run()
+        self.assertEqual(events[0]["asideStops"].get("geometry"), 1)
+        self.assertGreater(events[0]["asides"], 1)
+        self.assertEqual(events[0]["result"], "timeout")
+
     # Ione 796116d1 (2): the circle is rechecked with the remaining endpoint on every pulse.
     def test_a_push_out_of_the_circle_after_a_pulse_stops_the_aside(self):
         def push(r):
