@@ -1019,11 +1019,14 @@ static uintptr_t ApplyHitDamageBody(void* victim, void* hit, nativehittrace::Hit
 // VUH-2912 witness (diagnostic, reads only, only while the hit trace captures): a boss's applied hit that lowered
 // the local canonical player's HP, read again a few frames later. A native hit leaves its reaction motion and the
 // ignore-hit timer (+0xD70, which 0x3D65A0 tests) running; an HP-only write leaves neither. Keyed by the hittrace
-// sequence of that ApplyHitDamage scope, so a fixture joins it to the scope and to the mirror's hit line.
+// sequence of that ApplyHitDamage scope, so a fixture joins it to the scope and to the mirror's hit line. `reads`
+// has one bit per successful read (motion and timer before the hit, then again), so a failed read never looks like
+// a reaction; hitTickMs (GetTickCount64, one clock for every process on the PC) orders the hit against other seats.
+enum : uint32_t { kReadMotionBefore = 1, kReadIgnoreBefore = 2, kReadMotionAfter = 4, kReadIgnoreAfter = 8 };
 struct BossHitWitness {
-    std::uint64_t seq;
+    std::uint64_t seq, tickMs;
     uintptr_t attacker, victim;
-    uint32_t frame, atkpId, motion;
+    uint32_t frame, atkpId, motion, reads;
     float ignoreHit;
     int32_t hpBefore, hpAfter;
 };
@@ -1034,7 +1037,7 @@ static BossHitWitness g_witnesses[kWitnessSlots] = {};
 static unsigned g_witnessesLogged = 0;
 
 static void NoteBossHitWitness(std::uint64_t seq, uintptr_t victim, uintptr_t record, uint32_t motion, float ignoreHit,
-                               int32_t hpBefore, int32_t hpAfter) noexcept {
+                               uint32_t reads, int32_t hpBefore, int32_t hpAfter) noexcept {
     uintptr_t player = 0;
     if (!seq || g_witnessesLogged >= kWitnessLogLimit || hpAfter >= hpBefore || g_lastHit.hit != record ||
         !ReadHitTrace(g_exeBase + 0x2A105D0, player) || player != victim) return;
@@ -1044,7 +1047,8 @@ static void NoteBossHitWitness(std::uint64_t seq, uintptr_t victim, uintptr_t re
         if (name[0] != 'B' || name[1] != '_') return;
         for (auto& w : g_witnesses) {
             if (w.seq) continue;
-            w = {seq, g_lastHit.attacker, victim, g_frameCounter, g_lastHit.atkpId, motion, ignoreHit, hpBefore, hpAfter};
+            w = {seq, GetTickCount64(), g_lastHit.attacker, victim, g_frameCounter, g_lastHit.atkpId, motion, reads,
+                 ignoreHit, hpBefore, hpAfter};
             return;
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -1056,17 +1060,19 @@ static void BossHitWitnessTick() noexcept {
         uint32_t motion = UINT32_MAX;
         float ignoreHit = -1.0f;
         uintptr_t player = 0;
+        uint32_t reads = w.reads;
         const bool same = ReadHitTrace(g_exeBase + 0x2A105D0, player) && player == w.victim;
         if (same) {
-            (void)ReadHitTrace(w.victim + offsets::actor::ANIM_ID, motion);
-            (void)ReadHitTrace(w.victim + OFF_IGNORE_HIT, ignoreHit);
+            if (ReadHitTrace(w.victim + offsets::actor::ANIM_ID, motion)) reads |= kReadMotionAfter;
+            if (ReadHitTrace(w.victim + OFF_IGNORE_HIT, ignoreHit)) reads |= kReadIgnoreAfter;
         }
         if (g_witnessesLogged < kWitnessLogLimit) {
             ++g_witnessesLogged;
-            Log("[hitwitness] seq=%llu hitFrame=%u frame=%u attacker=%llX victim=%llX atkp=%u hp=%d->%d motion=%u->%u "
-                "ignoreHit=%.1f->%.1f same=%u", static_cast<unsigned long long>(w.seq), w.frame, g_frameCounter,
-                static_cast<unsigned long long>(w.attacker), static_cast<unsigned long long>(w.victim), w.atkpId,
-                w.hpBefore, w.hpAfter, w.motion, motion, double(w.ignoreHit), double(ignoreHit), same ? 1u : 0u);
+            Log("[hitwitness] seq=%llu hitFrame=%u hitTickMs=%llu frame=%u attacker=%llX victim=%llX atkp=%u hp=%d->%d "
+                "motion=%u->%u ignoreHit=%.1f->%.1f reads=%u same=%u", static_cast<unsigned long long>(w.seq), w.frame,
+                static_cast<unsigned long long>(w.tickMs), g_frameCounter, static_cast<unsigned long long>(w.attacker),
+                static_cast<unsigned long long>(w.victim), w.atkpId, w.hpBefore, w.hpAfter, w.motion, motion,
+                double(w.ignoreHit), double(ignoreHit), reads, same ? 1u : 0u);
         }
         w = {};
     }
@@ -1086,9 +1092,10 @@ static uintptr_t __fastcall HookedApplyHitDamage(void* victim, void* hit) {
     const std::uint64_t seq = traced ? token.event.sequence : 0;
     uint32_t motionBefore = UINT32_MAX;
     float ignoreBefore = -1.0f;
+    uint32_t readsBefore = 0;
     if (traced) {  // VUH-2912 witness inputs
-        (void)ReadHitTrace(actor + offsets::actor::ANIM_ID, motionBefore);
-        (void)ReadHitTrace(actor + OFF_IGNORE_HIT, ignoreBefore);
+        if (ReadHitTrace(actor + offsets::actor::ANIM_ID, motionBefore)) readsBefore |= kReadMotionBefore;
+        if (ReadHitTrace(actor + OFF_IGNORE_HIT, ignoreBefore)) readsBefore |= kReadIgnoreBefore;
     }
     ApplyFacts after {};
     uintptr_t result = 0;
@@ -1107,7 +1114,8 @@ static uintptr_t __fastcall HookedApplyHitDamage(void* victim, void* hit) {
         EndApply(token, normal && !AbnormalTermination(), result,
                  normal && !AbnormalTermination() ? &after : nullptr);
     }
-    if (traced && normal) NoteBossHitWitness(seq, actor, record, motionBefore, ignoreBefore, before.victim.hp, after.victim.hp);
+    if (traced && normal) NoteBossHitWitness(seq, actor, record, motionBefore, ignoreBefore, readsBefore, before.victim.hp,
+                                                  after.victim.hp);
     return result;
 }
 

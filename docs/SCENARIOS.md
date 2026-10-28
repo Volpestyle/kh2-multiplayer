@@ -3530,15 +3530,23 @@ Kills take `require: false`, so a seat Axel already downed refuses with `WrongSt
 - Mirror mode only: no `[enemy-target] forward` on the host, and no `remote-hit` or `veto` on the friend.
 - `owner_downs`, bracketed by marks, then `target_ledger` (`tools/scenario/boss_target_ledger.py`, the
   `hp_ledger`'s pinned boss lifetime). It checks each round in turn:
-  - Axel chose that seat inside the round.
-  - Inside the round, that seat took a native hit from its copy of the boss, after the choice by statehash tick.
-  - The hit has its `[hitwitness]`: a changed motion and a running ignore-hit timer, or, for a hit that downed
-    the seat, that seat's own gate intercept on that frame (reported as `downing`).
+  - Axel's selection names that seat at the round's start or inside it. Lines are logged on change only, so a choice
+    held from the walk counts; the fight's `until` reads the selection in force the same way.
+  - Inside the round, that seat took a native hit from its copy of the boss while the selection named it.
+  - The hit has its `[hitwitness]` with every read made: a changed motion and a running ignore-hit timer. For a hit
+    that downed the seat, that seat's own gate intercept on that frame stands instead. It is reported as `downing`:
+    lethal-hit evidence, not an i-frame test, so a run whose qualifying hits are all `downing` leaves nonlethal
+    reaction and i-frames unproven.
   - On the friend, the hit also has its `[enemy-mirror] hit` on a driven host motion.
 
-  Separately, no boss-target line may choose a candidate whose valid bit is clear. During each seat's own down
-  interval, a boss-target line must show it out of the candidates, and none may choose it after 1 s of pose
-  delivery.
+  Separately, no boss-target line may choose a candidate whose valid bit is clear. A boss-target line definitely
+  inside each seat's own down interval must show it out of the candidates, and none may choose it once 1 s of pose
+  delivery has passed.
+
+  Order: events in one seat's log go by line. Across seats they go by the GetTickCount64 `tickMs` that the
+  boss-target, `[hitwitness]` (`hitTickMs`) and `[downed]` intercept and revive lines carry: one clock for every
+  process on one PC, a strictly lower tick is earlier, and an equal or missing tick is unproven and fails. Once the
+  boss-target budget (256 lines) is spent, the selection after its last line is unknown and fails too.
 The `boss-target` lines are saved as `boss_targets`. The friend round's samples and the host's boss hits measure
 `atk_burst`'s and the leave distance's direct canonical-player reads (`docs/ENEMY_TARGET_REMOTE.md`); they are
 reported, not judged. `tests/test_axel_hp_fixture.py` checks the fixture's expressions and step order with

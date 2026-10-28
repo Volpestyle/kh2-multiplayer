@@ -421,10 +421,11 @@ static bool Intercept(uintptr_t actor, uint32_t mode) {
     BeginDowned(actor, hp, mode);
     if (g_down.gateLogs < 16) {
         ++g_down.gateLogs;
-        Log("[downed] gate intercept mode=%u episode=%llX actor=%llX hp=%d flags9B8=0x%X room=%u/%u/%u/%u/%u/%u frame=%u",
+        Log("[downed] gate intercept mode=%u episode=%llX actor=%llX hp=%d flags9B8=0x%X room=%u/%u/%u/%u/%u/%u frame=%u tickMs=%llu",
             mode, static_cast<unsigned long long>(g_down.episode), static_cast<unsigned long long>(actor), hp, flags,
             g_down.downedRoom.world, g_down.downedRoom.room, g_down.downedRoom.door, g_down.downedRoom.map,
-            g_down.downedRoom.battle, g_down.downedRoom.event, g_frameCounter);
+            g_down.downedRoom.battle, g_down.downedRoom.event, g_frameCounter,
+            static_cast<unsigned long long>(GetTickCount64()));
     }
     return true;
 }
@@ -586,10 +587,11 @@ static int StatDelta(void* actorPtr, int delta, int idx, bool& skip, int& skipRe
         g_logicalActor.store(actor, std::memory_order_release);
         if (g_down.gateLogs < 16) {
             ++g_down.gateLogs;
-            Log("[downed] gate intercept mode=4 logical=1 episode=%llX actor=%llX hp=%d delta=%d -> engine hp 1, dead bit clear room=%u/%u/%u/%u/%u/%u frame=%u",
+            Log("[downed] gate intercept mode=4 logical=1 episode=%llX actor=%llX hp=%d delta=%d -> engine hp 1, dead bit clear room=%u/%u/%u/%u/%u/%u frame=%u tickMs=%llu",
                 static_cast<unsigned long long>(g_down.episode), static_cast<unsigned long long>(actor), s.hp, delta,
                 g_down.downedRoom.world, g_down.downedRoom.room, g_down.downedRoom.door, g_down.downedRoom.map,
-                g_down.downedRoom.battle, g_down.downedRoom.event, g_frameCounter);
+                g_down.downedRoom.battle, g_down.downedRoom.event, g_frameCounter,
+                static_cast<unsigned long long>(GetTickCount64()));
         }
         if (g_down.setMotion) {
             bool fault = false;
@@ -688,8 +690,8 @@ static Result ReviveLogical(uint64_t episode, const Snap& s) {
         g_logicalActor.store(0, std::memory_order_release);
         g_logicalHeld.store(false, std::memory_order_release);
     }
-    Log("[downed] revive returned hp=%d/%d flags9B8=0x%X logical=1 fault=%u state=%u", after.hp, after.maxHp, after.flags,
-        fault ? 1u : 0u, static_cast<unsigned>(g_down.state));
+    Log("[downed] revive returned hp=%d/%d flags9B8=0x%X logical=1 fault=%u state=%u tickMs=%llu", after.hp, after.maxHp,
+        after.flags, fault ? 1u : 0u, static_cast<unsigned>(g_down.state), static_cast<unsigned long long>(GetTickCount64()));
     if (!ok) return fault ? Result::Fault : Result::Incomplete;
     if (g_down.setInvuln) {
         bool graceFault = false;
@@ -744,9 +746,9 @@ static Result TryRevive(uint64_t episode) {
     const bool cleared = (after.flags & 4U) == 0;
     g_down.state = cleared ? State::Ready : State::Refused;
     g_down.downedActor = 0;
-    Log("[downed] revive returned hp=%d/%d flags9B8=0x%X deadAction=%u controllerOff=%u guardUsed=%u state=%u",
+    Log("[downed] revive returned hp=%d/%d flags9B8=0x%X deadAction=%u controllerOff=%u guardUsed=%u state=%u tickMs=%llu",
         after.hp, after.maxHp, after.flags, after.deadAction ? 1u : 0u, after.controllerOff ? 1u : 0u,
-        g_down.reviveGuardUsed, static_cast<unsigned>(g_down.state));
+        g_down.reviveGuardUsed, static_cast<unsigned>(g_down.state), static_cast<unsigned long long>(GetTickCount64()));
     const bool ok = cleared && after.hp == target && !after.deadAction && !after.controllerOff && g_down.reviveGuardUsed;
     if (ok && g_down.setInvuln) {
         // Post-revive grace: the game's own ignore-hit timer (0x3D65A0 skips non-heal

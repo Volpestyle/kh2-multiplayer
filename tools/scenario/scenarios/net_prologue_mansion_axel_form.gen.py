@@ -272,6 +272,13 @@ def targets(target):
     return f"len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId={AXEL_OBJECT} target={target} ', 0))"
 
 
+def selected(target):
+    """Whether Axel's selection in force names candidate `target`. The host logs boss-target only on a change, so the
+    last line is the current choice, whether it was made inside the round or held from the walk."""
+    return (f"(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId={AXEL_OBJECT} target=(?P<t>-?\\d+) ', 0) "
+            f"or [{{'t': None}}])[-1]['t'] == '{target}'")
+
+
 def marks(name):
     return {"do": "save", "as": name, "expr": "[log_count('', 0), log_count('', 1)]"}
 
@@ -307,7 +314,7 @@ SEPARATION_MARGIN = 200  # beyond the policy's 150-unit hysteresis
 def target_round(name, fighter, reviver):
     """The reviver walks away from Axel; with both seats standing and measured apart, the round's baseline and window
     start. Then the reviver only revives while the fighter fights, filmed on both seats for the whole round. The
-    round must reach its milestone (Axel chose the fighter, the fighter was hit or downed, it landed damage) before
+    round must reach its milestone (Axel's selection names the fighter, the fighter was hit or downed, it landed damage) before
     its end mark; boss_target_ledger.py judges the choice, its order before the hit and the hit's witnesses."""
     base = f"saved['{name}_base']"
     seat = ("host", "friend")
@@ -331,7 +338,7 @@ def target_round(name, fighter, reviver):
         {"do": "revive_guard", "host": fighter, "friend": reviver},
         # The clips run as long as the round can (the step waits for them), so the round's hits are on film.
         {"do": "fight", "instances": [fighter], "seconds": 20, "reach": 120, "as": name,
-         "until": f"{targets(fighter)} > {base}['chosen'] and {hit} and {landed}",
+         "until": f"{selected(fighter)} and {hit} and {landed}",
          "sample": {"expr": observe, "everyMs": 500},
          "clips": [{"instance": 0, "seconds": 20, "fps": 30, "name": f"{name}_host"},
                    {"instance": 1, "seconds": 20, "fps": 30, "name": f"{name}_friend"}]},
