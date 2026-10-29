@@ -55,7 +55,7 @@ Any other first line means `launch`, the default.
 
 | Refusal | Level | Means |
 |---|---|---|
-| `recent-input` | both | Less than `idleMinutes` (15) since the last possible person. That covers physical or unattributed input, injected input that wasn't the rig's own, and any moment the context could have hidden someone: another session, the lock screen, a lost hook, or a sleep or stall of more than 5 s. The interval also restarts whenever the agent starts. |
+| `recent-input` | both | Less than `idleMinutes` since the last possible person (0 on both PCs since VUH-2963, so only input at the admission instant itself refuses). That covers physical or unattributed input, injected input that wasn't the rig's own, and any moment the context could have hidden someone: another session, the lock screen, a lost hook, or a sleep or stall of more than 5 s. The interval also restarts whenever the agent starts. |
 | `locked` | both | The input desktop isn't `Default` (lock screen or secure desktop). |
 | `session` | both | The agent isn't in the active console session. |
 | `observer` | both | The low-level hooks aren't installed. |
@@ -124,8 +124,8 @@ with `0xC000013A` (`STATUS_CONTROL_C_EXIT`; what sent it is unknown), and the ta
 availability log stop: treat a `state.json` older than a few seconds as no gate. The task also starts
 at each logon.
 
-A restarted agent starts a new idle interval, so on an idle-gated PC (`bld`) jobs that waited through the
-hold are refused with `recent-input` once it lifts. Queue them again after 15 min.
+A restarted agent starts a new idle interval, so on an idle-gated PC (`idleMinutes` above 0) jobs that waited
+through the hold are refused with `recent-input` once it lifts. Queue them again after that interval.
 
 `uninstall` first creates the stop file and waits for any running job to be reclaimed, so no job is
 ever left without its watchdog. It then unregisters the task and removes the gate code. `C:\desk\gate` keeps the logs, receipts and
@@ -139,8 +139,8 @@ with the ungated one.
 
 | Config | Machine | Idle | Reclaim on |
 |---|---|---|---|
-| `config.bld.json` | `bld`, someone's everyday desktop | 15 min of physical idle | physical or foreign injected input; a foreign game or fullscreen app for 10 s (as on PC1; 3 s reclaimed bld03b and zz72b during KH2's boot with nobody there); stop file, session or observer loss |
-| `config.pc1.json` | PC1 (`supedupsilly`), James's gaming PC | none (`idleMinutes` 0) | a foreign game or fullscreen app for 10 s; stop file, session or observer loss. Input doesn't reclaim (`reclaimOnInput` false). |
+| `config.bld.json` | `bld`, a dedicated kh2 rig since 2026-10-29 (VUH-2963) | none (`idleMinutes` 0; it was 15 while bld was someone's everyday desktop) | physical or foreign injected input; a foreign game or fullscreen app for 10 s (as on PC1; 3 s reclaimed bld03b and zz72b during KH2's boot with nobody there); stop file, session or observer loss |
+| `config.pc1.json` | PC1 (`supedupsilly`), a dedicated kh2 rig since 2026-10-29 (VUH-2963; James's gaming PC before) | none (`idleMinutes` 0) | a foreign game or fullscreen app for 10 s; stop file, session or observer loss. Input doesn't reclaim (`reclaimOnInput` false). |
 
 **PC1 profile.** PC1 runs on pad input while James works there, but never while he games. The lead
 read the AC "the same gate guards PC1 launches" this way on 2026-10-23. Setting `idleMinutes` 15 and
