@@ -20,24 +20,37 @@ a finding.
 
 ## Files
 
-`tools/rig/axel_inventory_plan.json` already selects `ard/us/tt05.ard`,
-`ard/us/tt20.ard`, `msn/us/TT05_MS404.bar`, `msn/us/TT20_MS603.bar`,
-`00objentry.bin`, `00battle.bin` and `03system.bin`. It does not select these,
-which this list also needs:
+One run of `tools/rig/axel_inventory_extract.py` gets every file this list needs.
+On top of the VUH-2914 set (Axel's models, `tt05`/`tt20` ARDs, both mission BARs,
+`00objentry.bin`, `00battle.bin`, `03system.bin`), `axel_inventory_plan.json` now
+selects:
 
-- `ard/us/tt19.ard` (02/13, the Basement Hall: events 135 and 136, door 50 evt2)
-  and `ard/us/tt21.ard` (02/15, the Computer Room, Axel II's Continue point).
-- The ARD for world 0x12 room 03 (`twtnw03-after-axel`, event 83). The expected
-  name is `ard/us/eh03.ard`; confirm it by its HED match before relying on it.
-- Each further room the chain after Axel II reaches (section 4). If `.local/`
-  still holds the 42 Twilight Town ARDs read for `docs/PROLOGUE_ENCOUNTERS.md`,
-  check their hashes against the install and reuse them.
-- `07localset.bin`, for the authored exit of each victory event.
-- The PE trap table entries for mission traps 4/3 (complete) and 4/16
-  (`mission_dead_boss`). The plan's `traps` list has tables 1, 2 and 6 only.
+- `07localset.bin`, required, for each victory event's authored exit. It is kept
+  as a BAR if it has the BAR magic and as a standalone table otherwise.
+- Optional room scripts: every `ard/us/ttNN.ard` from `tt00` to `tt41` (the chains
+  can wander; 02/13 is `tt19`, 02/15 is `tt21`, room names are decimal) and
+  `ard/us/eh03.ard` (world 0x12 room 03, event 83). An optional name the install
+  lacks goes in `capture.json` `absentOptionalAssets` instead of stopping the run.
+  If `tt19`, `tt21` or `eh03` shows up there, stop and report the names before
+  reading further.
+- PE trap table entries 4/3 (complete) and 4/16 (`mission_dead_boss`). As a check
+  on the table read, 4/16's function should be the `4334D0` handler that Thorn's
+  path starts from (`docs/PARTY_SETUP.md`).
 
-Either extend the plan with these (no prior hash, so `null` constraints) or read
-them with the same pinned decoder and record full SHA-256 for each.
+The new files have no prior pin, so the capture records their first full SHA-256.
+The same guards apply as for VUH-2914: pinned PE and HEDs, a new output directory
+strictly under `.local/`, and 20 GiB plus 512 MiB free:
+
+```powershell
+python tools/rig/axel_inventory_extract.py `
+  --install 'C:\Program Files (x86)\Steam\steamapps\common\KINGDOM HEARTS -HD 1.5+2.5 ReMIX-' `
+  --out .local/vuh2916-installed-01 `
+  --key-source .local/openkh-7a3b945c/EgsEncryption.cs
+```
+
+Require `complete=true` and every required asset in `capture.json` before reading.
+The room scripts are parsed with OpenKH's `AreaDataScript`/`SpawnPoint` layouts, as
+for `docs/PROLOGUE_ENCOUNTERS.md`; the capture does not interpret them.
 
 ## What to read
 

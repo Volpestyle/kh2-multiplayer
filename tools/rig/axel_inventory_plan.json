@@ -1,6 +1,10 @@
 {
   "schema": 1,
   "issue": "VUH-2914",
+  "alsoFor": [
+    "VUH-2916",
+    "VUH-2915"
+  ],
   "authority": "Plan only. No PC access until fresh explicit GO; full desk gate and rig lock precede capture.",
   "qualification": "UNQUALIFIED against installed bytes. Prefix/suffix asset constraints are not full SHA pins.",
   "openkhCommit": "7a3b945c538d32c6a285128c98aefba093f52ceb",
@@ -66,8 +70,56 @@
     "03system.bin": [
       "fd4b8469",
       "af4204"
-    ]
+    ],
+    "07localset.bin": null
   },
+  "optionalAssets": [
+    "ard/us/tt00.ard",
+    "ard/us/tt01.ard",
+    "ard/us/tt02.ard",
+    "ard/us/tt03.ard",
+    "ard/us/tt04.ard",
+    "ard/us/tt06.ard",
+    "ard/us/tt07.ard",
+    "ard/us/tt08.ard",
+    "ard/us/tt09.ard",
+    "ard/us/tt10.ard",
+    "ard/us/tt11.ard",
+    "ard/us/tt12.ard",
+    "ard/us/tt13.ard",
+    "ard/us/tt14.ard",
+    "ard/us/tt15.ard",
+    "ard/us/tt16.ard",
+    "ard/us/tt17.ard",
+    "ard/us/tt18.ard",
+    "ard/us/tt19.ard",
+    "ard/us/tt21.ard",
+    "ard/us/tt22.ard",
+    "ard/us/tt23.ard",
+    "ard/us/tt24.ard",
+    "ard/us/tt25.ard",
+    "ard/us/tt26.ard",
+    "ard/us/tt27.ard",
+    "ard/us/tt28.ard",
+    "ard/us/tt29.ard",
+    "ard/us/tt30.ard",
+    "ard/us/tt31.ard",
+    "ard/us/tt32.ard",
+    "ard/us/tt33.ard",
+    "ard/us/tt34.ard",
+    "ard/us/tt35.ard",
+    "ard/us/tt36.ard",
+    "ard/us/tt37.ard",
+    "ard/us/tt38.ard",
+    "ard/us/tt39.ard",
+    "ard/us/tt40.ard",
+    "ard/us/tt41.ard",
+    "ard/us/eh03.ard"
+  ],
+  "optionalAssetsNote": "VUH-2916 rooms: the Twilight Town room scripts the post-Axel chains may reach, and The World That Never Was room 03. File names are decimal rooms (02/13 is tt19). No prior pin; an absent name is listed in capture.json absentOptionalAssets instead of stopping the capture.",
+  "standaloneOrBar": [
+    "07localset.bin"
+  ],
   "traps": [
     [
       1,
@@ -144,6 +196,14 @@
     [
       2,
       20
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      4,
+      16
     ],
     [
       6,
