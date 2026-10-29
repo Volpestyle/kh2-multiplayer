@@ -262,6 +262,10 @@ class Instance:
 # Run context
 # --------------------------------------------------------------------------
 
+class CloseFailed(RuntimeError):
+    """Context.close could not prove the hp_assist worker stopped, so it tore nothing down."""
+
+
 class Context:
     def __init__(self, run_dir: Path) -> None:
         self.run_dir = run_dir
@@ -475,12 +479,16 @@ class Context:
             except Exception:  # noqa: BLE001 - best effort; loading rooms have no player
                 pass
 
-    def close(self) -> None:
-        if getattr(self, "hp_assist", None) is not None:  # a step failed while it was on: retire it before teardown
+    def close(self, abandon_assist: bool = False) -> None:
+        """Stop the protector, recorders and owned helpers. A running hp_assist is retired first; if its worker can't
+        be proven stopped, close raises CloseFailed before tearing anything down (lead #115). Only run_scenario,
+        after ending the games it could write to, calls again with abandon_assist."""
+        if getattr(self, "hp_assist", None) is not None and not abandon_assist:
             try:
                 stop_hp_assist(self, "close")
             except StepFailed as e:
                 self.assisted["closeError"] = str(e)
+                raise CloseFailed(str(e)) from e
         self._stop.set()
         # A protection poll can already be inside subprocess.run. Join it before
         # the runner exits: run() reaps its bounded child, including on timeout.
@@ -3703,18 +3711,19 @@ class HpAssist:
                     self.error = self.error or f"seat {index}: {exc}"
             self.stop.wait(self.POLL_S)
 
-    def standing(self, helpers: dict, index: int) -> int | None:
-        """The seat's canonical player address while it stands, else None (downed: the downed policy and the
-        reviver own its HP)."""
-        if helpers["log_count"](DOWNED_DOWN, index) > helpers["log_count"](DOWNED_REVIVED, index):
-            return None
+    def downs(self, helpers: dict, index: int) -> tuple[int, int]:
+        """The seat's (downs, revives) receipts from its inject log on disk: a local read, not an RPC."""
+        return helpers["log_count"](DOWNED_DOWN, index), helpers["log_count"](DOWNED_REVIVED, index)
+
+    def canonical(self, helpers: dict, index: int) -> int:
         return int(str(helpers["peek"]("0x2A105D0", "u64", index)), 16)
 
     def tick(self, index: int) -> dict | None:
         helpers = self.ctx.namespace()
-        canonical = self.standing(helpers, index)
-        if canonical is None:
-            return None
+        down, revived = self.downs(helpers, index)
+        if down > revived:
+            return None  # downed: the downed policy and the reviver own this seat's HP
+        canonical = self.canonical(helpers, index)
         pid = self.ctx.inst(index).pid
 
         def row():
@@ -3738,23 +3747,43 @@ class HpAssist:
         if actor is None or int(actor["status"], 16) != status or not first == before == (actor["hp"], actor["maxHp"]) \
                 or not 0 < before[0] <= self.floor or before[0] >= before[1]:
             return None  # moving or changed: the next round looks again
-        # Commit-time recheck (Ione r1 REQUIRED 2): the seat can down, or canonical move to another actor, during the
-        # reads above. Anything changed or unreadable withholds the write.
-        if self.stop.is_set() or self.standing(helpers, index) != canonical:
+        # The last blocking reads (Ione r2 REQUIRED 2, lead #115): canonical again, then the row (its status pointer),
+        # then the status HP. A canonical move, a status move or an HP change during them withholds the write.
+        if self.canonical(helpers, index) != canonical:
+            return None
+        actor = row()
+        if actor is None or int(actor["status"], 16) != status or read() != before:
+            return None
+        # Commit gate: local only (the stop flag and the seat's inject log on disk), with no RPC between it and the
+        # poke, so a down or a stop during any read above is seen here. The poke itself is still not atomic with the
+        # game: a down landing between this gate and the write is the residual, which the audit below catches.
+        commit = self.downs(helpers, index)
+        if self.stop.is_set() or commit[0] > commit[1]:
             return None
         event = {"seat": index, "t": round(time.monotonic(), 3), "actor": actor["address"], "before": list(before),
-                 "written": before[1], "poked": False, "readback": None}
+                 "written": before[1], "poked": False, "readback": None, "downsAtCommit": list(commit)}
         self.events.append(event)  # journalled first: a failed poke or readback still leaves its record
         kh2ctl("poke", "--addr", f"0x{status:X}", "--type", "i32", "--value", str(before[1]), pid=pid)
         event["poked"] = True
         try:
             after = read()
         except Exception as exc:
-            event["readbackError"] = str(exc)
+            event.update(readbackError=str(exc), invalid="unaudited: the readback failed")
             raise
         event["readback"] = list(after)
         if after != (before[1], before[1]):
             event["readbackMismatch"] = True
+        # Audit (lead #115): a refill that may have landed on a downed or no-longer-canonical actor invalidates the
+        # run (stop_hp_assist, run_scenario). An audit it can't finish counts as invalid too.
+        try:
+            later, moved = self.downs(helpers, index), self.canonical(helpers, index) != canonical
+        except Exception as exc:
+            event["invalid"] = f"unaudited: {exc}"
+            raise
+        problems = (["the seat downed around the write"] if later[0] > commit[0] else []) + \
+                   (["the canonical player changed around the write"] if moved else [])
+        if problems:
+            event["invalid"] = "; ".join(problems)
         return event
 
     def halt(self) -> bool:
@@ -3773,9 +3802,12 @@ def stop_hp_assist(ctx: Context, reason: str, name: str = "hp_assist") -> dict:
     if assist is None:
         return {"events": [], "error": "", "refills": 0, "stoppedBy": reason, "workerExited": True}
     exited = assist.halt()
+    invalid = [f"seat {e['seat']} at {e['t']}: {e['invalid']}" for e in assist.events if e.get("invalid")]
+    if invalid and getattr(ctx, "assisted", None) is not None:
+        ctx.assisted["invalid"] = invalid
     result = label_assisted(ctx, {"events": assist.events, "error": assist.error,
                                   "refills": sum(1 for e in assist.events if e.get("poked")),
-                                  "stoppedBy": reason, "workerExited": exited})
+                                  "invalid": invalid, "stoppedBy": reason, "workerExited": exited})
     ctx.saved[name] = result
     run_dir = getattr(ctx, "run_dir", None)
     if run_dir is not None:
@@ -6732,7 +6764,15 @@ def run_scenario(path: Path, attempt: int) -> dict:
         pending = getattr(ctx, "saved", {}).pop("_background_clips", [])  # isolated test contexts have no saved
         if pending:
             report["clipDrain"] = drain_clips(ctx, pending)
-        ctx.close()
+        try:
+            ctx.close()
+        except CloseFailed as e:
+            # Fail closed (lead #115): end the games the worker could still write to, then tear down the rest.
+            report.update(status="fail", closureError=str(e))
+            report.setdefault("error", f"closure failed: {e}")
+            for inst in ctx.instances:
+                kh2ctl("kill", pid=inst.pid, check=False)
+            ctx.close(abandon_assist=True)
         for inst in ctx.instances:  # recover: never leave this run's instances behind
             kh2ctl("kill", pid=inst.pid, check=False)
         for inst in ctx.instances:
@@ -6756,6 +6796,10 @@ def run_scenario(path: Path, attempt: int) -> dict:
         report["instances"] = [inst.pid for inst in ctx.instances]
         if getattr(ctx, "assisted", None) is not None:  # isolated test contexts skip __init__
             report["assisted"] = ctx.assisted
+            reasons = ctx.assisted.get("invalid", []) + ([ctx.assisted["closeError"]] if "closeError" in ctx.assisted else [])
+            if reasons:  # an assisted run whose refills or closure can't be trusted measures nothing
+                report.update(status="fail", invalid=reasons)
+                report.setdefault("error", f"assisted run invalid: {reasons[0]}")
         if ctx.protect or ctx.protected_actors:
             label = "stand-in seat protected" if ctx.after_pilot_covered else "stand-in friend protected"
             report["standInProtected"] = {"label": label, "instances": sorted(ctx.protect),
@@ -6778,6 +6822,8 @@ def render_md(report: dict) -> str:
     assisted = " (ASSISTED, not a native milestone)" if report.get("assisted") else ""
     lines = [f"# {report['scenario']} (attempt {report['attempt']}): {report['status'].upper()}{assisted}", "",
              f"Started {report['started']}, {report.get('seconds', '?')} s, instances {report.get('instances')}.", ""]
+    if report.get("invalid"):
+        lines += ["**INVALID:** " + "; ".join(report["invalid"]), ""]
     if report.get("assisted"):
         lines += [f"**{report['assisted']['label']}.** Seats {report['assisted']['seats']}, floor "
                   f"{report['assisted']['floor']} HP, {report['assisted']['refills']} refills "

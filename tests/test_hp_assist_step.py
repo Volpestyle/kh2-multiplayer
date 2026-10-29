@@ -270,13 +270,254 @@ class HpAssistRound2Test(unittest.TestCase):
         self.assertEqual(RUN.label_assisted(ctx, {"pass": True})["assisted"]["label"], RUN.ASSISTED_LABEL)
 
 
+def final_peek_context(game, counts, status, hooks):
+    """context() whose n-th canonical peek first runs hooks[n] (1: the early read, 2: the final read before the
+    commit gate, 3: the post-write audit), with live down counts and a live status pointer for the canonical row."""
+    ctx = context(game)
+    calls = [0]
+
+    def peek(rva, kind="u32", index=0):
+        calls[0] += 1
+        hooks.get(calls[0], lambda: None)()
+        return CANON
+    ctx.namespace = lambda: {"log_count": lambda text, index=0: counts.get(text, 0), "peek": peek}
+    ctx.actors = lambda index: [{"address": CANON, "name": "P_EX110_BTLF", "status": f"0x{status[0]:X}",
+                                 "hp": game.memory[STATUS], "maxHp": game.memory[STATUS + 4]}]
+    return ctx
+
+
+class PokeGame(FakeGame):
+    """FakeGame that runs `on_poke` as its poke lands (a down receipt arriving with the write)."""
+
+    def __init__(self, on_poke, **kw):
+        super().__init__(**kw)
+        self.on_poke = on_poke
+
+    def __call__(self, *args, pid=None, **kw):
+        if args[0] == "poke":
+            self.on_poke()
+        return super().__call__(*args, pid=pid, **kw)
+
+
+class FakeProc:
+    """An owned helper that records whether teardown touched it."""
+
+    def __init__(self):
+        self.terminated = False
+
+    def poll(self):
+        return 0 if self.terminated else None
+
+    def terminate(self):
+        self.terminated = True
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        self.terminated = True
+
+
+class FinalGateTest(unittest.TestCase):
+    """Lead #115 after Ione's final round (VUH-2912 e735c0d2): her four remaining counterexamples, plus the audit."""
+
+    def setUp(self):
+        self.original, self.join = RUN.kh2ctl, RUN.HpAssist.JOIN_S
+
+    def tearDown(self):
+        RUN.kh2ctl, RUN.HpAssist.JOIN_S = self.original, self.join
+
+    def tick(self, hooks, counts=None, status=None, assist_hook=None, hp=1):
+        game = FakeGame(hp=hp)
+        RUN.kh2ctl = game
+        counts = {} if counts is None else counts
+        status = [STATUS] if status is None else status
+        assist = RUN.HpAssist(final_peek_context(game, counts, status, hooks), [0], 12)
+        if assist_hook:
+            hooks.update(assist_hook(assist))
+        return assist, assist.tick(0), game
+
+    def test_a_down_during_the_final_canonical_read_withholds_the_write(self):
+        counts = {}
+        _, event, game = self.tick({2: lambda: counts.update({RUN.DOWNED_DOWN: 1})}, counts=counts)
+        self.assertEqual((event, game.pokes), (None, []))
+
+    def test_a_stop_during_the_final_canonical_read_withholds_the_write(self):
+        _, event, game = self.tick({}, assist_hook=lambda assist: {2: assist.stop.set})
+        self.assertEqual((event, game.pokes), (None, []))
+
+    def test_a_status_move_during_the_final_canonical_read_withholds_the_write(self):
+        status = [STATUS]
+        _, event, game = self.tick({2: lambda: status.__setitem__(0, STATUS + 0x1000)}, status=status)
+        self.assertEqual((event, game.pokes), (None, []))  # never aimed at the old status
+
+    def test_the_final_gate_still_writes_when_nothing_changed(self):
+        _, event, game = self.tick({})
+        self.assertEqual(game.pokes, [(4242, STATUS, "i32", 22)])
+        self.assertNotIn("invalid", event)
+
+    def test_a_down_landing_with_the_write_invalidates_the_refill(self):
+        counts = {}
+        game = PokeGame(lambda: counts.update({RUN.DOWNED_DOWN: 1}), hp=4)
+        RUN.kh2ctl = game
+        assist = RUN.HpAssist(final_peek_context(game, counts, [STATUS], {}), [0], 12)
+        event = assist.tick(0)
+        self.assertEqual((event["poked"], event["invalid"]), (True, "the seat downed around the write"))
+        ctx = SimpleNamespace(hp_assist=assist, assisted=None, saved={}, artifacts=[])
+        RUN.mark_assisted(ctx, [0], 12)
+        assist.stop.set()
+        assist.thread.start()  # exits at once: stop is already set
+        result = RUN.stop_hp_assist(ctx, "off")
+        self.assertEqual(len(result["invalid"]), 1)
+        self.assertEqual(ctx.assisted["invalid"], result["invalid"])
+
+    def test_a_canonical_change_landing_with_the_write_invalidates_the_refill(self):
+        game = FakeGame(hp=4)
+        RUN.kh2ctl = game
+        ctx = final_peek_context(game, {}, [STATUS], {})
+        peeks = iter([CANON, CANON, "0x7FF7014D3300"])  # early, final, audit
+        ctx.namespace = lambda: {"log_count": lambda text, index=0: 0, "peek": lambda *a, **k: next(peeks)}
+        event = RUN.HpAssist(ctx, [0], 12).tick(0)
+        self.assertEqual(event["invalid"], "the canonical player changed around the write")
+
+    def test_close_fails_closed_when_the_worker_will_not_halt(self):
+        gate = threading.Event()
+        game = LateGame(hp=6, gate=gate)
+        RUN.kh2ctl, RUN.HpAssist.JOIN_S = game, 0.2
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = FakeContext(Path(tmp), game)
+            ctx.test_only = {"player_hp_refill"}
+            helper = FakeProc()
+            ctx.processes.append(("runtime", helper, SimpleNamespace(close=lambda: None)))
+            RUN.step_hp_assist(ctx, {"do": "hp_assist", "seats": [0], "floor": 12})
+            self.assertTrue(game.entered.wait(2))
+            with self.assertRaises(RUN.CloseFailed):
+                ctx.close()
+            self.assertFalse(helper.terminated)  # nothing torn down as if closure succeeded
+            self.assertIsNotNone(ctx.hp_assist)  # handle and evidence retained
+            self.assertIn("still running", ctx.assisted["closeError"])
+            self.assertFalse(json.loads((Path(tmp) / "hp_assist.json").read_text())["workerExited"])
+            gate.set()
+            RUN.HpAssist.JOIN_S = 5
+            ctx.close()
+            self.assertTrue(helper.terminated)
+            self.assertEqual(game.pokes, [])
+
+    def test_an_invalid_refill_or_a_failed_closure_fails_the_run(self):
+        counts = {}
+        game = PokeGame(lambda: counts.update({RUN.DOWNED_DOWN: 1}), hp=9)
+        scenario = {"name": "native_milestone_probe", "testOnly": ["player_hp_refill"],
+                    "steps": [{"do": "hp_assist", "seats": [0], "floor": 12}, {"do": "wait", "ms": 600},
+                              {"do": "hp_assist", "on": False}]}
+        original_context, original_runs = RUN.Context, RUN.RUNS
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "native_milestone_probe.json"
+            path.write_text(json.dumps(scenario), encoding="utf-8")
+            RUN.kh2ctl, RUN.RUNS = game, Path(tmp) / "runs"
+            RUN.Context = lambda run_dir: FakeContext(run_dir, game, counts)
+            try:
+                report = RUN.run_scenario(path, 1)
+            finally:
+                RUN.Context, RUN.RUNS = original_context, original_runs
+            self.assertEqual(report["status"], "fail")
+            self.assertIn("seat downed around the write", report["invalid"][0])
+            self.assertIn("**INVALID:**", (Path(report["dir"]) / "report.md").read_text(encoding="utf-8"))
+
+
+class IoneRound2ProbeTest(unittest.TestCase):
+    """Ione's four final-round counterexamples (.local/ione-review/vuh2912-hp-assist-r2/probe.py, sent by her), with
+    their bug assertions inverted to the fixed behaviour."""
+
+    def setUp(self):
+        self.original = RUN.kh2ctl
+
+    def tearDown(self):
+        RUN.kh2ctl = self.original
+
+    def final_read_change(self, kind):
+        game = FakeGame(hp=1)
+        counts, canonical = {}, [CANON]
+        ctx = live_context(game, counts, canonical)
+        helper, calls = ctx.namespace(), [0]
+        assist = RUN.HpAssist(ctx, [0], 12)
+        original_actors, status = ctx.actors, [STATUS]
+
+        def actors(index):
+            rows = original_actors(index)
+            rows[0]["status"] = hex(status[0])
+            return rows
+        ctx.actors = actors
+
+        def peek(*args):
+            calls[0] += 1
+            if calls[0] == 2:  # the final canonical read, after the old HP reads and down-count check
+                if kind == "down":
+                    counts[RUN.DOWNED_DOWN] = 1
+                elif kind == "stop":
+                    assist.stop.set()
+                else:
+                    status[0] = STATUS + 0x1000
+            return CANON
+        helper["peek"] = peek
+        RUN.kh2ctl = game
+        return assist.tick(0), game
+
+    def test_probe_down_during_the_final_canonical_rpc(self):
+        event, game = self.final_read_change("down")
+        self.assertEqual((event, game.pokes), (None, []))
+
+    def test_probe_stop_during_the_final_canonical_rpc(self):
+        event, game = self.final_read_change("stop")
+        self.assertEqual((event, game.pokes), (None, []))
+
+    def test_probe_status_move_during_the_final_canonical_rpc(self):
+        event, game = self.final_read_change("status")
+        self.assertEqual((event, game.pokes), (None, []))
+
+    def test_probe_close_with_a_nonquiescent_assist(self):
+        class JoinStub:
+            def join(self, *args, **kwargs):
+                pass
+
+        class NeverExits:
+            JOIN_S = 0
+            events, error = [], ""
+
+            def halt(self):
+                return False
+        teardown = []
+
+        class Proc:
+            def poll(self):
+                return None
+
+            def terminate(self):
+                teardown.append("process terminated")
+
+            def wait(self, *args, **kwargs):
+                pass
+
+        class Log:
+            def close(self):
+                pass
+        ctx = object.__new__(RUN.Context)
+        ctx.hp_assist, ctx.assisted, ctx.saved = NeverExits(), {"refills": 0}, {}
+        ctx._stop, ctx._protector = threading.Event(), JoinStub()
+        ctx.processes = [("sentinel", Proc(), Log())]
+        with self.assertRaises(RUN.CloseFailed):
+            RUN.Context.close(ctx)
+        self.assertIsNotNone(ctx.hp_assist)
+        self.assertEqual(teardown, [])
+        self.assertIn("closeError", ctx.assisted)
+
+
 class FakeContext(RUN.Context):
     """A real Context (its close, artifacts and run dir) whose seat 0 reads come from a FakeGame."""
 
-    def __init__(self, run_dir, game):
+    def __init__(self, run_dir, game, counts=None):
         super().__init__(run_dir)
         self.game = game
-        self.fake = context(game)
+        self.fake = context(game) if counts is None else live_context(game, counts, [CANON])
 
     def inst(self, index):
         return self.fake.inst(index)
