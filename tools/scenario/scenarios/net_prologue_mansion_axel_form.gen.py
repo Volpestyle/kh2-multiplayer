@@ -634,6 +634,27 @@ HP_SPLITS = {
                       "target ledger's downs; no target rounds."),
 }
 
+# Lead #105 (VUH-2963: development runs use test assists by default): B1-inter and B2 again with a player survival
+# assist, after vuh2912-hp-12 (Axel downed the host inside the interleaved window) and hp-13 (the party fell in the room
+# before Axel). hp_assist refills a seat's own canonical player to its max HP at 12 or below. Hits, reactions and HP loss
+# stay native, so the `[hit]` witnesses and both ledgers still measure; it is not invulnerability. It starts once both
+# runtimes run, so it covers the room fight too, and it stops at the judged window's end mark (B1-inter) or just before
+# owner_downs (B2), whose forced downs it must not refill. The unassisted splits stay for milestone acceptance.
+HP_ASSIST_FLOOR = 12  # Roxas has 22: from 13, two ~6-HP hits inside one 250 ms poll leave 1
+HP_ASSISTED = {f"{HP_NAME}_b1_inter": "m_interleaved1", f"{HP_NAME}_b2": "owner_downs"}
+
+
+def assisted(steps, off):
+    """`steps` with hp_assist on right after the friend's runtime and off after the step `as` `off` (a mark), or just
+    before it when it is owner_downs."""
+    out = list(steps)
+    on = next(i for i, s in enumerate(out) if s.get("do") == "runtime" and s.get("role") == "friend1") + 1
+    out.insert(on, {"do": "hp_assist", "seats": [0, 1], "floor": HP_ASSIST_FLOOR})
+    at = next(i for i, s in enumerate(out) if s.get("as") == off)
+    out.insert(at if out[at]["do"] == "owner_downs" else at + 1, {"do": "hp_assist", "on": False, "as": "hp_assist"})
+    return out
+
+
 if __name__ == "__main__":
     description = __doc__.split("\n\n", 2)[2].strip().replace("\n", " ")
     for name, selection in VARIANTS.items():
@@ -651,3 +672,12 @@ if __name__ == "__main__":
         out = Path(__file__).with_name(f"{name}.json")
         out.write_text(json.dumps(scenario, indent=1) + "\n", encoding="utf-8")
         print(out)
+        if name in HP_ASSISTED:
+            scenario = {**scenario, "name": f"{name}_assisted", "testOnly": ["player_hp_refill"],
+                        "description": f"ASSISTED (lead #105): hp_assist refills each seat's own player at "
+                                       f"{HP_ASSIST_FLOOR} HP or below; hits and HP loss stay native. "
+                                       + scenario["description"],
+                        "steps": assisted(scenario["steps"], HP_ASSISTED[name])}
+            out = Path(__file__).with_name(f"{name}_assisted.json")
+            out.write_text(json.dumps(scenario, indent=1) + "\n", encoding="utf-8")
+            print(out)

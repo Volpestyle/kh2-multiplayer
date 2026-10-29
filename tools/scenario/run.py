@@ -3636,6 +3636,92 @@ def step_progress_hash_control(ctx: Context, step: dict) -> dict:
     return result
 
 
+class HpAssist:
+    """Test-only survival assist (VUH-2912 assisted reruns, lead #105; VUH-2963's development default). While on, it
+    refills each listed seat's own canonical player's native HP to its max once that HP falls to `floor` or below.
+    Hits, reactions and HP loss stay native and visible, so `[hit]` witnesses, downs and the boss HP ledgers still
+    measure: it is not invulnerability. It never writes to a downed seat (a down not yet revived) or at HP 0. It
+    writes only when the status block's HP/max HP agree with the entities row on both sides of that row read, like
+    test_enemy_hp, and checks the readback. A seat it can't read is skipped that round, and the first error is kept."""
+
+    POLL_S = 0.25
+
+    def __init__(self, ctx: Context, seats: list[int], floor: int) -> None:
+        self.ctx, self.seats, self.floor = ctx, list(seats), int(floor)
+        self.events: list[dict] = []
+        self.error = ""
+        self.stop = threading.Event()
+        self.thread = threading.Thread(target=self.loop, daemon=True)
+
+    def loop(self) -> None:
+        while not self.stop.is_set():
+            for index in self.seats:
+                try:
+                    self.tick(index)
+                except Exception as exc:  # noqa: BLE001 (a seat that can't be read is skipped this round)
+                    self.error = self.error or f"seat {index}: {exc}"
+            self.stop.wait(self.POLL_S)
+
+    def tick(self, index: int) -> dict | None:
+        helpers = self.ctx.namespace()
+        if helpers["log_count"](DOWNED_DOWN, index) > helpers["log_count"](DOWNED_REVIVED, index):
+            return None  # downed: the downed policy and the reviver own this seat's HP
+        pid = self.ctx.inst(index).pid
+        canonical = int(str(helpers["peek"]("0x2A105D0", "u64", index)), 16)
+
+        def row():
+            rows = [a for a in self.ctx.actors(index) if int(a["address"], 16) == canonical]
+            return rows[0] if len(rows) == 1 else None
+        actor = row()
+        if actor is None or not 0 < actor.get("hp", 0) <= self.floor or actor["hp"] >= actor.get("maxHp", 0):
+            return None
+        status = int(actor["status"], 16)
+        base = int(str(kh2ctl("peek", "--rva", "0x717008:u8", pid=pid)["moduleBase"]), 0)
+        if status < base:
+            raise StepFailed(f"hp_assist: status 0x{status:X} is below the module base 0x{base:X}")
+        keys = [f"0x{status + offset - base:X}" for offset in (0, 4)]
+
+        def read():
+            sample = kh2ctl("peek", "--rva", ",".join(f"{k}:i32" for k in keys), pid=pid)["samples"][0]
+            return int(sample[keys[0]]), int(sample[keys[1]])
+        first = read()
+        actor = row()
+        before = read()
+        if actor is None or int(actor["status"], 16) != status or not first == before == (actor["hp"], actor["maxHp"]) \
+                or not 0 < before[0] <= self.floor or before[0] >= before[1]:
+            return None  # moving or changed: the next round looks again
+        kh2ctl("poke", "--addr", f"0x{status:X}", "--type", "i32", "--value", str(before[1]), pid=pid)
+        after = read()
+        event = {"seat": index, "t": round(time.monotonic(), 3), "actor": actor["address"], "before": list(before),
+                 "written": before[1], "readback": list(after)}
+        if after != (before[1], before[1]):
+            event["readbackMismatch"] = True
+        self.events.append(event)
+        return event
+
+
+def step_hp_assist(ctx: Context, step: dict) -> dict:
+    """Start (`on`, default) or stop the test-only HpAssist. Refused unless the scenario declares
+    "testOnly": ["player_hp_refill"]. Stopping saves its events (and any read error) under `as`."""
+    if "player_hp_refill" not in ctx.test_only:
+        raise StepFailed('hp_assist needs the scenario to declare "testOnly": ["player_hp_refill"]')
+    assist = getattr(ctx, "hp_assist", None)
+    if step.get("on", True):
+        if assist is not None:
+            raise StepFailed("hp_assist is already on")
+        ctx.hp_assist = HpAssist(ctx, step.get("seats", [0, 1]), step.get("floor", 12))
+        ctx.hp_assist.thread.start()
+        return {"started": True, "seats": ctx.hp_assist.seats, "floor": ctx.hp_assist.floor}
+    if assist is None:
+        return {"events": [], "error": ""}
+    assist.stop.set()
+    assist.thread.join(timeout=10)
+    ctx.hp_assist = None
+    result = {"events": assist.events, "error": assist.error, "refills": len(assist.events)}
+    ctx.saved[step.get("as", "hp_assist")] = result
+    return result
+
+
 ENEMY_HP_AGREE_ATTEMPTS, ENEMY_HP_AGREE_PAUSE_S = 20, 0.1  # test_enemy_hp's status/row agreement, about 2 s
 
 
@@ -6297,7 +6383,8 @@ STEPS = {"boot": step_boot, "launch": step_launch, "pilot": step_pilot, "warp": 
          "dismiss_goa_map_reward": step_dismiss_goa_map_reward,
          "enemy_hash_control": step_enemy_hash_control,
          "courtyard_diagnostic": step_courtyard_diagnostic,
-         "native_enemy_census": step_native_enemy_census, "test_enemy_hp": step_test_enemy_hp}
+         "native_enemy_census": step_native_enemy_census, "test_enemy_hp": step_test_enemy_hp,
+         "hp_assist": step_hp_assist}
 
 
 # Saved-log forced-resync evidence is isolated from the live collector. Load by
@@ -6773,6 +6860,14 @@ def validate_scenario(scenario: dict) -> None:
                 raise ValueError(f'{prefix}: test_enemy_hp needs "testOnly": ["enemy_hp_write"]')
             if type(step.get("objectId")) is not int or type(step.get("hp")) is not int or step["hp"] < 1:
                 raise ValueError(f"{prefix}: test_enemy_hp needs integer objectId and hp >= 1")
+        if kind == "hp_assist":
+            if "player_hp_refill" not in scenario.get("testOnly", []):
+                raise ValueError(f'{prefix}: hp_assist needs "testOnly": ["player_hp_refill"]')
+            if type(step.get("on", True)) is not bool or (step.get("on", True) and (
+                    type(step.get("floor", 12)) is not int or step.get("floor", 12) < 1 or
+                    not isinstance(step.get("seats", [0, 1]), list) or
+                    not all(type(i) is int and i >= 0 for i in step.get("seats", [0, 1])))):
+                raise ValueError(f"{prefix}: hp_assist needs a boolean on, integer floor >= 1 and integer seats")
         if kind == "runtime" and step["role"] not in ("player", "friend1", "friend2", "spectator"):
             raise ValueError(f"{prefix}: invalid runtime role")
         if kind in ("reconnect_mark", "runtime_pause", "reconnect_check"):
