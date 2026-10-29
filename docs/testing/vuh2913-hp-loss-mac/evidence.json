@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "landing-checks.tar.gz",
+      "size": 22139,
+      "sha256": "2101646783dbdee56bea30f76aa2e0d80637621ab8b301e9c8be44f860e1a8d8",
+      "url": "clankie://evidence/sha256/2101646783dbdee56bea30f76aa2e0d80637621ab8b301e9c8be44f860e1a8d8"
+    },
+    {
+      "path": "raw.tar.gz",
+      "size": 1906155,
+      "sha256": "3325ebbbb75059d07b67328d10f7dc244df330f79180ba9bde42b7eb915f642c",
+      "url": "clankie://evidence/sha256/3325ebbbb75059d07b67328d10f7dc244df330f79180ba9bde42b7eb915f642c"
+    }
+  ]
+}

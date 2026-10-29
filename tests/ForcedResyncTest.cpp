@@ -577,8 +577,9 @@ void bossSitOutRelay(unsigned mode,std::uint16_t port){
         check(r.wait([&]{return r.seen[2].hp.size()==hp2+1;})&&r.fencedBarrier()&&r.seen[1].hp.size()==hp1,"the boss's HP still reaches other seats but not the fenced target");
         check(r.sendAck(1)&&r.result(ResyncResultReason::Converged),"the host-owned boss's HP is no material change: the sit-out converges");
         const auto held=r.seen[1].holds.size();
-        // EnemyHp is unreliable on both hops and ENet may drop any one copy, so it is resent with a fresh sequence, as
-        // the host's periodic HP is, until seat 2 has one. The hold goes after it: sent first, it can discard the HP.
+        // EnemyHp is unreliable on both hops; ENet's adaptive throttle can discard a copy even on loopback.
+        // Resend with fresh sequences like periodic host HP, then test the hold independently. HP uses channel 1
+        // and reliable EventHold channel 0, so this pair has no same-channel reliable-sequence dependency.
         bool hpReached=false;
         for(std::uint64_t seq=12;seq<17&&!hpReached;++seq){r.clients[0]->sendEnemyHp({7,{{1,800,1000}},seq});hpReached=r.wait([&]{return r.seen[2].hp.size()>=hp2+2;});}
         r.clients[0]->sendEventHold({7,true,157});
