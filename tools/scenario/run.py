@@ -2411,8 +2411,10 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     `timeoutMs` (rpc_deadline), and the deadline is checked again before a Kill. It only defers a Kill: natural
     downs count as before, and `timeoutMs` still bounds the step. `killWhenMs` (VUH-2912, lead #82: B2's clearance
     on this one mechanism) bounds each due Kill's wait: its reads are capped to the end of that wait as well, and past
-    it the Kill goes anyway. A Kill that waited on killWhen carries `when` {result: true|timeout, waitedS, and
-    `nearest` when the expression measured enemy_clear}. A down, revive or full-party down that arrives during a
+    it the Kill goes anyway. With `killWhenTimeout: "retry"` (VUH-2912 lead #119, run vuh2912-hp-14: the Kill went
+    with Axel near and both seats fell) no Kill goes past that wait: the step records a `whenTimeout` event and the
+    gate starts a new wait, until it holds or `timeoutMs` ends the step as a harness failure. A Kill that waited on
+    killWhen carries `when` {result: true|timeout, waitedS, and `nearest` when the expression measured enemy_clear}. A down, revive or full-party down that arrives during a
     killWhen read issues no Kill; the step recounts first. `fullParty: "continue"` (VUH-2931, the Sora host's
     natural full-party down in runs vuh2931-sora-01/02) makes that one path a pass instead of a harness failure, only
     with proof that both seats were down before the request (Ione 313a3a5d). Each poll reads the friend's log, then
@@ -2461,7 +2463,9 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     clip = _clip or film
     now, sleep = _now or time.monotonic, _sleep or ctx.sleep
     when_expr, when_ms = step.get("killWhen"), step.get("killWhenMs")
+    retry_gate = step.get("killWhenTimeout", "kill") == "retry"
     waiting = None  # when the current due Kill began waiting on killWhen
+    gate_timeouts = 0  # killWhen waits that ended without the gate holding (retry mode)
 
     def evaluate_when() -> bool:
         bound = deadline if when_ms is None else min(waiting + when_ms / 1000, deadline)
@@ -2578,6 +2582,15 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
                 held = ready()
                 if tallies() != before:
                     due = False  # a down, revive or full-party down came during the read: recount first
+                elif not held and retry_gate and when_ms is not None and now() - waiting >= when_ms / 1000:
+                    # Retry mode: never a Kill without the gate; the next poll starts a new wait.
+                    gate_timeouts += 1
+                    timed_out = {"seat": pending[0], "whenTimeout": round(now() - waiting, 1), "atS": round(now() - start, 1)}
+                    nearest = getattr(ctx, "last_clearance", None)
+                    if nearest is not None:
+                        timed_out["nearest"] = round(min(nearest, 1e6), 1)
+                    events.append(timed_out)
+                    waiting, due = None, False
                 elif held or (when_ms is not None and now() - waiting >= when_ms / 1000):
                     when = {"result": "true" if held else "timeout", "waitedS": round(now() - waiting, 1)}
                     nearest = getattr(ctx, "last_clearance", None)
@@ -2595,8 +2608,9 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
                 elif result != "WrongState":  # WrongState: already down, its natural downing is counted
                     raise StepFailed(f"owner_downs: Kill on seat {o} returned {result} (events {events})")
             if any(v is None for v in owed.values()) and now() >= deadline:
-                raise StepFailed(f"owner_downs: HARNESS FAILURE, no revive within {step.get('timeoutMs', 240000)} ms "
-                                 f"(events {events}); not a form result")
+                gate = f", killWhen never held after {gate_timeouts} timed-out waits" if gate_timeouts else ""
+                raise StepFailed(f"owner_downs: HARNESS FAILURE, no revive within {step.get('timeoutMs', 240000)} ms"
+                                 f"{gate} (events {events}); not a form result")
             sleep(0.25)
     except StepFailed as error:
         failure = error
@@ -2606,7 +2620,8 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
         for g in guards:
             g.thread.join(timeout=10)
         ctx.saved[name] = {"owners": {str(o): v for o, v in owed.items()}, "events": events,
-                           "guards": [g.events for g in guards], "killDeferred": deferred, "fullParty": full_party}
+                           "guards": [g.events for g in guards], "killDeferred": deferred, "fullParty": full_party,
+                           **({"killWhenTimeouts": gate_timeouts} if retry_gate else {})}
     if failure:
         # VUH-2912 (vuh2912-hp-05): a failed step never reaches the report's saved values, so its guards' events
         # (each downing episode: result, holds, last distance, asides) ride on the error and its report entry.
@@ -6981,6 +6996,8 @@ def validate_scenario(scenario: dict) -> None:
         if kind == "owner_downs" and "killWhenMs" in step and \
                 ("killWhen" not in step or type(step["killWhenMs"]) is not int or step["killWhenMs"] <= 0):
             raise ValueError(f"{prefix}: owner_downs killWhenMs must be a positive integer, with killWhen")
+        if kind == "owner_downs" and "killWhenTimeout" in step and                 (step["killWhenTimeout"] not in ("kill", "retry") or "killWhenMs" not in step):
+            raise ValueError(f'{prefix}: owner_downs killWhenTimeout must be "kill" or "retry", with killWhenMs')
         if kind == "owner_downs" and step.get("fullParty", "continue") != "continue":
             raise ValueError(f'{prefix}: owner_downs fullParty may only be "continue"')
         if kind == "owner_downs" and "fullPartyMs" in step and \

@@ -212,7 +212,8 @@
     "radius": 450
    },
    "killWhen": "enemy_clear(500)",
-   "killWhenMs": 20000
+   "killWhenMs": 20000,
+   "killWhenTimeout": "retry"
   },
   {
    "do": "stats_mark"

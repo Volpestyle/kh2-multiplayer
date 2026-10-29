@@ -586,8 +586,10 @@ def hp_steps(rounds=("friend_target", "host_target"), interleaved=True, downs=Tr
         # at most 20 s and labelled, until every living enemy is 500 units from both seats' canonical players: just
         # over the 90th percentile (479) of how far Axel travelled in the second before each of his 96 hits on a seat
         # in hp-05, hp-07 and hp-08 (max 591). Lead #82: through killWhen, owner_downs' one mechanism (VUH-2931).
+        # vuh2912-hp-14: the 20 s wait ran out with Axel near, the Kill went anyway and both seats fell. Lead #119: a
+        # timed-out wait forces nothing; the gate waits again, bounded by timeoutMs.
         {"do": "owner_downs", "owners": [1, 0], "as": "owner_downs", "clipSeconds": 12, "timeoutMs": 240000,
-         "aside": AXEL_ARENA, "killWhen": "enemy_clear(500)", "killWhenMs": 20000},
+         "aside": AXEL_ARENA, "killWhen": "enemy_clear(500)", "killWhenMs": 20000, "killWhenTimeout": "retry"},
         *([] if downs_only else [{"do": "clip_wait"}]),
         STATS_MARK,
         marks("m_downs1"),
