@@ -508,6 +508,61 @@ class OwnerDownsTest(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "killWhenMs must be a positive integer"):
                 RUN.validate_scenario({"steps": [boot, bad]})
 
+    # Lead #119 (vuh2912-hp-14: seat 0's wait ran out with Axel near, the Kill went anyway and both seats fell).
+    def test_retry_mode_never_kills_past_a_timed_out_wait(self):
+        rig = Rig()
+        clear = lambda text: rig.t >= 30.0  # noqa: E731 (due at 1.5; the first 20 s wait ends at 21.5)
+        result, _, error = rig.run(evaluate=clear, killWhen="clear", killWhenMs=20000, killWhenTimeout="retry")
+        self.assertIsNone(error)
+        self.assertEqual(rig.kills[0], (30.0, 1))
+        self.assertEqual([e for e in result["events"] if "whenTimeout" in e],
+                         [{"seat": 1, "whenTimeout": 20.0, "atS": 21.5}])
+        kills = [e for e in result["events"] if "kill" in e]
+        self.assertEqual(kills[0]["when"], {"result": "true", "waitedS": 8.2})  # its new wait began at 21.75 (8.25, rounded)
+        self.assertTrue(all(e["when"]["result"] == "true" for e in kills))
+        self.assertEqual(result["killWhenTimeouts"], 1)
+
+    def test_retry_mode_whose_gate_never_holds_fails_named_without_a_kill(self):
+        rig = Rig()
+        _, ctx, error = rig.run(evaluate=lambda text: False, killWhen="clear", killWhenMs=20000,
+                                killWhenTimeout="retry", timeoutMs=60000)
+        self.assertEqual(rig.kills, [])
+        self.assertIn("no revive within 60000 ms, killWhen never held after 2 timed-out waits", str(error))
+        self.assertEqual(ctx.saved["owner_downs"]["killWhenTimeouts"], 2)
+        self.assertLessEqual(rig.t, 60.5)
+
+    def test_retry_mode_still_counts_a_natural_down(self):
+        rig = Rig(script={10.0: lambda r: r.down(1)})
+        clear = lambda text: rig.t >= 50.0  # noqa: E731
+        result, _, error = rig.run(evaluate=clear, killWhen="clear", killWhenMs=20000, killWhenTimeout="retry")
+        self.assertIsNone(error)
+        self.assertEqual(result["owners"]["1"], {"kind": "natural", "seat": 1})
+        self.assertEqual([seat for _, seat in rig.kills], [0])
+        self.assertEqual(rig.kills[0][0], 50.0)
+
+    def test_the_default_still_kills_at_the_timeout(self):
+        rig = Rig()
+        result, _, error = rig.run(evaluate=lambda text: False, killWhen="clear", killWhenMs=20000,
+                                   killWhenTimeout="kill")
+        self.assertIsNone(error)
+        self.assertEqual(rig.kills[0], (21.5, 1))
+        self.assertNotIn("killWhenTimeouts", result)
+
+    def test_the_validator_checks_kill_when_timeout(self):
+        boot, downs = {"do": "boot"}, {"do": "owner_downs", "owners": [1, 0], "killWhen": "True"}
+        RUN.validate_scenario({"steps": [boot, {**downs, "killWhenMs": 20000, "killWhenTimeout": "retry"}]})
+        for bad in ({**downs, "killWhenTimeout": "retry"}, {**downs, "killWhenMs": 20000, "killWhenTimeout": "wait"}):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "killWhenTimeout must be"):
+                RUN.validate_scenario({"steps": [boot, bad]})
+
+    def test_the_axel_downs_fixtures_retry_their_gate(self):
+        for name in ("net_prologue_mansion_axel_hp", "net_prologue_mansion_axel_hp_b2",
+                     "net_prologue_mansion_axel_hp_b2_assisted"):
+            steps = RUN.json.loads((ROOT / f"tools/scenario/scenarios/{name}.json").read_text(encoding="utf-8"))["steps"]
+            downs = [s for s in steps if s["do"] == "owner_downs"]
+            self.assertEqual([(s["killWhen"], s["killWhenMs"], s["killWhenTimeout"]) for s in downs],
+                             [("enemy_clear(500)", 20000, "retry")], name)
+
     def test_the_validator_checks_full_party_and_skip_if(self):
         boot = {"do": "boot"}
         downs = {"do": "owner_downs", "owners": [1, 0]}
