@@ -45,7 +45,8 @@ def index(fragment, key="as"):
 
 def evaluate(text, logs=None, saved=None, actors=None, positions=None, peeks=None):
     logs = {i: "\n".join(lines) for i, lines in (logs or {}).items()}
-    return eval(text, {"__builtins__": {}, "len": len, "int": int, "max": max, "sum": sum, "all": all, "saved": saved or {},
+    return eval(text, {"__builtins__": {}, "len": len, "int": int, "max": max, "sum": sum, "all": all, "range": range,
+                       "saved": saved or {},
                        "log_matches": lambda p, i: [m.groupdict() for m in re.finditer(p, logs.get(i, ""))],
                        "log_count": lambda t, i: sum(t in line for line in logs.get(i, "").splitlines()),
                        "actors": lambda i: (actors or {}).get(i, []), "pos": lambda name, i: (positions or {})[(name, i)],
@@ -205,19 +206,82 @@ class AxelHpFixtureTest(unittest.TestCase):
             until = step(name)["until"]
             me = {"address": HOST, "name": "P_EX110_BTLF", "hp": 16, "position": {"x": 0, "z": 0}}
             boss = {"address": AXEL, "name": "B_EX110", "hp": 440, "position": {"x": 0, "z": 0}}
-            logs = {0: [target(fighter), CLAIM.format("host") + " beforeHp=449 afterHp=445 nativeOk=1"]}
-            saved = {f"{name}_base": {"chosen": 0, "claims": 0, "bossHp": 449, "hp": 22, "downs": 0}}
+            logs = {0: [target(fighter), CLAIM.format("host") + " beforeHp=449 afterHp=445 nativeOk=1"], 1: []}
+            logs[fighter].append(AXEL_HIT)  # each seat logs its own Axel's hits on its own canonical player
+            saved = {f"{name}_base": {"chosen": 0, "claims": 0, "bossHp": 449, "hp": 22, "downs": 0, "axelHits": 0,
+                                      "hpReads": 0}}
             actors = {fighter: [me], 0: [me, boss] if fighter == 0 else [boss]}
             peeks = {0: HOST, 1: HOST}
             self.assertTrue(evaluate(until, logs, saved, actors, peeks=peeks), name)
             # Logged on change only: a choice held from the walk, before the baseline, is still the selection.
             saved[f"{name}_base"]["chosen"] = 1
             self.assertTrue(evaluate(until, logs, saved, actors, peeks=peeks), name)
-            self.assertFalse(evaluate(until, {0: [target(fighter), target(1 - fighter), *logs[0][1:]]}, saved, actors,
-                                      peeks=peeks), name)  # then Axel turned to the other seat
+            turned = {**logs, 0: [target(fighter), target(1 - fighter), *logs[0][1:]]}
+            self.assertFalse(evaluate(until, turned, saved, actors, peeks=peeks), name)  # then Axel turned away
             logs[0][0] = target(1 - fighter)  # Axel chose the other seat
             self.assertFalse(evaluate(until, logs, saved, actors, peeks=peeks), name)
-            self.assertFalse(evaluate(until, {0: logs[0][1:]}, saved, actors, peeks=peeks), name)  # no choice logged
+            self.assertFalse(evaluate(until, {**logs, 0: logs[0][1:]}, saved, actors, peeks=peeks), name)  # no choice
+
+    def test_each_round_milestone_needs_axels_own_hit_on_the_fighter_not_an_hp_drop(self):
+        """vuh2912-hp-11: the host lost 1 HP with no hit on it, and an HP-drop milestone closed the window before Axel
+        hit the host. Only a native Axel `[hit]` that took HP from the fighter's canonical player, logged by the
+        fighter after the baseline, counts."""
+        clone_hit = AXEL_HIT.replace("@7FF600001000", "@7FF600003000")
+        down = "[downed] gate intercept mode=4 logical=1 actor=7FF600001000 hp=1"
+        for name, fighter, reviver in ROUNDS:
+            until = step(name)["until"]
+            me = {"address": HOST, "name": "P_EX110_BTLF", "hp": 16, "position": {"x": 0, "z": 0}}
+            boss = {"address": AXEL, "name": "B_EX110", "hp": 440, "position": {"x": 0, "z": 0}}
+            actors = {fighter: [me], 0: [me, boss] if fighter == 0 else [boss]}
+            peeks = {0: HOST, 1: HOST}
+            base = {"chosen": 0, "claims": 0, "bossHp": 449, "hp": 22, "downs": 0, "axelHits": 0, "hpReads": 0}
+            host_log = [target(fighter), CLAIM.format("host") + " beforeHp=449 afterHp=445 nativeOk=1"]
+
+            def logs_with(fighter_lines, other_lines=()):
+                logs = {0: list(host_log), 1: []}
+                logs[fighter] += list(fighter_lines)
+                logs[1 - fighter] += list(other_lines)
+                return logs
+
+            def reached(fighter_lines, axel_hits=0, other_lines=()):
+                return evaluate(until, logs_with(fighter_lines, other_lines),
+                                {f"{name}_base": {**base, "axelHits": axel_hits}}, actors, peeks=peeks)
+
+            self.assertTrue(reached([AXEL_HIT]), name)
+            self.assertFalse(reached([]), name)  # HP 22 -> 16 with no hit at all (the hp-11 fall)
+            self.assertFalse(reached([down]), name)  # a down with no Axel hit logged
+            self.assertFalse(reached([AXEL_HIT.replace("damage=6", "damage=0")]), name)  # no HP taken
+            self.assertFalse(reached([DUSK_HIT]), name)  # another attacker
+            self.assertFalse(reached([clone_hit]), name)  # Axel's hit on the other seat's clone
+            self.assertFalse(reached([], other_lines=[AXEL_HIT]), name)  # logged only by the other seat
+            self.assertFalse(reached([AXEL_HIT], axel_hits=1), name)  # already counted at the baseline
+            self.assertTrue(reached([AXEL_HIT, AXEL_HIT], axel_hits=1), name)
+            counted = evaluate(step(f"{name}_base")["expr"], logs_with([AXEL_HIT, clone_hit, DUSK_HIT]), {}, actors,
+                               peeks=peeks)
+            self.assertEqual((counted["axelHits"], counted["hpReads"]), (1, 0), name)
+
+    def test_each_round_notes_hp_falls_outside_every_hit_and_judges_none(self):
+        """lead #102: a fall in the fighter's canonical HP between two different hits' hook reads (hp-11: 7 -> 6 at
+        frames 10932..10951) is saved as a note after the round's end mark, with the frames around it. A fall inside
+        one hit's own reads, another actor's fall and reads before the baseline are not noted; nothing asserts on it."""
+        def reads(seq, frame, *hps, actor="7FF600001000"):
+            lines = [f"[hittrace] context schema=1 seq={seq} phase=0 readMask=127 available=1 frame={frame} generation=2"]
+            return lines + [f"[hittrace] actor schema=1 seq={seq} phase={p} subject=1 actor={actor} objentry=1 status=2 "
+                            f"objectId=803 readMask=511 type=0 team=1 hp={hp} maxHp=22 namePrefix=5F50"
+                            for p, hp in enumerate(hps)]
+        peeks = {0: HOST, 1: HOST}
+        for name, fighter, reviver in ROUNDS:
+            note = step(f"{name}_unattributed_hp")
+            self.assertLess(index(f"m_{name}1"), index(f"{name}_unattributed_hp"))
+            self.assertLess(index(f"{name}_unattributed_hp"), index(f"{name}: in 20 s Axel never chose", "message"))
+            self.assertFalse(any(f"{name}_unattributed_hp" in json.dumps(s) for s in STEPS if s is not note))
+            log = (reads(140, 10900, 9, 9) + reads(141, 10920, 7, 7) + reads(143, 10932, 7, 7) + reads(145, 10951, 6, 6)
+                   + reads(147, 11061, 6, 4) + reads(148, 11070, 3, 3, actor="7FF600003000") + reads(149, 11080, 4, 4)
+                   + reads(150, 11090, 9, 9))  # the clone's 3 read, then the fighter revived to 9: neither is noted
+            saved = {f"{name}_base": {"hpReads": 2}}  # the 9 -> 7 fall came before the baseline
+            self.assertEqual(evaluate(note["expr"], {fighter: log}, saved, peeks=peeks),
+                             [{"afterFrame": 10932, "beforeFrame": 10951, "before": 7, "after": 6}], name)
+            self.assertEqual(evaluate(note["expr"], {fighter: log[:9]}, saved, peeks=peeks), [], name)
 
     def test_each_round_is_filmed_for_its_whole_length(self):
         for name, fighter, reviver in ROUNDS:
@@ -341,7 +405,7 @@ class AxelHpSplitTest(unittest.TestCase):
                 self.assertFalse([s for s in between if s["do"] in ("wait_until", "clip_wait", "capture", "revive_guard")
                                   or "revive returned" in json.dumps(s)], key)
                 self.assertEqual([s["do"] for s in between],
-                                 ["assert"] * (round_ != "interleaved") + ["wait", "save", "hp_ledger", "assert", "assert",
+                                 ["save", "assert"] * (round_ != "interleaved") + ["wait", "save", "hp_ledger", "assert", "assert",
                                                                            "assert", "target_ledger", "assert"])
                 tail = steps[verdict + 1:]
                 self.assertTrue(tail and all(s["do"] in ("revive_guard", "clip_wait", "capture") for s in tail), key)

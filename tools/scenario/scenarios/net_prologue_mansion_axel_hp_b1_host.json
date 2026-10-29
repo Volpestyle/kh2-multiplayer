@@ -260,7 +260,7 @@
   {
    "do": "save",
    "as": "host_target_base",
-   "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=0 ', 0)), 'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0], 'hp': [a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'downs': log_count('[downed] gate intercept', 0)}"
+   "expr": "{'chosen': len(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=0 ', 0)), 'claims': len(log_matches(r'\\[enemysync\\] host hit claim [^\\n]*objectId=81 [^\\n]*nativeOk=1', 0)), 'bossHp': ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0], 'hp': [a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'downs': log_count('[downed] gate intercept', 0), 'axelHits': len([m for m in log_matches(r'\\[hit\\] frame (?P<f>\\d+) attacker=B_EX110 \\(handle [0-9A-F]+\\) atkp=\\d+ -> victim=P_EX110_BTLF@(?P<v>[0-9A-F]+) damage=(?P<d>\\d+) ', 0) if int(m['v'], 16) == int(peek('0x2A105D0','u64',0),16) and int(m['d']) > 0]), 'hpReads': len([(m['s'], m['p'], int(m['h'])) for m in log_matches(r'\\[hittrace\\] actor schema=1 seq=(?P<s>\\d+) phase=(?P<p>\\d) subject=\\d+ actor=(?P<a>[0-9A-F]+) [^\\n]*? hp=(?P<h>-?\\d+) maxHp=', 0) if int(m['a'], 16) == int(peek('0x2A105D0','u64',0),16)])}"
   },
   {
    "do": "save",
@@ -288,7 +288,7 @@
    "seconds": 20,
    "reach": 120,
    "as": "host_target",
-   "until": "(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '0' and ([a['hp'] for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0] < saved['host_target_base']['hp'] or log_count('[downed] gate intercept', 0) > saved['host_target_base']['downs']) and ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0] < saved['host_target_base']['bossHp']",
+   "until": "(log_matches(r'boss-target frame=\\d+ enemy=\\S+ objectId=81 target=(?P<t>-?\\d+) ', 0) or [{'t': None}])[-1]['t'] == '0' and len([m for m in log_matches(r'\\[hit\\] frame (?P<f>\\d+) attacker=B_EX110 \\(handle [0-9A-F]+\\) atkp=\\d+ -> victim=P_EX110_BTLF@(?P<v>[0-9A-F]+) damage=(?P<d>\\d+) ', 0) if int(m['v'], 16) == int(peek('0x2A105D0','u64',0),16) and int(m['d']) > 0]) > saved['host_target_base']['axelHits'] and ([a['hp'] for a in actors(0) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0] < saved['host_target_base']['bossHp']",
    "sample": {
     "expr": "{'axel': [(a['position']['x'], a['position']['z'], a.get('motionId')) for a in actors(0) if a['name'] == 'B_EX110'], 'host': [(a['position']['x'], a['position']['z']) for a in actors(0) if int(a['address'],16) == int(peek('0x2A105D0','u64',0),16)][0], 'clone': [(a['position']['x'], a['position']['z']) for a in actors(0) if a['name'] == 'P_EX110_BTLF' and int(a['address'],16) != int(peek('0x2A105D0','u64',0),16)][0]}",
     "everyMs": 500
@@ -317,6 +317,11 @@
    "do": "save",
    "as": "m_host_target1",
    "expr": "[log_count('', 0), log_count('', 1)]"
+  },
+  {
+   "do": "save",
+   "as": "host_target_unattributed_hp",
+   "expr": "(lambda r, f: [{'afterFrame': f.get(r[k - 1][0]), 'beforeFrame': f.get(r[k][0]), 'before': r[k - 1][2], 'after': r[k][2]} for k in range(1, len(r)) if r[k - 1][0] != r[k][0] and r[k][2] < r[k - 1][2]])([(m['s'], m['p'], int(m['h'])) for m in log_matches(r'\\[hittrace\\] actor schema=1 seq=(?P<s>\\d+) phase=(?P<p>\\d) subject=\\d+ actor=(?P<a>[0-9A-F]+) [^\\n]*? hp=(?P<h>-?\\d+) maxHp=', 0) if int(m['a'], 16) == int(peek('0x2A105D0','u64',0),16)][saved['host_target_base']['hpReads']:], {m['s']: int(m['f']) for m in log_matches(r'\\[hittrace\\] context schema=1 seq=(?P<s>\\d+) phase=0 [^\\n]*? frame=(?P<f>\\d+) ', 0)})"
   },
   {
    "do": "assert",

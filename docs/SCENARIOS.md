@@ -3538,8 +3538,14 @@ Kills take `require: false`, so a seat Axel already downed refuses with `WrongSt
   FAILURE (window). In the open window the walker only revives
   (`revive_guard`) while the fighter runs the
   `fight` bot, filmed on both seats for the round's full 20 s, with positions and Axel's motion sampled every
-  500 ms. The fight's `until` (Axel chose the fighter, the fighter was hit or downed, it landed damage) must be
-  reached, and the window closes right after the fight. A downed fighter is revived before the next round.
+  500 ms. The fight's `until` must be reached: Axel chose the fighter, the fighter landed damage, and Axel's own
+  native hit took HP from the fighter's canonical player. That hit is a `[hit] … attacker=B_EX110 … victim=P_EX110_BTLF@<canonical>
+  damage>0` line in the fighter's log, counted past the baseline. A lethal hit logs its `[hit]` before the downed intercept.
+  An HP drop alone doesn't count: in vuh2912-hp-11 the host lost 1 HP with no hit on it (frames 10932–10951), and the
+  old drop-keyed milestone closed the window 2.6 s in, before Axel had hit the host (VUH-2912 ae2aa1ca, lead #102).
+  The window closes right after the fight. Then `<round>_unattributed_hp` saves, as a note and never a verdict, each fall
+  in the fighter's canonical HP between the hook reads of two different hits since the baseline, with the frames around
+  it, for the Axel hazard inventory (`docs/AXEL_HAZARDS.md` on its branch). A downed fighter is revived before the next round.
 - **Revive asides** (VUH-2912, Ione 00c3ac51): this fixture's `revive_guard` and `owner_downs` steps carry
   `aside: {roomScope, center, radius}`, Axel II's sealed scope 02/14 btl137 and a 450-unit circle inside the
   positions reached in runs vuh2912-hp-02/03. While a native RC owns Triangle, a guard in reach steps sideways

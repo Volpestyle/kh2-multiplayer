@@ -331,6 +331,32 @@ def boss_hp(i):
     return f"([a['hp'] for a in actors({i}) if a['name'] == 'B_EX110' and a.get('hp', 0) > 0] or [-1])[0]"
 
 
+def axel_hits(i):
+    """Axel's native hits that took HP from seat i's own canonical player, from seat i's `[hit]` log (each seat logs
+    its own Axel's hits on it). vuh2912-hp-11: the host lost 1 HP with no hit on it, and a round milestone keyed on
+    any HP drop closed its window before Axel ever hit the host."""
+    return (f"[m for m in log_matches(r'\\[hit\\] frame (?P<f>\\d+) attacker=B_EX110 \\(handle [0-9A-F]+\\) atkp=\\d+ -> "
+            f"victim=P_EX110_BTLF@(?P<v>[0-9A-F]+) damage=(?P<d>\\d+) ', {i}) "
+            f"if int(m['v'], 16) == {canon(i)} and int(m['d']) > 0]")
+
+
+def hp_reads(i):
+    """Seat i's canonical player's HP at each hit-trace hook read, in log order, as (seq, phase, hp)."""
+    return (f"[(m['s'], m['p'], int(m['h'])) for m in log_matches(r'\\[hittrace\\] actor schema=1 seq=(?P<s>\\d+) "
+            f"phase=(?P<p>\\d) subject=\\d+ actor=(?P<a>[0-9A-F]+) [^\\n]*? hp=(?P<h>-?\\d+) maxHp=', {i}) "
+            f"if int(m['a'], 16) == {canon(i)}]")
+
+
+def unattributed_drops(i, start):
+    """A note, never a pass: each fall in seat i's canonical HP between two hook reads of different hits since read
+    `start`, i.e. outside every hit (a field hazard is one candidate), with the hook frames around it."""
+    frames = (f"{{m['s']: int(m['f']) for m in log_matches(r'\\[hittrace\\] context schema=1 seq=(?P<s>\\d+) phase=0 "
+              f"[^\\n]*? frame=(?P<f>\\d+) ', {i})}}")
+    return (f"(lambda r, f: [{{'afterFrame': f.get(r[k - 1][0]), 'beforeFrame': f.get(r[k][0]), 'before': r[k - 1][2], "
+            f"'after': r[k][2]}} for k in range(1, len(r)) if r[k - 1][0] != r[k][0] and r[k][2] < r[k - 1][2]])"
+            f"({hp_reads(i)}[{start}:], {frames})")
+
+
 def clone_xz(i):
     """Seat i's view of the other seat's dual-wield Roxas (its clone)."""
     return (f"[(a['position']['x'], a['position']['z']) for a in actors({i}) "
@@ -388,8 +414,8 @@ AXEL_ARENA = {"roomScope": AXEL, "center": [39, -27], "radius": 450}
 def target_round(name, fighter, reviver, last=False):
     """The fighter walks in to Axel, then the reviver walks away; with both seats standing and measured apart, the
     round's baseline and window start. Then the reviver only revives while the fighter fights, filmed on both seats
-    for the whole round. The round must reach its milestone (Axel's selection names the fighter, the fighter was hit
-    or downed, it landed damage) before its end mark; boss_target_ledger.py judges the choice, its order before the hit
+    for the whole round. The round must reach its milestone (Axel's selection names the fighter, Axel's own native
+    hit took HP from the fighter, it landed damage) before its end mark; boss_target_ledger.py judges the choice, its order before the hit
     and the hit's witnesses. A `last` round (its run's only judged window) ends at its milestone: its ledgers follow
     at once, and its guard and clips are collected after them, so a later party down is no failure (lead #56)."""
     base = f"saved['{name}_base']"
@@ -398,8 +424,9 @@ def target_round(name, fighter, reviver, last=False):
              f"({separation()})")
     near = f"(lambda s: s['{seat[fighter]}'] < {FIGHTER_NEAR})({separation()})"
     landed = f"{host_claims()} > {base}['claims']" if fighter == 1 else f"{boss_hp(0)} < {base}['bossHp']"
-    hit = (f"({canonical_hp(fighter)} < {base}['hp'] or "
-           f"log_count('[downed] gate intercept', {fighter}) > {base}['downs'])")
+    # A witnessed native Axel hit that took HP from the fighter's canonical player (a lethal one logs its `[hit]`
+    # before the downed intercept), never merely an HP drop: hp_ledger asks this round for exactly that hit.
+    hit = f"len({axel_hits(fighter)}) > {base}['axelHits']"
     observe = (f"{{'axel': [(a['position']['x'], a['position']['z'], a.get('motionId')) for a in actors(0) if a['name'] == 'B_EX110'], "
                f"'host': {canonical_xz(0)}, 'clone': {clone_xz(0)}}}")
     return [
@@ -433,7 +460,8 @@ def target_round(name, fighter, reviver, last=False):
          "timeoutMs": SETTLE_MS, "pollMs": 250},
         {"do": "save", "as": f"{name}_base", "expr": f"{{'chosen': {targets(fighter)}, 'claims': {host_claims()}, "
                                                     f"'bossHp': {boss_hp(0)}, 'hp': {canonical_hp(fighter)}, "
-                                                    f"'downs': log_count('[downed] gate intercept', {fighter})}}"},
+                                                    f"'downs': log_count('[downed] gate intercept', {fighter}), "
+                                                    f"'axelHits': len({axel_hits(fighter)}), 'hpReads': len({hp_reads(fighter)})}}"},
         {"do": "save", "as": f"{name}_quiet", "expr": quiet(f"'aligned': {aligned()}")},
         marks(f"m_{name}0"),
         # Ione fc9e195f (1): the window opens on the fighter's selection and settled HP, not merely after them. No
@@ -453,6 +481,9 @@ def target_round(name, fighter, reviver, last=False):
                    {"instance": 1, "seconds": 20, "fps": 30, "name": f"{name}_friend", "background": True}]},
         STATS_MARK,
         marks(f"m_{name}1"),
+        # vuh2912-hp-11 (lead #102): any fall in the fighter's HP outside every hit, as a note for the Axel hazard
+        # inventory (docs/AXEL_HAZARDS.md). Nothing is judged on it.
+        {"do": "save", "as": f"{name}_unattributed_hp", "expr": unattributed_drops(fighter, f"{base}['hpReads']")},
         {"do": "assert", "expr": f"saved['{name}']['until']['reached']",
          "message": f"{name}: in 20 s Axel never chose the {seat[fighter]} with the {seat[fighter]} hit and landing damage"},
         *([] if last else [
