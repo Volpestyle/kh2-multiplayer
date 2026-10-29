@@ -522,6 +522,38 @@ class OwnerDownsTest(unittest.TestCase):
         self.assertTrue(all(e["when"]["result"] == "true" for e in kills))
         self.assertEqual(result["killWhenTimeouts"], 1)
 
+    def test_retry_mode_rejects_a_late_true_and_samples_again(self):
+        """Ione 0d95a1a0: the wait starts at 1.5 s and its one read takes 20.25 s (non-RPC work) and returns true.
+        On dd70c41 that Killed at 21.75 s labelled true; the 20 s wait had expired, so it must defer."""
+        rig = Rig()
+        reads = []
+        def late_then_instant(text):
+            reads.append(rig.t)
+            if len(reads) == 1:
+                rig.t = round(rig.t + 20.25, 2)
+            return True
+        result, _, error = rig.run(evaluate=late_then_instant, killWhen="clear", killWhenMs=20000,
+                                   killWhenTimeout="retry")
+        self.assertIsNone(error)
+        self.assertEqual([e for e in result["events"] if "whenTimeout" in e],
+                         [{"seat": 1, "whenTimeout": 20.2, "atS": 21.8, "heldLate": True}])
+        self.assertEqual(rig.kills[0], (22.0, 1))  # a fresh sample in a new wait, not the late one
+        self.assertEqual(reads[:2], [1.5, 22.0])
+        self.assertEqual(next(e for e in result["events"] if "kill" in e)["when"], {"result": "true", "waitedS": 0.0})
+
+    def test_the_default_still_kills_on_a_late_true(self):
+        rig = Rig()
+        reads = []
+        def late_then_instant(text):
+            reads.append(rig.t)
+            if len(reads) == 1:
+                rig.t = round(rig.t + 20.25, 2)
+            return True
+        result, _, error = rig.run(evaluate=late_then_instant, killWhen="clear", killWhenMs=20000)
+        self.assertIsNone(error)
+        self.assertEqual(rig.kills[0], (21.75, 1))
+        self.assertEqual(next(e for e in result["events"] if "kill" in e)["when"], {"result": "true", "waitedS": 20.2})
+
     def test_retry_mode_whose_gate_never_holds_fails_named_without_a_kill(self):
         rig = Rig()
         _, ctx, error = rig.run(evaluate=lambda text: False, killWhen="clear", killWhenMs=20000,
