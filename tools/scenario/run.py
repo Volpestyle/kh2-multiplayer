@@ -2412,8 +2412,8 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
     downs count as before, and `timeoutMs` still bounds the step. `killWhenMs` (VUH-2912, lead #82: B2's clearance
     on this one mechanism) bounds each due Kill's wait: its reads are capped to the end of that wait as well, and past
     it the Kill goes anyway. With `killWhenTimeout: "retry"` (VUH-2912 lead #119, run vuh2912-hp-14: the Kill went
-    with Axel near and both seats fell) no Kill goes past that wait: the step records a `whenTimeout` event and the
-    gate starts a new wait, until it holds or `timeoutMs` ends the step as a harness failure. A Kill that waited on
+    with Axel near and both seats fell) no Kill goes past that wait, even when a read that ends after it holds
+    (`heldLate`): the step records a `whenTimeout` event and the gate starts a new wait with a fresh sample, until it holds or `timeoutMs` ends the step as a harness failure. A Kill that waited on
     killWhen carries `when` {result: true|timeout, waitedS, and `nearest` when the expression measured enemy_clear}. A down, revive or full-party down that arrives during a
     killWhen read issues no Kill; the step recounts first. `fullParty: "continue"` (VUH-2931, the Sora host's
     natural full-party down in runs vuh2931-sora-01/02) makes that one path a pass instead of a harness failure, only
@@ -2582,10 +2582,12 @@ def step_owner_downs(ctx: Context, step: dict, *, _count=None, _kill=None, _guar
                 held = ready()
                 if tallies() != before:
                     due = False  # a down, revive or full-party down came during the read: recount first
-                elif not held and retry_gate and when_ms is not None and now() - waiting >= when_ms / 1000:
-                    # Retry mode: never a Kill without the gate; the next poll starts a new wait.
+                elif retry_gate and when_ms is not None and now() - waiting >= when_ms / 1000:
+                    # Retry mode: never a Kill past the wait's bound, even if this late read held (Ione 0d95a1a0);
+                    # the next poll starts a new wait with a fresh sample.
                     gate_timeouts += 1
-                    timed_out = {"seat": pending[0], "whenTimeout": round(now() - waiting, 1), "atS": round(now() - start, 1)}
+                    timed_out = {"seat": pending[0], "whenTimeout": round(now() - waiting, 1), "atS": round(now() - start, 1),
+                                 **({"heldLate": True} if held else {})}
                     nearest = getattr(ctx, "last_clearance", None)
                     if nearest is not None:
                         timed_out["nearest"] = round(min(nearest, 1e6), 1)
