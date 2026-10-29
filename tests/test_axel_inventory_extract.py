@@ -101,13 +101,44 @@ class ExtractTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 extract.bar_rows(data)
 
+    @staticmethod
+    def atkp(rows, trailer=b""):
+        """OpenKH 7a3b945c Atkp.cs rows: SubId u16, Id u16, then 44 further bytes (48 in all)."""
+        return struct.pack("<II", 6, len(rows)) + b"".join(
+            struct.pack("<HH", sub, attack) + bytes([attack & 0xFF]) * 44 for sub, attack in rows) + trailer
+
     def test_selected_atkp_rows(self):
-        content = struct.pack("<II", 6, 3) + b"".join(struct.pack("<HHI", i, sub, 0)
-                                                         for i, sub in ((427, 0), (503, 2), (1, 0)))
+        data = bar(b"atkp", 0, self.atkp([(0, 427), (2, 503), (0, 1)]))
+        rows, tables = extract.atkp_rows(data, extract.bar_rows(data))
+        self.assertEqual([(r["id"], r["subId"], r["row"]) for r in rows], [(427, 0, 0), (503, 2, 1)])
+        self.assertEqual([(r["offset"], r["length"]) for r in rows], [(40, 48), (88, 48)])
+        self.assertEqual(tables[0]["trailer"]["length"], 0)
+
+    def test_atkp_selects_by_id_not_sub_id(self):
+        """SubId comes first (vuh2914-installed-01): a row whose SubId is 503 is not attack 503."""
+        data = bar(b"atkp", 0, self.atkp([(503, 7), (1, 503)]))
+        rows, _ = extract.atkp_rows(data, extract.bar_rows(data))
+        self.assertEqual([(r["id"], r["subId"], r["row"]) for r in rows], [(503, 1, 1)])
+
+    def test_installed_atkp_layout_with_its_277_byte_trailer(self):
+        """The installed shape: version 6, 2713 rows of 48 bytes, then 277 bytes the table doesn't describe.
+        main 6b4f7a5 refused it ("unexpected ATKP row layout")."""
+        rows = [(0, 1 + i % 400) for i in range(2713)]
+        rows[100], rows[2712] = (3, 427), (0, 503)
+        trailer = bytes(range(1, 251)) + bytes(27)
+        content = self.atkp(rows, trailer)
+        self.assertEqual(len(content), 130509)
         data = bar(b"atkp", 0, content)
-        rows = extract.atkp_rows(data, extract.bar_rows(data))
-        self.assertEqual([(r["id"], r["subId"]) for r in rows], [(427, 0), (503, 2)])
-        self.assertEqual(rows[1]["offset"], 48)
+        selected, tables = extract.atkp_rows(data, extract.bar_rows(data))
+        self.assertEqual([(r["id"], r["subId"], r["row"]) for r in selected], [(427, 3, 100), (503, 0, 2712)])
+        self.assertEqual(tables, [{"entry": 0, "version": 6, "count": 2713, "rowBytes": 48,
+                                   "trailer": {"offset": 32 + 8 + 2713 * 48, "length": 277,
+                                               "sha256": hashlib.sha256(trailer).hexdigest()}}])
+
+    def test_atkp_rows_past_the_entry_still_refuse(self):
+        data = bar(b"atkp", 0, self.atkp([(0, 427)])[:-1])
+        with self.assertRaisesRegex(ValueError, "unexpected ATKP row layout"):
+            extract.atkp_rows(data, extract.bar_rows(data))
 
     def test_native_pe_rva_mapping(self):
         rows = extract.pe_traps(pe(), [[1, 155]])

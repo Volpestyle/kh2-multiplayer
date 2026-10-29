@@ -120,27 +120,36 @@ def bar_rows(data):
     return rows
 
 
+# OpenKH 7a3b945c OpenKh.Kh2/Battle/Atkp.cs (BaseTable<Atkp>): an 8-byte header (version, count), then
+# 48-byte rows whose first fields are SubId (u16) and then Id (u16). The installed 00battle.bin atkp entry
+# (vuh2914-installed-01) has 2713 rows followed by 277 bytes the table does not describe.
+ATKP_HEADER, ATKP_ROW = 8, 48
+
+
 def atkp_rows(data, bar):
-    """Capture row identities/ranges only; no speculative field/ABI interpretation."""
-    result = []
+    """Capture row identities/ranges only; no speculative field/ABI interpretation. Bytes after the
+    count's rows are kept as a trailer (offset, length, hash), never parsed. Returns (rows, tables)."""
+    result, tables = [], []
     for entry in bar:
         if entry["name"] != "atkp":
             continue
         content = span(data, entry["offset"], entry["length"])
         count = struct.unpack_from("<I", span(content, 4, 4))[0]
-        if not count or (len(content) - 8) % count:
+        end = ATKP_HEADER + count * ATKP_ROW
+        if not count or end > len(content):
             raise ValueError("unexpected ATKP row layout")
-        stride = (len(content) - 8) // count
-        if stride < 4:
-            raise ValueError("short ATKP row")
+        trailer = content[end:]
+        tables.append({"entry": entry["entry"], "version": struct.unpack_from("<I", content)[0], "count": count,
+                       "rowBytes": ATKP_ROW, "trailer": {"offset": entry["offset"] + end, "length": len(trailer),
+                                                          "sha256": sha(trailer)}})
         for i in range(count):
-            row = span(content, 8 + i*stride, stride)
-            attack, sub = struct.unpack_from("<HH", row)
+            row = span(content, ATKP_HEADER + i*ATKP_ROW, ATKP_ROW)
+            sub, attack = struct.unpack_from("<HH", row)
             if attack in ATTACK_IDS:
                 result.append({"id": attack, "subId": sub, "row": i,
-                               "offset": entry["offset"] + 8 + i*stride,
-                               "length": stride, "sha256": sha(row)})
-    return result
+                               "offset": entry["offset"] + ATKP_HEADER + i*ATKP_ROW,
+                               "length": ATKP_ROW, "sha256": sha(row)})
+    return result, tables
 
 
 def pe_traps(data, traps):
@@ -256,7 +265,7 @@ def capture(install, out, key_source, plan):
                      "constraint": "partial prior hash" if expected else "new full hash, no prior pin",
                      **metadata}
             if name == "00battle.bin":
-                asset["selectedAtkpRows"] = atkp_rows(data, bar)
+                asset["selectedAtkpRows"], asset["atkpTables"] = atkp_rows(data, bar)
             result["assets"].append(asset)
             if bar:
                 result["openkhCommands"].append(["OpenKh.Command.Bar.exe", "unpack", str(target),
