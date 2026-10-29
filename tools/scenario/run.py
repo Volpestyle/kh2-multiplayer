@@ -277,6 +277,8 @@ class Context:
         self.relay_port = "7782"
         self.player_env: dict[str, str] = {}  # scenario "playerDefaults": the package's KH2COOP_ policy
         self.test_only: set[str] = set()  # scenario "testOnly": test-only steps it opts into (VUH-2763)
+        self.hp_assist = None  # the running HpAssist, if any
+        self.assisted: dict | None = None  # latched once hp_assist starts; labels report and verdicts
         self._stop = threading.Event()
         self._protector = threading.Thread(target=self._protect_loop, daemon=True)
         self._protector.start()
@@ -474,6 +476,11 @@ class Context:
                 pass
 
     def close(self) -> None:
+        if getattr(self, "hp_assist", None) is not None:  # a step failed while it was on: retire it before teardown
+            try:
+                stop_hp_assist(self, "close")
+            except StepFailed as e:
+                self.assisted["closeError"] = str(e)
         self._stop.set()
         # A protection poll can already be inside subprocess.run. Join it before
         # the runner exits: run() reaps its bounded child, including on timeout.
@@ -1030,6 +1037,7 @@ def step_coop_verdict(ctx: Context, step: dict) -> dict:
                                    text(ctx.run_dir / "relay.log"), ctx.run_dir / "desync-reports")
     if wait:
         result["arrivalWait"] = wait
+    label_assisted(ctx, result)
     name = step.get("as", "coop_verdict")
     path = ctx.run_dir / f"{name}.json"
     path.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -1054,7 +1062,7 @@ def step_hp_ledger(ctx: Context, step: dict) -> dict:
     text = lambda i: (LOGS / f"kh2coop_inject_{ctx.inst(i).pid}.log").read_text(encoding="utf-8", errors="replace")
     marks = {"marks": {name: ctx.saved[name] for name in step["marks"]}, "phases": step.get("phases", []),
              "window": step.get("window", [step["marks"][0], step["marks"][-1]]), "program": step.get("program", 87)}
-    result = _boss_hp_ledger.ledger(text(host), text(friend), int(step["objectId"]), marks)
+    result = label_assisted(ctx, _boss_hp_ledger.ledger(text(host), text(friend), int(step["objectId"]), marks))
     name = step.get("as", "hp_ledger")
     path = ctx.run_dir / f"{name}.json"
     path.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -1077,7 +1085,7 @@ def step_target_ledger(ctx: Context, step: dict) -> dict:
              "rounds": step.get("rounds", []), "deliveryMs": step.get("deliveryMs", 1000)}
     if step.get("downs"):
         marks["downs"] = step["downs"]
-    result = _boss_target_ledger.ledger(text(host), text(friend), int(step["objectId"]), marks)
+    result = label_assisted(ctx, _boss_target_ledger.ledger(text(host), text(friend), int(step["objectId"]), marks))
     name = step.get("as", "target_ledger")
     path = ctx.run_dir / f"{name}.json"
     path.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -3636,15 +3644,45 @@ def step_progress_hash_control(ctx: Context, step: dict) -> dict:
     return result
 
 
+ASSISTED_LABEL = ("ASSISTED: test-only player HP refill (hp_assist); hits, reactions and HP loss stay native; "
+                  "not a native milestone")
+
+
+def mark_assisted(ctx: Context, seats: list[int], floor: int) -> None:
+    """Latch this run as assisted the first time hp_assist starts (Ione r1 REQUIRED 3): ASSISTED.json goes into the
+    run dir at once, and the report, its Markdown and the hp/target ledgers and co-op verdict carry ctx.assisted
+    from then on, after off and after a failure too, whatever the scenario is named."""
+    if getattr(ctx, "assisted", None) is not None:
+        return
+    ctx.assisted = {"label": ASSISTED_LABEL, "nativeMilestone": False, "since": dt.datetime.now().isoformat(timespec="seconds"),
+                    "seats": list(seats), "floor": floor, "refills": 0}
+    run_dir = getattr(ctx, "run_dir", None)
+    if run_dir is not None:
+        (run_dir / "ASSISTED.json").write_text(json.dumps(ctx.assisted, indent=2), encoding="utf-8")
+        ctx.artifacts.append("ASSISTED.json")
+
+
+def label_assisted(ctx: Context, result: dict) -> dict:
+    """`result` with the run's assisted latch, if any, before a verdict or evidence file is written."""
+    if getattr(ctx, "assisted", None) is not None:
+        result["assisted"] = dict(ctx.assisted)
+    return result
+
+
 class HpAssist:
     """Test-only survival assist (VUH-2912 assisted reruns, lead #105; VUH-2963's development default). While on, it
     refills each listed seat's own canonical player's native HP to its max once that HP falls to `floor` or below.
     Hits, reactions and HP loss stay native and visible, so `[hit]` witnesses, downs and the boss HP ledgers still
-    measure: it is not invulnerability. It never writes to a downed seat (a down not yet revived) or at HP 0. It
-    writes only when the status block's HP/max HP agree with the entities row on both sides of that row read, like
-    test_enemy_hp, and checks the readback. A seat it can't read is skipped that round, and the first error is kept."""
+    measure: it is not invulnerability. It writes only when the status block's HP/max HP agree with the entities row
+    on both sides of that row read, like test_enemy_hp, and only if, rechecked after those reads and just before the
+    write, the seat is still standing (no down since its last revive), its canonical player is the same actor and
+    the assist hasn't been stopped. That narrows the window to one poke; it does not make the poke atomic. Each write
+    is journalled before it is made, then gets its readback. Every kh2ctl call in one seat's tick ends within TICK_S
+    (rpc_deadline), so a stop is bounded. A seat it can't read is skipped that round, and the first error is kept."""
 
     POLL_S = 0.25
+    TICK_S = 3.0
+    JOIN_S = TICK_S + 5.0
 
     def __init__(self, ctx: Context, seats: list[int], floor: int) -> None:
         self.ctx, self.seats, self.floor = ctx, list(seats), int(floor)
@@ -3656,18 +3694,28 @@ class HpAssist:
     def loop(self) -> None:
         while not self.stop.is_set():
             for index in self.seats:
+                if self.stop.is_set():
+                    break
                 try:
-                    self.tick(index)
+                    with rpc_deadline(time.monotonic() + self.TICK_S):
+                        self.tick(index)
                 except Exception as exc:  # noqa: BLE001 (a seat that can't be read is skipped this round)
                     self.error = self.error or f"seat {index}: {exc}"
             self.stop.wait(self.POLL_S)
 
+    def standing(self, helpers: dict, index: int) -> int | None:
+        """The seat's canonical player address while it stands, else None (downed: the downed policy and the
+        reviver own its HP)."""
+        if helpers["log_count"](DOWNED_DOWN, index) > helpers["log_count"](DOWNED_REVIVED, index):
+            return None
+        return int(str(helpers["peek"]("0x2A105D0", "u64", index)), 16)
+
     def tick(self, index: int) -> dict | None:
         helpers = self.ctx.namespace()
-        if helpers["log_count"](DOWNED_DOWN, index) > helpers["log_count"](DOWNED_REVIVED, index):
-            return None  # downed: the downed policy and the reviver own this seat's HP
+        canonical = self.standing(helpers, index)
+        if canonical is None:
+            return None
         pid = self.ctx.inst(index).pid
-        canonical = int(str(helpers["peek"]("0x2A105D0", "u64", index)), 16)
 
         def row():
             rows = [a for a in self.ctx.actors(index) if int(a["address"], 16) == canonical]
@@ -3690,36 +3738,74 @@ class HpAssist:
         if actor is None or int(actor["status"], 16) != status or not first == before == (actor["hp"], actor["maxHp"]) \
                 or not 0 < before[0] <= self.floor or before[0] >= before[1]:
             return None  # moving or changed: the next round looks again
-        kh2ctl("poke", "--addr", f"0x{status:X}", "--type", "i32", "--value", str(before[1]), pid=pid)
-        after = read()
+        # Commit-time recheck (Ione r1 REQUIRED 2): the seat can down, or canonical move to another actor, during the
+        # reads above. Anything changed or unreadable withholds the write.
+        if self.stop.is_set() or self.standing(helpers, index) != canonical:
+            return None
         event = {"seat": index, "t": round(time.monotonic(), 3), "actor": actor["address"], "before": list(before),
-                 "written": before[1], "readback": list(after)}
+                 "written": before[1], "poked": False, "readback": None}
+        self.events.append(event)  # journalled first: a failed poke or readback still leaves its record
+        kh2ctl("poke", "--addr", f"0x{status:X}", "--type", "i32", "--value", str(before[1]), pid=pid)
+        event["poked"] = True
+        try:
+            after = read()
+        except Exception as exc:
+            event["readbackError"] = str(exc)
+            raise
+        event["readback"] = list(after)
         if after != (before[1], before[1]):
             event["readbackMismatch"] = True
-        self.events.append(event)
         return event
+
+    def halt(self) -> bool:
+        """Stop the worker and wait for it: True once it has exited, so no later write can follow."""
+        self.stop.set()
+        self.thread.join(timeout=self.JOIN_S)
+        return not self.thread.is_alive()
+
+
+def stop_hp_assist(ctx: Context, reason: str, name: str = "hp_assist") -> dict:
+    """The one stop path, for off and Context.close (Ione r1 REQUIRED 1). It returns only after the worker has
+    exited; otherwise it keeps ctx.hp_assist (close tries again) and raises, so off never lets owner_downs or
+    teardown overlap a late refill. Its events and any error are saved under `name` and written to `<name>.json`
+    either way."""
+    assist = getattr(ctx, "hp_assist", None)
+    if assist is None:
+        return {"events": [], "error": "", "refills": 0, "stoppedBy": reason, "workerExited": True}
+    exited = assist.halt()
+    result = label_assisted(ctx, {"events": assist.events, "error": assist.error,
+                                  "refills": sum(1 for e in assist.events if e.get("poked")),
+                                  "stoppedBy": reason, "workerExited": exited})
+    ctx.saved[name] = result
+    run_dir = getattr(ctx, "run_dir", None)
+    if run_dir is not None:
+        (run_dir / f"{name}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+        if f"{name}.json" not in ctx.artifacts:
+            ctx.artifacts.append(f"{name}.json")
+    if not exited:
+        raise StepFailed(f"hp_assist: its worker was still running {assist.JOIN_S} s after stop ({reason}); "
+                         "not proceeding while it could still write")
+    ctx.hp_assist = None
+    if getattr(ctx, "assisted", None) is not None:
+        ctx.assisted["refills"] += result["refills"]
+    return result
 
 
 def step_hp_assist(ctx: Context, step: dict) -> dict:
     """Start (`on`, default) or stop the test-only HpAssist. Refused unless the scenario declares
-    "testOnly": ["player_hp_refill"]. Stopping saves its events (and any read error) under `as`."""
+    "testOnly": ["player_hp_refill"]. Starting latches the run as assisted. Stopping returns only once the worker
+    has exited, and saves its events (and any read error) under `as`."""
     if "player_hp_refill" not in ctx.test_only:
         raise StepFailed('hp_assist needs the scenario to declare "testOnly": ["player_hp_refill"]')
-    assist = getattr(ctx, "hp_assist", None)
     if step.get("on", True):
-        if assist is not None:
+        if getattr(ctx, "hp_assist", None) is not None:
             raise StepFailed("hp_assist is already on")
-        ctx.hp_assist = HpAssist(ctx, step.get("seats", [0, 1]), step.get("floor", 12))
-        ctx.hp_assist.thread.start()
-        return {"started": True, "seats": ctx.hp_assist.seats, "floor": ctx.hp_assist.floor}
-    if assist is None:
-        return {"events": [], "error": ""}
-    assist.stop.set()
-    assist.thread.join(timeout=10)
-    ctx.hp_assist = None
-    result = {"events": assist.events, "error": assist.error, "refills": len(assist.events)}
-    ctx.saved[step.get("as", "hp_assist")] = result
-    return result
+        assist = HpAssist(ctx, step.get("seats", [0, 1]), step.get("floor", 12))
+        mark_assisted(ctx, assist.seats, assist.floor)
+        ctx.hp_assist = assist
+        assist.thread.start()
+        return {"started": True, "seats": assist.seats, "floor": assist.floor}
+    return stop_hp_assist(ctx, "off", step.get("as", "hp_assist"))
 
 
 ENEMY_HP_AGREE_ATTEMPTS, ENEMY_HP_AGREE_PAUSE_S = 20, 0.1  # test_enemy_hp's status/row agreement, about 2 s
@@ -6668,6 +6754,8 @@ def run_scenario(path: Path, attempt: int) -> dict:
             ctx.artifacts.append(summary["path"])
         report["seconds"] = round(time.monotonic() - t0, 1)
         report["instances"] = [inst.pid for inst in ctx.instances]
+        if getattr(ctx, "assisted", None) is not None:  # isolated test contexts skip __init__
+            report["assisted"] = ctx.assisted
         if ctx.protect or ctx.protected_actors:
             label = "stand-in seat protected" if ctx.after_pilot_covered else "stand-in friend protected"
             report["standInProtected"] = {"label": label, "instances": sorted(ctx.protect),
@@ -6687,8 +6775,13 @@ def run_scenario(path: Path, attempt: int) -> dict:
 
 
 def render_md(report: dict) -> str:
-    lines = [f"# {report['scenario']} (attempt {report['attempt']}): {report['status'].upper()}", "",
+    assisted = " (ASSISTED, not a native milestone)" if report.get("assisted") else ""
+    lines = [f"# {report['scenario']} (attempt {report['attempt']}): {report['status'].upper()}{assisted}", "",
              f"Started {report['started']}, {report.get('seconds', '?')} s, instances {report.get('instances')}.", ""]
+    if report.get("assisted"):
+        lines += [f"**{report['assisted']['label']}.** Seats {report['assisted']['seats']}, floor "
+                  f"{report['assisted']['floor']} HP, {report['assisted']['refills']} refills "
+                  "([ASSISTED.json](ASSISTED.json)).", ""]
     if report.get("thornFloor"):
         lines += [f"Thorn floor check: **{report['thornFloor']['status'].upper()}** "
                   "([sampled canonical seat heights](thorn_floor.json)).", ""]
@@ -6924,8 +7017,8 @@ def main() -> int:
             for path in args.scenarios:
                 r = run_scenario(path.resolve(), attempt)
                 results.append(r)
-                print(f"[{r['status'].upper():5}] {r['scenario']} #{attempt} ({r.get('seconds')} s) {r.get('error', '')}",
-                      flush=True)
+                print(f"[{r['status'].upper():5}] {r['scenario']} #{attempt}{' ASSISTED' if r.get('assisted') else ''} "
+                      f"({r.get('seconds')} s) {r.get('error', '')}", flush=True)
         saves_after = hash_saves()
         changed = sorted(k for k in set(saves_before) | set(saves_after)
                          if saves_before.get(k) != saves_after.get(k))
@@ -6939,6 +7032,7 @@ def main() -> int:
             "saveFilesChanged": changed,
             "saveViolation": save_violation,
             "reports": [r["dir"] for r in results],
+            "assisted": [f"{r['scenario']}#{r['attempt']}" for r in results if r.get("assisted")],
         }
         RUNS.mkdir(parents=True, exist_ok=True)
         (RUNS / "last_suite.json").write_text(json.dumps(summary, indent=2))

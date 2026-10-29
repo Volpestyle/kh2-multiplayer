@@ -4,6 +4,8 @@
 """
 import importlib.util
 import json
+import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -127,6 +129,163 @@ class HpAssistTest(unittest.TestCase):
             with self.subTest(bad), self.assertRaisesRegex(ValueError, "hp_assist needs"):
                 RUN.validate_scenario({"testOnly": ["player_hp_refill"],
                                        "steps": [steps[0], {"do": "hp_assist", **bad}]})
+
+
+class LateGame(FakeGame):
+    """FakeGame whose n-th status read (1-based) first runs `hooks[n]`, and whose status reads can block on `gate`
+    (a worker stuck in an RPC) after signalling `entered`."""
+
+    def __init__(self, hooks=None, gate=None, **kw):
+        super().__init__(**kw)
+        self.hooks, self.gate, self.status_reads = dict(hooks or {}), gate, 0
+        self.entered = threading.Event()
+
+    def __call__(self, *args, pid=None, **kw):
+        if args[0] == "peek" and f"0x{STATUS - BASE:X}:i32" in args[2]:
+            self.status_reads += 1
+            self.hooks.get(self.status_reads, lambda: None)()
+            if self.gate is not None:
+                self.entered.set()
+                self.gate.wait()
+        return super().__call__(*args, pid=pid, **kw)
+
+
+def live_context(game, counts, canonical):
+    """context() whose down counts and canonical pointer are read live, so a test can change them mid-tick."""
+    ctx = context(game)
+    namespace = {"log_count": lambda text, index=0: counts.get(text, 0), "peek": lambda rva, kind="u32", index=0: canonical[0]}
+    ctx.namespace = lambda: namespace
+    return ctx
+
+
+class HpAssistRound2Test(unittest.TestCase):
+    """Ione r1 CHANGES (VUH-2912 04a25cff): quiescent stop, commit-time recheck, latched label, journalled write."""
+
+    def setUp(self):
+        self.original, self.join = RUN.kh2ctl, RUN.HpAssist.JOIN_S
+
+    def tearDown(self):
+        RUN.kh2ctl, RUN.HpAssist.JOIN_S = self.original, self.join
+
+    def test_a_seat_that_downs_during_the_reads_is_not_refilled(self):
+        counts = {RUN.DOWNED_DOWN: 0, RUN.DOWNED_REVIVED: 0}
+        game = LateGame(hp=1, hooks={2: lambda: counts.update({RUN.DOWNED_DOWN: 1})})  # downed, held at HP 1
+        RUN.kh2ctl = game
+        self.assertIsNone(RUN.HpAssist(live_context(game, counts, [CANON]), [0], 12).tick(0))
+        self.assertEqual(game.pokes, [])
+
+    def test_a_canonical_change_during_the_reads_withholds_the_write(self):
+        canonical = [CANON]
+        game = LateGame(hp=5, hooks={2: lambda: canonical.__setitem__(0, "0x7FF7014D3300")})  # old actor still listed
+        RUN.kh2ctl = game
+        self.assertIsNone(RUN.HpAssist(live_context(game, {}, canonical), [0], 12).tick(0))
+        self.assertEqual(game.pokes, [])
+
+    def test_off_waits_for_a_worker_inside_an_rpc_and_no_write_follows_it(self):
+        gate = threading.Event()
+        game = LateGame(hp=6, gate=gate)
+        RUN.kh2ctl = game
+        ctx = context(game)
+        RUN.step_hp_assist(ctx, {"do": "hp_assist", "seats": [0], "floor": 12})
+        self.assertTrue(game.entered.wait(2))  # the worker is now blocked in its first status read
+        done = []
+        off = threading.Thread(target=lambda: done.append(RUN.step_hp_assist(ctx, {"do": "hp_assist", "on": False})))
+        off.start()
+        off.join(0.3)
+        self.assertTrue(off.is_alive())  # off has not returned while the worker can still write
+        gate.set()
+        off.join(5)
+        self.assertEqual((done[0]["workerExited"], done[0]["refills"], game.pokes, ctx.hp_assist), (True, 0, [], None))
+
+    def test_off_refuses_to_proceed_past_a_worker_that_will_not_exit(self):
+        gate = threading.Event()
+        game = LateGame(hp=6, gate=gate)
+        RUN.kh2ctl, RUN.HpAssist.JOIN_S = game, 0.2
+        ctx = context(game)
+        RUN.step_hp_assist(ctx, {"do": "hp_assist", "seats": [0], "floor": 12})
+        self.assertTrue(game.entered.wait(2))
+        with self.assertRaisesRegex(RUN.StepFailed, "still running"):
+            RUN.step_hp_assist(ctx, {"do": "hp_assist", "on": False})
+        self.assertIsNotNone(ctx.hp_assist)  # not forgotten: close tries again
+        self.assertFalse(ctx.saved["hp_assist"]["workerExited"])
+        gate.set()
+        RUN.HpAssist.JOIN_S = 5
+        self.assertTrue(RUN.step_hp_assist(ctx, {"do": "hp_assist", "on": False})["workerExited"])
+        self.assertEqual(game.pokes, [])
+
+    def test_context_close_retires_a_running_assist(self):
+        game = FakeGame(hp=22)  # full HP: the worker only polls
+        RUN.kh2ctl = game
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = FakeContext(Path(tmp), game)
+            ctx.test_only = {"player_hp_refill"}
+            RUN.step_hp_assist(ctx, {"do": "hp_assist", "seats": [0], "floor": 12})
+            worker = ctx.hp_assist.thread
+            ctx.close()  # a later step failed with the assist still on
+            self.assertFalse(worker.is_alive())
+            self.assertIsNone(ctx.hp_assist)
+            self.assertEqual(ctx.saved["hp_assist"]["stoppedBy"], "close")
+            self.assertTrue((Path(tmp) / "ASSISTED.json").exists())
+
+    def test_a_write_is_journalled_before_it_is_made(self):
+        game = FakeGame(hp=7)
+        RUN.kh2ctl = lambda *a, **k: (_ for _ in ()).throw(RUN.StepFailed("readback lost")) \
+            if a[0] == "peek" and game.pokes else game(*a, **k)
+        assist = RUN.HpAssist(context(game), [0], 12)
+        with self.assertRaisesRegex(RUN.StepFailed, "readback lost"):
+            assist.tick(0)
+        self.assertEqual(len(assist.events), 1)
+        self.assertEqual((assist.events[0]["poked"], assist.events[0]["readbackError"]), (True, "readback lost"))
+
+    def test_a_generically_named_assisted_run_is_labelled_everywhere(self):
+        """The run is named like a native milestone; a refill really happens; the report, its Markdown, the
+        evidence and the suite line must all say ASSISTED, after off."""
+        game = FakeGame(hp=9)
+        scenario = {"name": "native_milestone_probe", "testOnly": ["player_hp_refill"],
+                    "steps": [{"do": "hp_assist", "seats": [0], "floor": 12}, {"do": "wait", "ms": 600},
+                              {"do": "hp_assist", "on": False}]}
+        original_context, original_runs = RUN.Context, RUN.RUNS
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "native_milestone_probe.json"
+            path.write_text(json.dumps(scenario), encoding="utf-8")
+            RUN.kh2ctl, RUN.RUNS = game, Path(tmp) / "runs"
+            RUN.Context = lambda run_dir: FakeContext(run_dir, game)
+            try:
+                report = RUN.run_scenario(path, 1)
+            finally:
+                RUN.Context, RUN.RUNS = original_context, original_runs
+            run_dir = Path(report["dir"])
+            self.assertEqual(report["status"], "pass")
+            self.assertGreaterEqual(game.pokes and report["assisted"]["refills"], 1)
+            self.assertFalse(report["assisted"]["nativeMilestone"])
+            self.assertIn("(ASSISTED, not a native milestone)", (run_dir / "report.md").read_text().splitlines()[0])
+            self.assertTrue(json.loads((run_dir / "report.json").read_text())["assisted"])
+            self.assertTrue(json.loads((run_dir / "hp_assist.json").read_text())["assisted"])
+            self.assertIn("ASSISTED.json", report["artifacts"])
+
+    def test_verdicts_written_after_the_assist_carry_the_label(self):
+        ctx = SimpleNamespace(assisted=None)
+        self.assertNotIn("assisted", RUN.label_assisted(ctx, {"pass": True}))
+        RUN.mark_assisted(ctx, [0, 1], 12)
+        self.assertEqual(RUN.label_assisted(ctx, {"pass": True})["assisted"]["label"], RUN.ASSISTED_LABEL)
+
+
+class FakeContext(RUN.Context):
+    """A real Context (its close, artifacts and run dir) whose seat 0 reads come from a FakeGame."""
+
+    def __init__(self, run_dir, game):
+        super().__init__(run_dir)
+        self.game = game
+        self.fake = context(game)
+
+    def inst(self, index):
+        return self.fake.inst(index)
+
+    def actors(self, index=0):
+        return self.fake.actors(index)
+
+    def namespace(self):
+        return self.fake.namespace()
 
 
 class AssistedSplitsTest(unittest.TestCase):
