@@ -2,19 +2,44 @@
 
 `build_friend.py` copies explicitly selected local products and the installed
 CPython 3.11 standard library/Tk. It never downloads, installs, launches KH2,
-opens a listener or writes the game folder. Current source is protocol **34**,
-but `product_protocol.py` still accepts only **18** and `friend-products.json` pins the
-protocol-18 / AvatarBridge-4 cohort built from `bb7122a` (including the VUH-2239 server fix). DLL, runtime, relay,
-avatarctl and portable CLI share one source revision and build ID. Refresh all
-five product receipts together; the existing validator rejects mixed versions,
-cohorts and packaged hashes.
+opens a listener or writes the game folder. The supported wire protocol is read
+from `common/include/kh2coop/Protocol.hpp` at package build. That same header is
+copied into the ZIP and covered by `package.json`'s file hashes; the receipt's
+`protocol` and every product's protocol must match it at startup. There is no
+separate launcher protocol number to update. The receipt is an integrity
+inventory, not binary protocol introspection or a signature.
 
-These historical products cannot package current source: the builder explicitly
-rejects a source/product protocol mismatch. A current package requires a
-separately reviewed validator update and a complete matching native cohort;
-changing version labels alone does not qualify binaries. No current protocol-34
-package is established by this manifest. The historical local copies live under
-`build/rig/vuh2239-protocol18-20261013-02/products/`.
+`friend-products.json` still pins the historical protocol-18 / AvatarBridge-4
+cohort from `bb7122a`. It deliberately remains unchanged pending Kit's one
+reviewed PC1 build of current main (`2fd13501e335cff41083985984ce4d157e0f5633`
+or a descendant). The builder refuses that historical selection against current
+source. Do not relabel old binaries. All five products must share a full source
+revision and one build ID; stale/mixed protocols, missing roles, mixed cohorts
+and changed bytes remain refusals.
+
+## PC1 receipt needed to refresh the pin (VUH-2971)
+
+Kit owns the native build, package build and bld install/join. From ONE reviewed
+PC1 CMake build, retain the full source commit, build ID, protocol read from that
+checkout's `Protocol.hpp`, AvatarBridge version, build configuration/portable
+flags and review approval. Supply these exact pin entries (paths below are
+repository-relative staging paths; replace `<build-id>` with that receipt's ID):
+
+| JSON role | Path | Required hash |
+| --- | --- | --- |
+| `products.dll` | `build/rig/<build-id>/products/kh2coop_inject.dll` | SHA-256 of DLL bytes |
+| `products.runtime` | `build/rig/<build-id>/products/kh2coop_runtime_scaffold.exe` | SHA-256 of runtime bytes |
+| `products.server` | `build/rig/<build-id>/products/kh2coop_server.exe` | SHA-256 of server bytes |
+| `products.avatarctl` | `build/rig/<build-id>/products/avatarctl.exe` | SHA-256 of avatarctl bytes |
+| `cli` | `build/rig/<build-id>/products/kh2ctl.exe` | SHA-256 of portable CLI bytes |
+
+Every entry needs `path`, a lowercase 64-digit `sha256`, integer `protocol`,
+full lowercase 40-digit `sourceRevision`, and the identical `buildId`. Top-level
+`protocol` must match the source and all entries; `avatarBridgeVersion` must
+match the source; `transport` must be `steam`. Actual hashes and build ID are
+pending Kit's receipt, not placeholders to commit. Keep absolute PC paths and
+build logs in local evidence. Refresh all five entries together after review.
+Pass the same staged CLI path and its hash as `--cli` and `--cli-sha256`.
 
 This cohort builds all five native products with the static MSVC CRT. Earlier
 release01/release02 products remain historical evidence, not current inputs.
@@ -34,12 +59,12 @@ For MSVC, retain its default CXX flags and append
 `/PDBALTPATH:portable.pdb`. Do not package PDBs. Build targets `kh2coop_inject`,
 `kh2coop_runtime_scaffold`, `kh2coop_server`, `avatarctl` and `kh2ctl` from the
 same checkout, then refresh every per-role receipt path, hash and cohort field
-alongside the reviewed validator. The commands below are the packaging procedure
-once those prerequisites are satisfied; the checked-in v18 selection will
-currently be rejected.
+with that build receipt. The commands below are the packaging procedure
+once those prerequisites are satisfied; the checked-in v18 selection is
+currently rejected. Run checks through `clankie heavy --` on fleet machines.
 
 ```powershell
-python -B tools/launcher/test_friend_package.py
+clankie heavy -- python -B -m unittest tools/launcher/test_friend_package.py tools/packaging/test_product_protocol.py tools/launcher/test_steam_flow.py tools/launcher/test_steam_launcher.py
 python -B tools/packaging/check_portable.py --cli <private-kh2ctl.exe> --output <new-checks.json>
 python -B tools/packaging/build_friend.py `
   --output <new-parent>/KH2-Co-op --evidence <new-local-evidence-dir> `
@@ -84,8 +109,14 @@ creation-time Job Object boundary; the game remains outside that helper job.
 
 Offline tests do not prove clean-machine dependencies, visible UI, startup
 without an app-ID file, live guard installation, connect/disconnect, name/HP
-rendering, or save preservation. Those require the lead's bounded desktop
-rehearsal in a fresh unpacked folder. Never test by attempting an in-game save.
+rendering, or save preservation. Kit must build from the refreshed pin, retain `provenance.json`,
+`package-result.json` and `crt-imports.json`, then run the extracted package's
+`--self-check` and normal `friend.py` flow on bld in a fresh folder. Confirm the
+intended Steam accounts, SaveGuard and exact EXE, join the PC1 host, capture a
+verified roster and RTT, disconnect/close owned processes and verify unchanged
+saves on both PCs. Attach the package receipt, ZIP hash and join/closure evidence
+to VUH-2971. These checks remain pending; no fight is required for this smoke
+join. Never test by attempting an in-game save.
 
 ## Historical installed-package evidence (protocol 18)
 

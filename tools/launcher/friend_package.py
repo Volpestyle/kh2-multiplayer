@@ -11,7 +11,7 @@ import time
 import re
 
 from plan import steam_id
-from product_protocol import validate_protocol_set, AVATAR_BRIDGE_VERSION
+from product_protocol import validate_protocol_set, AVATAR_BRIDGE_VERSION, source_protocol, PROTOCOL_HEADER
 from steam_flow import AppIdFile, broker_error
 
 GAME_NAME = 'KINGDOM HEARTS II FINAL MIX.exe'
@@ -40,7 +40,10 @@ def verify_package(root):
     for role, name in manifest['products'].items():
         if name not in manifest['files'] or not (root / name).is_file():
             raise ValueError(f'Missing verified {role} product.')
-    validate_protocol_set(manifest.get('protocol'), manifest.get('productBuilds', {}), manifest['files'])
+    if PROTOCOL_HEADER not in manifest['files']:
+        raise ValueError('Package protocol header is missing from its integrity inventory.')
+    validate_protocol_set(manifest.get('protocol'), manifest.get('productBuilds', {}), manifest['files'],
+                          supported_protocol=source_protocol(root))
     if any(manifest['productBuilds'][role]['path'] != name for role,name in manifest['products'].items()):
         raise ValueError('Product paths disagree with build receipts.')
     if manifest.get('ordinaryLifecycleExperimental') is not False:

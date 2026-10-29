@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import friend_package as f
+from product_protocol import SUPPORTED_PROTOCOL, PROTOCOL_HEADER
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'packaging'))
 from build_friend import leakage, allowed
 from plan import Options, make_plan
@@ -37,9 +38,12 @@ class Safety(unittest.TestCase):
         self.manifest={'schema':1,'avatarBridgeVersion':4,'products':self.products,
                        'files':{n:f.digest(self.root/n) for n in self.products.values()},
                        'supportedGame':{'sha256':f.SUPPORTED_GAME}}
+        header=self.root/PROTOCOL_HEADER;header.parent.mkdir(parents=True)
+        header.write_bytes((Path(__file__).resolve().parents[2]/PROTOCOL_HEADER).read_bytes())
+        self.manifest['files'][PROTOCOL_HEADER]=f.digest(header)
         self.manifest['ordinaryLifecycleExperimental']=False
-        self.manifest['protocol']=18
-        self.manifest['productBuilds']={r:dict(protocol=18,sourceRevision='a'*40,buildId='fixture',path=n,sha256=f.digest(self.root/n)) for r,n in self.products.items()}
+        self.manifest['protocol']=SUPPORTED_PROTOCOL
+        self.manifest['productBuilds']={r:dict(protocol=SUPPORTED_PROTOCOL,sourceRevision='a'*40,buildId='fixture',path=n,sha256=f.digest(self.root/n)) for r,n in self.products.items()}
         self.save_manifest();self.win=Win();self.calls=[]
     def save_manifest(self):(self.root/'package.json').write_text(json.dumps(self.manifest))
     def owner(self,command=None):return f.GameOwner(self.root,self.manifest,self.win,command or self.command)
@@ -59,12 +63,24 @@ class Safety(unittest.TestCase):
     def test_mixed_protocol_build_and_experiment_refused(self):
         self.manifest['productBuilds']['runtime']['protocol']=16;self.save_manifest()
         with self.assertRaisesRegex(ValueError,'Mixed protocols'):f.verify_package(self.root)
-        self.manifest['productBuilds']['runtime']['protocol']=18
+        self.manifest['productBuilds']['runtime']['protocol']=SUPPORTED_PROTOCOL
         self.manifest['ordinaryLifecycleExperimental']=True;self.save_manifest()
         with self.assertRaisesRegex(ValueError,'experiment OFF'):f.verify_package(self.root)
     def test_build_receipt_cannot_name_other_product_bytes(self):
         self.manifest['productBuilds']['runtime']['sha256']='a'*64;self.save_manifest()
         with self.assertRaisesRegex(ValueError,'hash disagrees'):f.verify_package(self.root)
+    def test_stale_complete_package_refused(self):
+        self.manifest['protocol']=SUPPORTED_PROTOCOL-1
+        for row in self.manifest['productBuilds'].values():row['protocol']=SUPPORTED_PROTOCOL-1
+        self.save_manifest()
+        with self.assertRaisesRegex(ValueError,'protocol differs from source'):f.verify_package(self.root)
+    def test_missing_roles_and_protocol_header_refused(self):
+        for role in self.products:
+            row=self.manifest['productBuilds'].pop(role);self.save_manifest()
+            with self.assertRaisesRegex(ValueError,'roles missing'):f.verify_package(self.root)
+            self.manifest['productBuilds'][role]=row
+        del self.manifest['files'][PROTOCOL_HEADER];self.save_manifest()
+        with self.assertRaisesRegex(ValueError,'protocol header'):f.verify_package(self.root)
     def test_escape_path_refused(self):
         self.manifest['files']['../outside']='bad';self.save_manifest()
         with self.assertRaises(ValueError):f.verify_package(self.root)

@@ -1,14 +1,28 @@
 """Offline build-receipt coherence; not binary protocol introspection."""
 import re
+from pathlib import Path
 
-SUPPORTED_PROTOCOL = 18
+PROTOCOL_HEADER = "common/include/kh2coop/Protocol.hpp"
+
+def source_protocol(root):
+    """Read the canonical header, also bundled in the portable package."""
+    try:
+        header = (Path(root)/PROTOCOL_HEADER).read_text(encoding="utf-8-sig")
+    except OSError as error:
+        raise ValueError("Source protocol declaration unavailable. Obtain a fresh complete package.") from error
+    versions = re.findall(r"^\s*inline constexpr std::uint16_t PROTOCOL_VERSION\s*=\s*(\d+)\s*;", header, re.MULTILINE)
+    if len(versions) != 1 or not 0 < int(versions[0]) <= 65535:
+        raise ValueError("Source protocol declaration unavailable or ambiguous.")
+    return int(versions[0])
+
+SUPPORTED_PROTOCOL = source_protocol(Path(__file__).resolve().parents[2])
 AVATAR_BRIDGE_VERSION = 4
 
 ROLES = {"dll", "runtime", "server", "avatarctl", "cli"}
 
-def validate_protocol_set(protocol, builds, files=None):
-    if type(protocol) is not int or protocol != SUPPORTED_PROTOCOL or set(builds) != ROLES:
-        raise ValueError("Package protocol/build roles missing. Obtain a fresh coherent package; do not mix versions.")
+def validate_protocol_set(protocol, builds, files=None, *, supported_protocol=SUPPORTED_PROTOCOL):
+    if type(protocol) is not int or protocol != supported_protocol or set(builds) != ROLES:
+        raise ValueError("Package protocol differs from source or build roles missing. Obtain a fresh coherent package; do not mix versions.")
     cohorts = set()
     for role, row in builds.items():
         if type(row.get("protocol")) is not int or row["protocol"] != protocol:

@@ -11,6 +11,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 from steam_flow import AppIdFile, RuntimeStatus, broker_error, confirm_account, host_identity, invitation
 from plan import Options, make_plan
 import friend_package as f
+from product_protocol import SUPPORTED_PROTOCOL
 import test_friend_package as fixtures
 
 A='76561197960265729';B='76561197960265730'
@@ -57,9 +58,9 @@ class Flow(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'products.json';p.write_text(json.dumps({'products':{}}))
             with self.assertRaisesRegex(ValueError,'declare Steam'):select_products('steam',p)
-            receipt={'transport':'steam','avatarBridgeVersion':f.AVATAR_BRIDGE_VERSION,'protocol':18,
-                     'products':{k:dict(protocol=18,sourceRevision='a'*40,buildId='fixture',sha256='b'*64) for k in ('dll','runtime','server','avatarctl')},
-                     'cli':dict(protocol=18,sourceRevision='a'*40,buildId='fixture',sha256='b'*64)}
+            receipt={'transport':'steam','avatarBridgeVersion':f.AVATAR_BRIDGE_VERSION,'protocol':SUPPORTED_PROTOCOL,
+                     'products':{k:dict(protocol=SUPPORTED_PROTOCOL,sourceRevision='a'*40,buildId='fixture',sha256='b'*64) for k in ('dll','runtime','server','avatarctl')},
+                     'cli':dict(protocol=SUPPORTED_PROTOCOL,sourceRevision='a'*40,buildId='fixture',sha256='b'*64)}
             p.write_text(json.dumps(receipt));self.assertEqual(select_products('steam',p),receipt)
             receipt['products']['extra']={};p.write_text(json.dumps(receipt))
             with self.assertRaisesRegex(ValueError,'exactly'):select_products('steam',p)
