@@ -124,6 +124,9 @@ def bar_rows(data):
 # 48-byte rows whose first fields are SubId (u16) and then Id (u16). The installed 00battle.bin atkp entry
 # (vuh2914-installed-01) has 2713 rows followed by 277 bytes the table does not describe.
 ATKP_HEADER, ATKP_ROW = 8, 48
+# OpenKH 7a3b945c OpenKh.Kh2/Bar.cs EntryType: Bdx = 3 (the AI program), ModelTexture = 7. In B_EX110.mdlx entry 1
+# is the type-7 texture `tim_` and entry 2 the type-3 AI `b_ex` (vuh2914-installed-02).
+BAR_BDX = 3
 
 
 def atkp_rows(data, bar):
@@ -271,7 +274,7 @@ def capture(install, out, key_source, plan):
                 result["openkhCommands"].append(["OpenKh.Command.Bar.exe", "unpack", str(target),
                                                  "-o", str(out / "unpacked" / name)])
             for entry in bar:
-                if entry["type"] == 7:  # OpenKH Bar.EntryType.AiBinary
+                if entry["type"] == BAR_BDX:
                     ai = out / "ai" / (name.replace("/", "__") + f"__{entry['entry']}.bdx")
                     ai.write_bytes(span(data, entry["offset"], entry["length"]))
                     labels = []

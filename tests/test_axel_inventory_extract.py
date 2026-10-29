@@ -32,8 +32,17 @@ def original(data, compressed=-2, remastered=0):
     return record, (bytes(16), 0, len(record), len(data))
 
 
-def bar(name=b"test", kind=7, data=b"synthetic ai"):
-    return b"BAR\x01" + struct.pack("<I", 1) + bytes(8) + struct.pack("<HH4sII", kind, 0, name, 32, len(data)) + data
+def bar(name=b"test", kind=3, data=b"synthetic ai"):
+    return bars([(name, kind, data)])
+
+
+def bars(entries):
+    """A BAR of (name, type, data) entries; OpenKH 7a3b945c Bar.EntryType: 3 Bdx, 7 ModelTexture."""
+    table, body, offset = b"", b"", 16 + 16 * len(entries)
+    for name, kind, data in entries:
+        table += struct.pack("<HH4sII", kind, 0, name, offset + len(body), len(data))
+        body += data
+    return b"BAR\x01" + struct.pack("<I", len(entries)) + bytes(8) + table + body
 
 
 def pe():
@@ -95,7 +104,7 @@ class ExtractTest(unittest.TestCase):
 
     def test_bar_ranges_and_hashes(self):
         rows = extract.bar_rows(bar())
-        self.assertEqual((rows[0]["offset"], rows[0]["type"]), (32, 7))
+        self.assertEqual((rows[0]["offset"], rows[0]["type"]), (32, 3))
         self.assertEqual(rows[0]["sha256"], extract.sha(b"synthetic ai"))
         for data in (b"bad", bar()[:-1], b"BAR\x01" + struct.pack("<I", 999) + bytes(8)):
             with self.assertRaises(ValueError):
@@ -184,7 +193,9 @@ class ExtractTest(unittest.TestCase):
             source = root / "keys.cs"
             source.write_bytes(key_source())
             (install / "fake.exe").write_bytes(pe())
-            assets = {"obj/B_EX110.mdlx": bar(), "00objentry.bin": b"fake objentry"}
+            # The installed MDLX shape: a type-7 texture before the type-3 AI (vuh2914-installed-02 decoded the texture).
+            assets = {"obj/B_EX110.mdlx": bars([(b"tim_", 7, b"texture bytes"), (b"b_ex", 3, b"synthetic ai")]),
+                      "00objentry.bin": b"fake objentry"}
             pkg = bytearray()
             hed = bytearray()
             for name, data in assets.items():
@@ -205,6 +216,10 @@ class ExtractTest(unittest.TestCase):
             self.assertTrue(result["complete"])
             self.assertEqual(len(result["assets"]), 2)
             self.assertIn("-l", result["openkhCommands"][1])
+            decoded = [Path(c[-2]).name for c in result["openkhCommands"] if c[0] == "OpenKh.Command.Bdxio.exe"]
+            self.assertEqual(decoded, ["obj__B_EX110.mdlx__1.bdx"])
+            self.assertEqual((root / "capture/ai/obj__B_EX110.mdlx__1.bdx").read_bytes(), b"synthetic ai")
+            self.assertFalse((root / "capture/ai/obj__B_EX110.mdlx__0.bdx").exists())
             self.assertTrue(json.loads((root / "capture/capture.json").read_text())["complete"])
             self.assertEqual(before, {p.name: p.read_bytes() for p in install.iterdir()})
             for name, data in assets.items():
