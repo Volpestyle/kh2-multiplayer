@@ -36,7 +36,7 @@ Ownership: a per-PID launcher mutex prevents duplicate runtimes **from this laun
 
 Network helpers start inside an owned kill-on-close Job Object using Windows 10+ creation-time `PROC_THREAD_ATTRIBUTE_JOB_LIST`, with private hidden consoles. Only private NUL-input and log-output handles are inherited; the job handle is not. Unsupported/failed attribute or process creation stops startup with no uncontained fallback. This closes the abrupt-parent-loss gap before later job assignment ([Microsoft explanation](https://devblogs.microsoft.com/oldnewthing/20230209-00/?p=107812/)). Disconnect sends Ctrl+C only after confirming the private console contains just the helper and this launcher, allowing the runtime's normal world reset/disconnect path. A three-second signal wait falls back to termination through the retained creation handle. `exit.json` records forced termination and whether the actual shutdown log marker appeared; absence of graceful cleanup is not accepted as a clean native disconnect. No bridge/header repair is attempted. Review native state before reconnecting after a forced stop. The wall timer (30â€“3600 seconds) is independent of Tk, runtime also uses `--max-ticks`, and job closure contains only spawned helpers. Root validated Session1 GUI disconnect, close and exact time-limit behavior on the earlier creation path. The replacement passed Session0 private-relay graceful stop, actual post-stop discovery and abrupt-parent-loss probes; post-fix Session1 GUI run053047 also passed with matching two-game native arrivals, graceful helper exits and unchanged saves. Evidence: `build/rig/vuh1507-launcher-20261005-01/creation-job-prep/`.
 
-Offline command/config inspection (no GUI, native processes, files or networking):
+Offline command/config inspection (reads local protocol metadata; no GUI, native processes, file writes or networking):
 
 ```powershell
 python -B tools/launcher/launcher.py --plan --mode join --pid 1234 --endpoint 100.103.220.58 --port 27795 --slot friend1 --peer-id James --seconds 120
@@ -58,11 +58,12 @@ manifest's `defaultTransport` selects Steam or ENet (a missing value falls back
 to ENet). Supported protocol metadata comes from `Protocol.hpp`, which the
 builder copies into the package's hashed inventory and records in
 `package.json`. The launcher checks the receipt and every product against that
-header, with no second hard-coded protocol. Missing roles, stale/mixed protocols,
+header, with no second hard-coded protocol. A missing or corrupt header reaches
+the same startup error dialog as other incomplete-package errors. Missing roles, stale/mixed protocols,
 mixed source/build cohorts and hash mismatches refuse startup.
 
-The checked-in product selection remains historical protocol 18. Kit must supply
-one reviewed PC1 build of current main before a current package can ship; see
+The checked-in selection now pins Kit's one PC1 protocol-40 build
+`vuh2971-protocol40-20261029-01` from main `2fd1350`; see
 [the pin receipt checklist](../packaging/README.md#pc1-receipt-needed-to-refresh-the-pin-vuh-2971).
 The Mac checks cover offline validation; bld install and PC1 join remain separate
 acceptance steps.

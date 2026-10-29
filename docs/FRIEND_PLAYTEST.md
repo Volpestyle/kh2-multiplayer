@@ -9,9 +9,9 @@
 >
 > Current packages derive their protocol from `Protocol.hpp` at build and carry
 > that header in the hashed package inventory alongside the protocol receipt.
-> The checked-in products still pin historical protocol 18 and are refused
-> against current source. Kit must provide one reviewed PC1 build before the
-> current package can be built and installed on bld; see the
+> The checked-in products pin Kit's PC1 protocol-40 build
+> `vuh2971-protocol40-20261029-01` from main `2fd1350`. Real package build,
+> self-check and bld install/join acceptance remain pending; see the
 > [pin receipt checklist](../tools/packaging/README.md#pc1-receipt-needed-to-refresh-the-pin-vuh-2971).
 > Use the Steam guide for that install and verify roster/RTT with the PC1 host,
 > then disconnect/close and check unchanged saves. That acceptance is pending.

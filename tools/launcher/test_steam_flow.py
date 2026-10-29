@@ -11,7 +11,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 from steam_flow import AppIdFile, RuntimeStatus, broker_error, confirm_account, host_identity, invitation
 from plan import Options, make_plan
 import friend_package as f
-from product_protocol import SUPPORTED_PROTOCOL
+from product_protocol import source_protocol
+SUPPORTED_PROTOCOL = source_protocol(Path(__file__).resolve().parents[2])
 import test_friend_package as fixtures
 
 A='76561197960265729';B='76561197960265730'

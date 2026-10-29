@@ -24,7 +24,6 @@ class Controls(unittest.TestCase):
                             cli=self.rows['cli'])
 
     def test_current_source_accepted(self):
-        self.assertEqual(p.SUPPORTED_PROTOCOL, self.protocol)
         self.assertEqual(p.validate_protocol_set(self.protocol, self.rows,
                          {r['path']:r['sha256'] for r in self.rows.values()}), self.protocol)
 
@@ -63,9 +62,15 @@ class Controls(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Mixed protocols'):
                 builder.select_products('steam', file)
 
-    def test_historical_pin_still_refused(self):
-        with self.assertRaisesRegex(ValueError, 'protocol differs from source'):
-            builder.select_products('enet', None)
+    def test_stale_selection_refused_and_current_pin_accepted(self):
+        with tempfile.TemporaryDirectory() as d:
+            receipt=copy.deepcopy(self.receipt);receipt['protocol']=self.protocol-1
+            for row in [*receipt['products'].values(),receipt['cli']]:row['protocol']=self.protocol-1
+            file=Path(d)/'stale.json';file.write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, 'protocol differs from source'):
+                builder.select_products('steam', file)
+        selected=builder.select_products('steam',builder.ROOT/'tools/packaging/friend-products.json')
+        self.assertEqual(selected['protocol'],self.protocol)
 
     def test_builder_reads_header_at_build_without_a_new_launcher_constant(self):
         with tempfile.TemporaryDirectory() as d:

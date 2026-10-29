@@ -1,10 +1,10 @@
-"""Pure command/config construction. Importing this module starts nothing."""
+"""Command/config construction. Importing this module starts nothing."""
 from dataclasses import asdict, dataclass
 import ipaddress
 import math
 from pathlib import Path
 import re
-from product_protocol import SUPPORTED_PROTOCOL
+from product_protocol import source_protocol
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL = Path(__file__).resolve().parent / '.local'
@@ -31,7 +31,7 @@ class Options:
 
 
 def make_plan(options: Options, run_dir: Path, *, runtime: Path, server: Path) -> dict:
-    """No IO, DNS, processes, or sockets. Explicit private IPv4 only."""
+    """Reads local protocol metadata only; no DNS, processes or sockets."""
     if type(options.pid) is not int or not 0 < options.pid < 2**32:
         raise ValueError('Select an existing game PID.')
     if options.mode not in ('host', 'join'):
@@ -77,7 +77,7 @@ def make_plan(options: Options, run_dir: Path, *, runtime: Path, server: Path) -
         relay_argv = [str(server), '--bind', endpoint, '--port', str(options.port),
                       '--build', options.game_build, '--content', options.content, '--mod', options.mod,
                       '--max-peers', '3', '--desync-dir', str(run_dir / 'relay-desync')]
-    return {'options': asdict(options), 'role': role, 'protocol': SUPPORTED_PROTOCOL,
+    return {'options': asdict(options), 'role': role, 'protocol': source_protocol(ROOT),
             'runtime_config': config, 'runtime_argv': runtime_argv, 'relay_argv': relay_argv,
             'wall_limit_seconds': options.seconds, 'run_dir': str(run_dir)}
 

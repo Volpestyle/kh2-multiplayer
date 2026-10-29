@@ -15,12 +15,13 @@ def source_protocol(root):
         raise ValueError("Source protocol declaration unavailable or ambiguous.")
     return int(versions[0])
 
-SUPPORTED_PROTOCOL = source_protocol(Path(__file__).resolve().parents[2])
 AVATAR_BRIDGE_VERSION = 4
 
 ROLES = {"dll", "runtime", "server", "avatarctl", "cli"}
 
-def validate_protocol_set(protocol, builds, files=None, *, supported_protocol=SUPPORTED_PROTOCOL):
+def validate_protocol_set(protocol, builds, files=None, *, supported_protocol=None):
+    if supported_protocol is None:
+        supported_protocol = source_protocol(Path(__file__).resolve().parents[2])
     if type(protocol) is not int or protocol != supported_protocol or set(builds) != ROLES:
         raise ValueError("Package protocol differs from source or build roles missing. Obtain a fresh coherent package; do not mix versions.")
     cohorts = set()

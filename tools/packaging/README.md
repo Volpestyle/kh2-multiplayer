@@ -9,13 +9,16 @@ copied into the ZIP and covered by `package.json`'s file hashes; the receipt's
 separate launcher protocol number to update. The receipt is an integrity
 inventory, not binary protocol introspection or a signature.
 
-`friend-products.json` still pins the historical protocol-18 / AvatarBridge-4
-cohort from `bb7122a`. It deliberately remains unchanged pending Kit's one
-reviewed PC1 build of current main (`2fd13501e335cff41083985984ce4d157e0f5633`
-or a descendant). The builder refuses that historical selection against current
-source. Do not relabel old binaries. All five products must share a full source
-revision and one build ID; stale/mixed protocols, missing roles, mixed cohorts
-and changed bytes remain refusals.
+`friend-products.json` pins Kit's PC1 protocol-40 / AvatarBridge-4 cohort
+`vuh2971-protocol40-20261029-01`, built from main
+`2fd13501e335cff41083985984ce4d157e0f5633`. All five staged products share that
+source and build ID. Kit reports that rebuilding with the test-only MSVC fix
+`bd48a35` left all five products byte-identical and serial ctest passed 304/304.
+The full local `build-receipt.json` is beside the staged `products/` directory.
+[Build report on VUH-2971](https://linear.app/vuhlp/issue/VUH-2971).
+The pin is an input inventory; real ZIP/self-check and bld install/join
+acceptance are still required. Stale/mixed protocols, missing roles, mixed
+cohorts and changed bytes remain refusals.
 
 ## PC1 receipt needed to refresh the pin (VUH-2971)
 
@@ -36,9 +39,9 @@ repository-relative staging paths; replace `<build-id>` with that receipt's ID):
 Every entry needs `path`, a lowercase 64-digit `sha256`, integer `protocol`,
 full lowercase 40-digit `sourceRevision`, and the identical `buildId`. Top-level
 `protocol` must match the source and all entries; `avatarBridgeVersion` must
-match the source; `transport` must be `steam`. Actual hashes and build ID are
-pending Kit's receipt, not placeholders to commit. Keep absolute PC paths and
-build logs in local evidence. Refresh all five entries together after review.
+match the source; `transport` must be `steam`. The checked-in values come from
+Kit's receipt for the cohort above. Future refreshes must use actual receipt
+values, never placeholders. Keep absolute PC paths and build logs in local evidence. Refresh all five entries together after review.
 Pass the same staged CLI path and its hash as `--cli` and `--cli-sha256`.
 
 This cohort builds all five native products with the static MSVC CRT. Earlier
@@ -60,8 +63,8 @@ For MSVC, retain its default CXX flags and append
 `kh2coop_runtime_scaffold`, `kh2coop_server`, `avatarctl` and `kh2ctl` from the
 same checkout, then refresh every per-role receipt path, hash and cohort field
 with that build receipt. The commands below are the packaging procedure
-once those prerequisites are satisfied; the checked-in v18 selection is
-currently rejected. Run checks through `clankie heavy --` on fleet machines.
+for the checked-in cohort once those staged PC1 inputs are available.
+Run checks through `clankie heavy --` on fleet machines.
 
 ```powershell
 clankie heavy -- python -B -m unittest tools/launcher/test_friend_package.py tools/packaging/test_product_protocol.py tools/launcher/test_steam_flow.py tools/launcher/test_steam_launcher.py

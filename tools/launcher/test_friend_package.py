@@ -1,6 +1,8 @@
 """Offline safety boundaries; all game operations are fakes, no KH2/network."""
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -11,7 +13,8 @@ from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import friend_package as f
-from product_protocol import SUPPORTED_PROTOCOL, PROTOCOL_HEADER
+from product_protocol import source_protocol, PROTOCOL_HEADER
+SUPPORTED_PROTOCOL = source_protocol(Path(__file__).resolve().parents[2])
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'packaging'))
 from build_friend import leakage, allowed
 from plan import Options, make_plan
@@ -69,6 +72,38 @@ class Safety(unittest.TestCase):
     def test_build_receipt_cannot_name_other_product_bytes(self):
         self.manifest['productBuilds']['runtime']['sha256']='a'*64;self.save_manifest()
         with self.assertRaisesRegex(ValueError,'hash disagrees'):f.verify_package(self.root)
+    def test_packaged_entrypoint_reports_missing_or_corrupt_header(self):
+        # Use a fresh interpreter and the actual packaged modules: imports must
+        # reach friend.py's existing error handler before any Windows/game work.
+        launcher=self.root/'tools/launcher';launcher.mkdir(parents=True)
+        for name in ('friend.py','friend_package.py','launcher.py','plan.py','steam_flow.py','product_protocol.py'):
+            shutil.copyfile(Path(__file__).resolve().parent/name,launcher/name)
+        entry=launcher/'friend.py'
+        probe = """
+import json, runpy, sys, types
+tk=types.ModuleType('tkinter');box=types.ModuleType('tkinter.messagebox')
+box.showerror=lambda title, message: print(json.dumps({'title':title,'message':message}))
+tk.messagebox=box
+sys.modules['tkinter']=tk;sys.modules['tkinter.messagebox']=box
+sys.argv=[sys.argv[1]]
+runpy.run_path(sys.argv[0],run_name='__main__')
+"""
+        header=self.root/PROTOCOL_HEADER
+        for contents in (None,b'corrupt declaration'):
+            with self.subTest(contents=contents):
+                if contents is None:header.unlink()
+                else:
+                    header.write_bytes(contents)
+                    # Even an inventoried but invalid declaration must be caught.
+                    self.manifest['files'][PROTOCOL_HEADER]=f.digest(header);self.save_manifest()
+                result=subprocess.run([sys.executable,'-I','-B','-c',probe,str(entry)],
+                                      capture_output=True,text=True,timeout=15)
+                self.assertEqual(result.returncode,1,result.stderr)
+                dialog=json.loads(result.stdout)
+                self.assertEqual(dialog['title'],'KH2 Co-op could not start')
+                self.assertRegex(dialog['message'],'Package file is missing|protocol declaration unavailable')
+                self.assertNotIn('Traceback',result.stderr)
+
     def test_stale_complete_package_refused(self):
         self.manifest['protocol']=SUPPORTED_PROTOCOL-1
         for row in self.manifest['productBuilds'].values():row['protocol']=SUPPORTED_PROTOCOL-1
