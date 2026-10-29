@@ -743,6 +743,18 @@ void enetChecks() {
     refusedBy("host-connection", "forged host connection script call refused", [&] { clients[0]->sendScriptCall(forgedHost); });
     ++calls.seq; clients[0]->sendScriptCall(calls); pump();
     check(received[1].size() == 3 && received[2].size() == 2, "a valid script call after refusals still forwards");
+    // VUH-2914: sequence admission does not deduplicate resource occurrences.
+    // The native adapter must refuse an already-paired start before native birth.
+    auto duplicateStart=calls;
+    ScriptCallEntry effectStart;effectStart.netId=enemy.netId;effectStart.objectId=enemy.objectId;
+    effectStart.table=1;effectStart.index=21;effectStart.effect=77;
+    effectStart.args={num(11),num(0),num(0),0};duplicateStart.entries={effectStart};
+    const auto beforeDuplicate=received[1].size();
+    duplicateStart.seq=++calls.seq;clients[0]->sendScriptCall(duplicateStart);pump();
+    duplicateStart.seq=++calls.seq;clients[0]->sendScriptCall(duplicateStart);pump();
+    check(received[1].size()==beforeDuplicate+2 &&
+          received[1][beforeDuplicate].entries.front().effect==77 && received[1].back().entries.front().effect==77,
+          "real relay and NetworkClient admit repeated effect ID in increasing packet sequences");
     ScriptReactionCompletion completion;completion.location=room;completion.seq=1;
     completion.requesterConnectionId=server.peerBySlot(SlotType::Friend1)->connectionId;
     completion.occurrence=1;completion.resource=1;completion.objectId=enemy.objectId;completion.netId=enemy.netId;completion.command=345;

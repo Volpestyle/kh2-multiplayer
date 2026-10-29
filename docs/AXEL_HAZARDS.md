@@ -85,7 +85,12 @@ valid lifecycle controls and unchanged authority/incarnation boundaries. It is
 not approval of an unseen patch. New HP, light, boundary or native-call behavior
 waits for installed byte/version/hash/ABI qualification and full review.
 
-No counterexample has been reproduced and no lifecycle patch is included.
+The Mac lifecycle fixture now reproduces duplicate effect-start replacement/orphaning
+and a use-after-free when native attack free reenters allocation-forget during
+room retirement. The scoped patch refuses an already-paired effect start before
+native creation and snapshots/revalidates attack identities before retirement.
+See [portable lifecycle evidence](testing/vuh2914-script-lifecycle/README.md).
+This establishes adapter failures, not installed Axel hazard semantics.
 The public text contains five `attack_new` call sites. Absence assertions above
 cover the complete public text for those named traps, not the complete installed
 encounter. Weapon-bound visual effects39–44, assault effects13–15 and leave
@@ -101,8 +106,9 @@ constraints are in its input plan. The selected original PE is expected to hash
 hashes are available only as prefix/suffix constraints: they cannot certify full
 byte identity. Record full hashes on capture and retain that qualification gap.
 
-No product change or live result is claimed. The PC is held by James; no PC
-read, extraction, build or run is authorized by this inventory work.
+The portable lifecycle patch is separate from installed-byte qualification. No live
+result is claimed. The PC is held by James; no PC read, extraction, build or run
+is authorized by this inventory work.
 
 ## Next product work: Mac now versus installed-byte qualification
 
@@ -121,8 +127,9 @@ that a live Axel failure or reachable stale packet has been reproduced.
 Reproduce before changing behavior; if a candidate is already excluded by actual
 admission, record that result rather than add speculative state. This work must
 remain independent of D12313/D13075 semantics. Ione's full independent review
-still gates the exact inject patch before build/live use. No such patch or
-counterexample is included in this inventory checkpoint.
+still gates the exact inject patch before game build/live use. The original
+inventory checkpoint contained no patch; the portable lifecycle result above
+records the separate Mac follow-up.
 
 **(b) Wait for PC qualification:** new handling of1/155 floor HP drain;
 1/181–184 lighting;1/311 element changes; enemy-owned2/17 party strikes;

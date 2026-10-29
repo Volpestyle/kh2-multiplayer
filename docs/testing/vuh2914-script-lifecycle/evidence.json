@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "baseline-ctest.log",
+      "size": 27956,
+      "sha256": "2ac68d279ad363a720c2c181cba8a1473e99ce5e946dcc1f59c4ae117aee2f8b",
+      "url": "clankie://evidence/sha256/2ac68d279ad363a720c2c181cba8a1473e99ce5e946dcc1f59c4ae117aee2f8b"
+    }
+  ]
+}

@@ -271,6 +271,44 @@ endif()
 # VUH-2252: ScriptCall codec, relay forwarding and the send-on-change rules
 # (inject/src/ScriptMirror.hpp). Loopback ENet, no KH2.
 add_executable(kh2coop_script_mirror_test tests/ScriptMirrorTest.cpp)
+
+# Compile the production lifecycle/admission bodies against fake native boundaries.
+# Extraction is verbatim; source dependencies force regeneration on product edits.
+function(script_lifecycle_section source first last output)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
+    file(READ "${source}" body)
+    string(FIND "${body}" "${first}" begin)
+    if(begin LESS 0)
+        message(FATAL_ERROR "Missing lifecycle fixture start: ${first}")
+    endif()
+    string(SUBSTRING "${body}" ${begin} -1 tail)
+    string(FIND "${tail}" "${last}" end)
+    if(end LESS 0)
+        message(FATAL_ERROR "Missing lifecycle fixture end: ${last}")
+    endif()
+    string(SUBSTRING "${tail}" 0 ${end} section)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${output}" "${section}")
+endfunction()
+script_lifecycle_section(inject/src/ScriptMirror.inl "enum class Applied" "// ---- owner-routed reactions" lifecycle_replay.inc)
+script_lifecycle_section(inject/src/ScriptMirror.inl "static void SmForgetAllocation(" "static uintptr_t __fastcall SmAttackConstruct" lifecycle_forget.inc)
+script_lifecycle_section(inject/src/ScriptMirror.inl "static void SmRetireClientAttacks(" "static void SmStopHost(" lifecycle_reset.inc)
+script_lifecycle_section(inject/src/ScriptMirror.inl "static uintptr_t SmDrivenActor(" "// The native trap with" lifecycle_driven.inc)
+script_lifecycle_section(inject/src/ScriptMirror.inl "static bool SmEffectState(" "// ---- host" lifecycle_identity.inc)
+script_lifecycle_section(inject/src/EnemySync.cpp "void AdmitScriptCall(const WorldScope& scope, const std::uint8_t* payload, std::size_t size) {" "} // namespace" lifecycle_admission.inc)
+script_lifecycle_section(common/src/NetworkClient.cpp "        if (type == PacketType::ScriptCall) {" "        // Actual accepted inner body" lifecycle_network.inc)
+script_lifecycle_section(inject/src/EnemySync.hpp "struct ScriptCallRecord {" "// Host: one reliable ScriptCall" lifecycle_record.inc)
+add_executable(kh2coop_script_lifecycle_test tests/ScriptMirrorLifecycleTest.cpp)
+target_include_directories(kh2coop_script_lifecycle_test PRIVATE inject/src runtime/include "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(kh2coop_script_lifecycle_test PRIVATE kh2coop_common)
+if(MSVC)
+    target_compile_options(kh2coop_script_lifecycle_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(kh2coop_script_lifecycle_test PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-unused-function)
+    # Native destruction reenters allocation-forget: make invalid traversal observable.
+    target_compile_options(kh2coop_script_lifecycle_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(kh2coop_script_lifecycle_test PRIVATE -fsanitize=address)
+endif()
+
 add_executable(kh2coop_spawn_emission_test tests/SpawnEmissionTest.cpp)
 
 # VUH-2342: MissionState codec and the mission mirror's rules (inject/src/MissionMirror.hpp).

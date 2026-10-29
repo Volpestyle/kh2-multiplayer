@@ -662,13 +662,25 @@ static void SmFlush() {
 // Attack resources carry collision. Retire them before discarding a pairing;
 // unlike visual effects, silent registry eviction is never acceptable.
 static void SmRetireClientAttacks() noexcept {
-    g_sm.clientAttacks.Each([](std::uint32_t, const R::ClientEffect& pair) {
-        if (!SmAttackState(pair.handle, pair.effect, pair.part)) return;
+    // Native free reenters SmForgetAllocation, which erases client bindings.
+    // Never keep a map iterator or reference across that callback.
+    std::array<std::pair<std::uint32_t,R::ClientEffect>,R::ClientEffects::kCap> retiring{};
+    std::size_t count=0;
+    g_sm.clientAttacks.Each([&](std::uint32_t id,const R::ClientEffect& pair) {
+        retiring[count++]={id,pair};
+    });
+    for(std::size_t i=0;i<count;++i) {
+        const auto& [id,pair]=retiring[i];
+        const auto* current=g_sm.clientAttacks.Find(id);
+        if(!current || current->handle!=pair.handle || current->effect!=pair.effect ||
+           current->part!=pair.part || current->netId!=pair.netId ||
+           current->ownerSlot!=pair.ownerSlot || current->ownerRole!=pair.ownerRole ||
+           !SmAttackState(pair.handle,pair.effect,pair.part))continue;
         __try {
             std::uint64_t args[1]{R::Tagged(R::kTagAddress, pair.handle)};
             reinterpret_cast<TrapFn>(g_exeBase + 0x4323B0)(args);
         } __except(EXCEPTION_EXECUTE_HANDLER) { ++g_sm.faults; }
-    });
+    }
     g_sm.clientAttacks.Reset();
 }
 
@@ -929,6 +941,9 @@ static Applied SmReplay(const R::Call& c, uintptr_t actor) {
         return Applied::Ok;
     }
     if (t.kind == R::Kind::EffectStart) {
+        // An already-paired resource has its birth, including held replay.
+        // Preserve its binding before invoking a native start that would orphan it.
+        if (g_sm.clientEffects.Find(c.effect)) return Applied::Refused;
         const std::uint32_t handle = SmOwnHandle(actor);
         if (!handle) return Applied::Refused;
         if (!SmCallTrap(c.trap, handle, c.values, result)) return Applied::Fault;
