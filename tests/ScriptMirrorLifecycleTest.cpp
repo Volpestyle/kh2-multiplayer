@@ -134,13 +134,13 @@ static bool SmCallTrap(std::size_t trap,std::uint32_t handle,const std::uint64_t
 #include "lifecycle_replay.inc"
 
 // Only the session/bridge context is fake. Both admission bodies below are extracted verbatim.
-static RoomTransition room{7,2,0x14,0,0,137,0};
+static RoomTransition fixtureRoom{7,2,0x14,0,0,137,0};
 namespace admission {
 enum class Role { Host,Client };
 static Role role=Role::Client;
 static Role CurrentRole() { return role; }
 static bool active=true;
-static bool ActivationContext(Role,RoomTransition& out) { out=room;return active; }
+static bool ActivationContext(Role,RoomTransition& out) { out=fixtureRoom;return active; }
 struct Bridge {
     std::uint8_t slot=1;
     std::uint64_t host=10,delivery=20;
@@ -159,12 +159,12 @@ static void (*g_log)(const char*,...)=Log;
 }
 namespace network {
 static std::array<std::uint64_t,3> avatarConnections_{10,11,0};
-static std::optional<RoomTransition> hostRoom_=room;
+static std::optional<RoomTransition> hostRoom_=fixtureRoom;
 static std::uint64_t receivedScriptCallHost_=0,receivedScriptCallSeq_=0;
 static void log(const std::string&) {}
 static unsigned forwarded=0;
-static void Deliver(const ScriptCall& calls,const WorldScope& scope) {
-    const auto encoded=encode(calls);const std::uint8_t* payload=nullptr;std::size_t payloadSize=0;
+static void Deliver(const ScriptCall& sent,const WorldScope& scope) {
+    const auto encoded=encode(sent);const std::uint8_t* payload=nullptr;std::size_t payloadSize=0;
     const auto type=decodePacketHeader(encoded.data(),encoded.size(),payload,payloadSize);
     ByteReader reader(payload,payloadSize);
     const auto* admittedScope=&scope;
@@ -185,7 +185,7 @@ static ScriptCallEntry entry(bool attack,std::uint32_t id=1,bool end=false,std::
 }
 static std::uint64_t seq=0;
 static void send(std::initializer_list<ScriptCallEntry> entries) {
-    ScriptCall c;c.location=room;c.hostConnectionId=10;c.seq=++seq;c.entries=entries;network::Deliver(c,scope());
+    ScriptCall c;c.location=fixtureRoom;c.hostConnectionId=10;c.seq=++seq;c.entries=entries;network::Deliver(c,scope());
 }
 static void reset() {
     g_sm=State{};g_smLifetimeReliable=true;handles.clear();memory.clear();effects.clear();live.clear();
@@ -232,7 +232,7 @@ static void controls() {
 }
 static void admissionControls() {
     reset();send({entry(false)});const auto before=g_sm.second.received;
-    ScriptCall stale;stale.location=room;stale.hostConnectionId=10;stale.seq=seq;stale.entries={entry(false)};
+    ScriptCall stale;stale.location=fixtureRoom;stale.hostConnectionId=10;stale.seq=seq;stale.entries={entry(false)};
     network::Deliver(stale,scope());
     check(g_sm.second.received==before,"NetworkClient rejects repeated/old packet sequence before adapter");
     auto bytes=encode(stale);const std::uint8_t* p;std::size_t n;decodePacketHeader(bytes.data(),bytes.size(),p,n);
@@ -240,12 +240,12 @@ static void admissionControls() {
     check(g_sm.second.received==before,"EnemySync independently rejects old packet sequence before adapter");
     stale.seq=++seq;++stale.location.epoch;network::Deliver(stale,scope());
     check(g_sm.second.received==before,"old epoch cannot enter adapter");
-    stale.location=room;stale.seq=++seq;auto foreign=scope();foreign.sourceConnectionId=99;network::Deliver(stale,foreign);
+    stale.location=fixtureRoom;stale.seq=++seq;auto foreign=scope();foreign.sourceConnectionId=99;network::Deliver(stale,foreign);
     check(g_sm.second.received==before,"foreign host cannot enter adapter");
     foreign=scope();foreign.sourceDeliverySerial=99;stale.seq=++seq;network::Deliver(stale,foreign);
     check(g_sm.second.received==before,"old delivery/session incarnation cannot enter adapter");
     reset();send({entry(false)});
-    stale.location=room;stale.hostConnectionId=10;stale.seq=seq;stale.entries={entry(false)};
+    stale.location=fixtureRoom;stale.hostConnectionId=10;stale.seq=seq;stale.entries={entry(false)};
     send({entry(false,1,true)});send({entry(false,2)});const auto afterEnd=g_sm.second.received;
     network::Deliver(stale,scope());
     check(g_sm.second.received==afterEnd && births==2 && !g_sm.clientEffects.Find(1) && g_sm.clientEffects.Find(2),
