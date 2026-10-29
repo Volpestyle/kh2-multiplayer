@@ -1,0 +1,241 @@
+{
+  "schema": 1,
+  "issue": "VUH-2914",
+  "authority": "Plan only. No PC access until fresh explicit GO; full desk gate and rig lock precede capture.",
+  "qualification": "UNQUALIFIED against installed bytes. Prefix/suffix asset constraints are not full SHA pins.",
+  "openkhCommit": "7a3b945c538d32c6a285128c98aefba093f52ceb",
+  "openkhEncryptionSource": "https://raw.githubusercontent.com/OpenKH/OpenKh/7a3b945c538d32c6a285128c98aefba093f52ceb/OpenKh.Egs/EgsEncryption.cs",
+  "openkhEncryptionSha256": "62609383cff28cd07733b03cd40b5d5bc48c2a901ef67e2fd08a53ae9edd5e1f",
+  "baseline": "Retained trace-02 install-before.json captured 2026-10-28T22:26:23Z; AXEL_REACTIONS.md partial asset hashes",
+  "pe": {
+    "path": "KINGDOM HEARTS II FINAL MIX.exe",
+    "bytes": 8659216,
+    "sha256": "9002b2de6a1f91a790bd0673de125d1cf833f7942bfec827cdcf6ba64d5849ed"
+  },
+  "hedSha256": {
+    "Image/dt/kh2_fifth.hed": "4d2ccadcb01e40f4aa3b8568906e1bb70319075f2afccd332aa42cfdf3b6beb7",
+    "Image/dt/kh2_first.hed": "585077e10e38cd87d68f1b1147972361472bef47a08c98dbab4a8e0059e44e6c",
+    "Image/dt/kh2_fourth.hed": "7fe1897f9fdaa863808a75fa18e4760d25de18a726da0c9ba3ba070c6692f47d",
+    "Image/dt/kh2_second.hed": "4e92b1e5b9d5bf073e495ebf00825696a65b5bf612d06791f643955030b01ec1",
+    "Image/dt/kh2_sixth.hed": "2dfcb86f79783b7cd406ac5bb3ca4a62e2ad988c007af98d0b1eb5a58fc8de0e",
+    "Image/dt/kh2_third.hed": "461102a557f6dc45403c45890a8068184d4772c70d632b7cca2b17323aaa42cd"
+  },
+  "assets": {
+    "obj/B_EX110.mdlx": [
+      "69afebc1",
+      "3046ca"
+    ],
+    "obj/B_EX110_SKIRMISH.mdlx": [
+      "69afebc1",
+      "3046ca"
+    ],
+    "obj/B_EX110.mset": [
+      "5a5746f1",
+      "cfd445"
+    ],
+    "obj/B_EX110_SKIRMISH.mset": [
+      "df118607",
+      "047ee43"
+    ],
+    "obj/B_EX110.a.us": [
+      "bc91c3d6",
+      "d56f12"
+    ],
+    "obj/B_EX110_SKIRMISH.a.us": [
+      "a9d916a3",
+      "88bc37"
+    ],
+    "ard/us/tt05.ard": [
+      "e981513f",
+      "eb0a2b"
+    ],
+    "ard/us/tt20.ard": [
+      "5a87ffef",
+      "718bc1"
+    ],
+    "msn/us/TT05_MS404.bar": [
+      "f067c8df",
+      "7f5104"
+    ],
+    "msn/us/TT20_MS603.bar": [
+      "ff1679f6",
+      "842d67"
+    ],
+    "00battle.bin": null,
+    "00objentry.bin": null,
+    "03system.bin": [
+      "fd4b8469",
+      "af4204"
+    ]
+  },
+  "traps": [
+    [
+      1,
+      3
+    ],
+    [
+      1,
+      84
+    ],
+    [
+      1,
+      141
+    ],
+    [
+      1,
+      155
+    ],
+    [
+      1,
+      181
+    ],
+    [
+      1,
+      182
+    ],
+    [
+      1,
+      183
+    ],
+    [
+      1,
+      184
+    ],
+    [
+      1,
+      225
+    ],
+    [
+      1,
+      228
+    ],
+    [
+      1,
+      230
+    ],
+    [
+      1,
+      311
+    ],
+    [
+      2,
+      10
+    ],
+    [
+      2,
+      11
+    ],
+    [
+      2,
+      12
+    ],
+    [
+      2,
+      13
+    ],
+    [
+      2,
+      17
+    ],
+    [
+      2,
+      18
+    ],
+    [
+      2,
+      20
+    ],
+    [
+      6,
+      63
+    ]
+  ],
+  "offsetRules": {
+    "hed": "32-byte <16sQii>: MD5 UTF8 path, PKG offset +0x10, record length +0x18, actual length +0x1c",
+    "original": "PKG record + 0x10 + remasteredCount*0x30; original only; no remastered payloads",
+    "bar": "16-byte header then <HH4sII> entries; record all offsets and full hashes; AI type7",
+    "bdx": "Public halfword PC Lx corresponds to AI entry offset 16+2*x, only after installed decode confirms label",
+    "native": "PE RVA 0x753490 + 8*table -> VA table; 16-byte entries; first 8 fn VA, +8 flags. Map through PE sections, not RVA=file offset"
+  },
+  "axelPublicLabels": [
+    303,
+    563,
+    1239,
+    1433,
+    1536,
+    1659,
+    1728,
+    1964,
+    2135,
+    2419,
+    2599,
+    2883,
+    3544,
+    5137,
+    5389,
+    5448,
+    5449,
+    5466,
+    5471,
+    5486,
+    5672,
+    5777,
+    5790,
+    5935,
+    6001,
+    6067,
+    6179,
+    6246,
+    6917,
+    6927,
+    6961,
+    6975,
+    6985,
+    7763,
+    8122,
+    8165,
+    8176,
+    8217,
+    8264,
+    8275,
+    8285,
+    8826,
+    8914,
+    8929,
+    9071,
+    9408,
+    9423,
+    9505,
+    9667,
+    9846,
+    9923,
+    9931,
+    10000,
+    10029,
+    10064,
+    10166,
+    10229,
+    10329,
+    10534,
+    10615,
+    11019,
+    11053,
+    11326,
+    11389,
+    11398,
+    11548,
+    11734,
+    12313,
+    12512,
+    13075,
+    13526
+  ],
+  "pendingQualification": [
+    "Complete MSET/ANB trigger decode, MDLX collision rows and PAX effect identities",
+    "Selected ATKP 427/429/432/434/436/503 power/team/element/hit flags and geometry",
+    "Whole PE native functions/callers: HP/ground/star/strike/thread cancellation and retry/load teardown; 256-byte hash windows are not ABI proof",
+    "Complete ARD/MSN hazard-owner absence controls and installed/public BDX comparison",
+    "OpenKH executables need independent version/hash pin before running emitted commands"
+  ],
+  "copyright": "All source disassembly, originals, PE and decodes stay in ignored .local; never publish to evidence store or git. Hashes/derived tables only."
+}
