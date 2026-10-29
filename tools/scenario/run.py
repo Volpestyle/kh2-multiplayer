@@ -3636,32 +3636,52 @@ def step_progress_hash_control(ctx: Context, step: dict) -> dict:
     return result
 
 
+ENEMY_HP_AGREE_ATTEMPTS, ENEMY_HP_AGREE_PAUSE_S = 20, 0.1  # test_enemy_hp's status/row agreement, about 2 s
+
+
 def step_test_enemy_hp(ctx: Context, step: dict) -> dict:
     """Test-only (VUH-2763): lower one live enemy's native HP so the seats finish it.
 
     Refused unless the scenario declares "testOnly": ["enemy_hp_write"]. Writes the
     HP i32 at *(actor+0x5C0)+0 on one instance only after the status pointer's
     HP/max HP match that actor's entities row; it never raises HP or touches 0.
+    The seats may still be fighting (vuh2921-thorn-chain-01: a hit between the row
+    and the status read made them 380 vs 370), so the row is read between two status
+    reads and taken only when all three agree, retried ENEMY_HP_AGREE_ATTEMPTS times.
     """
     if "enemy_hp_write" not in ctx.test_only:
         raise StepFailed('test_enemy_hp needs the scenario to declare "testOnly": ["enemy_hp_write"]')
     index, object_id, hp = step.get("instance", 0), step["objectId"], step["hp"]
     pid = ctx.inst(index).pid
-    rows = [a for a in ctx.actors(index) if a.get("objectId") == object_id and a.get("hp", 0) > 0]
-    if len(rows) != 1:
-        raise StepFailed(f"test_enemy_hp: expected one live objectId={object_id}, found {len(rows)}")
-    actor = rows[0]
+
+    def row():
+        rows = [a for a in ctx.actors(index) if a.get("objectId") == object_id and a.get("hp", 0) > 0]
+        if len(rows) != 1:
+            raise StepFailed(f"test_enemy_hp: expected one live objectId={object_id}, found {len(rows)}")
+        return rows[0]
+    actor = row()
     status = int(actor["status"], 16)
     base = int(str(kh2ctl("peek", "--rva", "0x717008:u8", pid=pid)["moduleBase"]), 0)
     if status < base:  # kh2ctl peek reads only base+RVA and refuses an RVA that would wrap
         raise StepFailed(f"test_enemy_hp: status 0x{status:X} is below the module base 0x{base:X}")
     keys = [f"0x{status + offset - base:X}" for offset in (0, 4)]
+    rows_address = actor["address"]
     def read():
         sample = kh2ctl("peek", "--rva", ",".join(f"{k}:i32" for k in keys), pid=pid)["samples"][0]
         return int(sample[keys[0]]), int(sample[keys[1]])
-    before = read()
-    if before != (actor["hp"], actor["maxHp"]):
-        raise StepFailed(f"test_enemy_hp: status {before} disagrees with actor row {actor['hp']}/{actor['maxHp']}")
+    for attempt in range(1, ENEMY_HP_AGREE_ATTEMPTS + 1):
+        first = read()
+        actor = row()
+        before = read()
+        if actor["address"] != rows_address or int(actor["status"], 16) != status:
+            raise StepFailed(f"test_enemy_hp: objectId={object_id} changed to {actor['address']}/{actor['status']} "
+                             f"during the check")
+        if first == before == (actor["hp"], actor["maxHp"]):
+            break
+        time.sleep(ENEMY_HP_AGREE_PAUSE_S)
+    else:
+        raise StepFailed(f"test_enemy_hp: status {first}..{before} disagrees with actor row "
+                         f"{actor['hp']}/{actor['maxHp']} in all {ENEMY_HP_AGREE_ATTEMPTS} attempts")
     if not 1 <= hp < before[0]:
         raise StepFailed(f"test_enemy_hp: target {hp} must be at least 1 and below current HP {before[0]}")
     kh2ctl("poke", "--addr", f"0x{status:X}", "--type", "i32", "--value", str(hp), pid=pid)
@@ -3669,7 +3689,7 @@ def step_test_enemy_hp(ctx: Context, step: dict) -> dict:
     if after[0] > hp or after[1] != before[1]:
         raise StepFailed(f"test_enemy_hp: readback {after} after writing {hp}")
     result = {"instance": index, "objectId": object_id, "actor": actor["address"], "status": actor["status"],
-              "before": list(before), "written": hp, "readback": list(after)}
+              "before": list(before), "written": hp, "readback": list(after), "attempts": attempt}
     if step.get("as"):
         ctx.saved[step["as"]] = result
     return result

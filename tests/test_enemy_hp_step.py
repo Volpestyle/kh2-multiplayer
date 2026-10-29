@@ -46,14 +46,48 @@ def context(actors, test_only=("enemy_hp_write",)):
     return SimpleNamespace(test_only=set(test_only), inst=lambda index: inst, actors=lambda index: actors, saved={})
 
 
+class CombatGame(FakeGame):
+    """Thorn's status HP as the seats keep hitting him: each status read returns the next scripted HP (max 390)."""
+
+    def __init__(self, reads):
+        super().__init__(hp=reads[0], max_hp=390)
+        self.reads, self.served, self.poked = list(reads), 0, False
+
+    def __call__(self, *args, pid=None, **kwargs):
+        if args[0] == "poke":
+            self.poked = True  # the readback then sees the write
+        elif args[0] == "peek" and not self.poked and f"0x{STATUS - BASE:X}:i32" in args[2]:
+            self.memory[STATUS] = self.reads[min(self.served, len(self.reads) - 1)]
+            self.served += 1
+        return super().__call__(*args, pid=pid, **kwargs)
+
+
+class Rows:
+    """The entities listing's Thorn row: the n-th listing shows hps[n] (the last one repeats)."""
+
+    def __init__(self, game, hps, replace_after=None):
+        self.game, self.hps, self.calls, self.replace_after = game, hps, 0, replace_after
+
+    def __call__(self, index):
+        hp = self.hps[min(self.calls, len(self.hps) - 1)]
+        replaced = self.replace_after is not None and self.calls >= self.replace_after
+        self.calls += 1
+        return [dict(THORN, hp=hp, maxHp=390, address="0x2B000000" if replaced else THORN["address"])]
+
+
+def context_rows(rows):
+    inst = SimpleNamespace(pid=4242)
+    return SimpleNamespace(test_only={"enemy_hp_write"}, inst=lambda index: inst, actors=rows, saved={})
+
+
 class EnemyHpStepTest(unittest.TestCase):
     def run_step(self, game, ctx, **step):
-        original = RUN.kh2ctl
-        RUN.kh2ctl = game
+        original, pause = RUN.kh2ctl, RUN.ENEMY_HP_AGREE_PAUSE_S
+        RUN.kh2ctl, RUN.ENEMY_HP_AGREE_PAUSE_S = game, 0
         try:
             return RUN.step_test_enemy_hp(ctx, {"do": "test_enemy_hp", "objectId": 307, "hp": 1, **step})
         finally:
-            RUN.kh2ctl = original
+            RUN.kh2ctl, RUN.ENEMY_HP_AGREE_PAUSE_S = original, pause
 
     def test_lowers_hp_after_identity_check(self):
         game, ctx = FakeGame(), context([dict(THORN)])
@@ -77,6 +111,35 @@ class EnemyHpStepTest(unittest.TestCase):
             with self.subTest(message), self.assertRaisesRegex(RUN.StepFailed, message):
                 self.run_step(game, context(actors), hp=hp)
             self.assertEqual(game.pokes, [])
+
+    def test_waits_until_status_and_row_agree_while_the_seats_fight(self):
+        """vuh2921-thorn-chain-01: a hit landed between the row and the status read (380 vs 370). The row is now read
+        between two status reads and taken only when all three agree; nothing is written before that."""
+        game = CombatGame([380, 370, 370, 370, 370])  # status reads in order: a hit between read 1 and the row
+        rows = Rows(game, [380, 370])                    # the row taken mid-hit, then settled
+        result = self.run_step(game, context_rows(rows), **{"as": "assist"})
+        self.assertEqual(game.pokes, [(4242, STATUS, "i32", 1)])
+        self.assertEqual((result["before"], result["attempts"]), ([370, 390], 2))
+
+    def test_a_hit_between_the_two_status_reads_is_not_agreement(self):
+        game = CombatGame([380, 370, 370, 370])  # attempt 1: 380, row 380, 370; attempt 2: 370, row 370, 370
+        rows = Rows(game, [380, 380, 370])
+        result = self.run_step(game, context_rows(rows))
+        self.assertEqual((result["before"], result["attempts"]), ([370, 390], 2))
+
+    def test_refuses_when_they_never_agree_and_writes_nothing(self):
+        game = CombatGame([390 - n for n in range(3 * RUN.ENEMY_HP_AGREE_ATTEMPTS + 3)])  # a hit before every read
+        rows = Rows(game, [500])
+        with self.assertRaisesRegex(RUN.StepFailed, f"disagrees with actor row 500/390 in all {RUN.ENEMY_HP_AGREE_ATTEMPTS}"):
+            self.run_step(game, context_rows(rows))
+        self.assertEqual(game.pokes, [])
+
+    def test_refuses_an_enemy_replaced_during_the_check(self):
+        game = CombatGame([380, 370, 370, 370])
+        rows = Rows(game, [380, 370], replace_after=1)
+        with self.assertRaisesRegex(RUN.StepFailed, "changed to"):
+            self.run_step(game, context_rows(rows))
+        self.assertEqual(game.pokes, [])
 
     def test_refuses_a_status_below_the_image(self):
         game = FakeGame()
