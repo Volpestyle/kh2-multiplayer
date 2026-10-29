@@ -1578,7 +1578,7 @@ def finish_pilot(ctx: Context, proc, end: float, inst, step: dict, name: str, ou
     if out.exists():
         ctx.artifacts += [f"{name}/{p.name}" for p in sorted(out.iterdir())]
     if stopped:
-        return {"exit": proc.returncode, "stopped": True}
+        return {"exit": proc.returncode, "stopped": True, "pid": proc.pid}
     if proc.returncode != 0 and not step.get("allowStuck", False):
         raise StepFailed(f"pilot exited {proc.returncode} (see {name}.log, {name}/pilot.jsonl)")
     return {"exit": proc.returncode}
@@ -1895,22 +1895,24 @@ def step_pilot_wait(ctx: Context, step: dict) -> dict:
 
     With `stop`, every pilot still running is killed first, all of them before any is collected, and
     collecting releases its keys (VUH-2921, lead #118: no combat pilot input may reach the post-fight
-    events). A stopped pilot passes; one that had already exited is judged by its own exit as before."""
+    events). A stopped pilot passes; one that had already exited is judged by its own exit as before. Stopping
+    is tracked by the runner's own Popen handle for that exact process, never by the step's display name: two
+    pilots may share a name (Ione 60a76c2b: a failed `pilot` read as stopped once another `pilot` was killed)."""
     if not isinstance(step.get("stop", False), bool):
         raise StepFailed("pilot_wait stop must be a boolean")
     pilots = ctx.saved.pop("_background_pilots", [])
-    stopped = set()
+    stopped = []  # the Popen handles this step killed
     if step.get("stop", False):
-        for proc, _end, _inst, _pstep, name, _out in pilots:
+        for proc, *_ in pilots:
             if proc.poll() is None:
                 proc.kill()
-                stopped.add(name)
+                stopped.append(proc)
         for proc, *_ in pilots:
             proc.wait(timeout=30)
     results, failure = {}, None
     for proc, end, inst, pstep, name, out in pilots:
         try:
-            results[name] = finish_pilot(ctx, proc, end, inst, pstep, name, out, stopped=name in stopped)
+            results[name] = finish_pilot(ctx, proc, end, inst, pstep, name, out, stopped=any(proc is killed for killed in stopped))
         except StepFailed as error:  # still collect (and release) the others first
             results[name], failure = {"error": str(error)}, failure or error
     if failure:

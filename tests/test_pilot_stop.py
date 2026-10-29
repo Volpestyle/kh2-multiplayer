@@ -99,8 +99,8 @@ class FightRoomExitTest(unittest.TestCase):
 
 
 class FakeProc:
-    def __init__(self, name, events, code=None):
-        self.name, self.events, self.returncode = name, events, code
+    def __init__(self, name, events, code=None, pid=None):
+        self.name, self.events, self.returncode, self.pid = name, events, code, pid
 
     def poll(self):
         return self.returncode
@@ -127,21 +127,31 @@ class PilotWaitStopTest(unittest.TestCase):
         self.events.append(("release", cmd[cmd.index("--pid") + 1]))
         return SimpleNamespace(returncode=0)
 
-    def pilots(self, *codes):
+    def pilots(self, *codes, names=None):
         out = Path(self.tmp.name)
+        names = names or [f"p{i}" for i in range(len(codes))]
         self.ctx.saved["_background_pilots"] = [
-            (FakeProc(f"p{i}", self.events, code), RUNNER.time.monotonic() + 1, SimpleNamespace(pid=100 + i),
-             {"input": "pad"}, f"p{i}", out / f"p{i}") for i, code in enumerate(codes)]
+            (FakeProc(f"p{i}", self.events, code, pid=900 + i), RUNNER.time.monotonic() + 1,
+             SimpleNamespace(pid=100 + i), {"input": "pad"}, names[i], out / names[i]) for i, code in enumerate(codes)]
 
     def test_stop_kills_every_running_pilot_before_collecting_any(self):
         self.pilots(None, None)
         result = RUNNER.step_pilot_wait(self.ctx, {"do": "pilot_wait", "stop": True})
         self.assertEqual(self.events, [("kill", "p0"), ("kill", "p1"), ("release", "100"), ("release", "101")])
-        self.assertEqual(result, {"p0": {"exit": 1, "stopped": True}, "p1": {"exit": 1, "stopped": True}})
+        self.assertEqual(result, {"p0": {"exit": 1, "stopped": True, "pid": 900},
+                                  "p1": {"exit": 1, "stopped": True, "pid": 901}})
         self.assertNotIn("_background_pilots", self.ctx.saved)
 
     def test_a_pilot_that_already_failed_still_fails(self):
         self.pilots(3, None)
+        with self.assertRaisesRegex(RUNNER.StepFailed, "pilot exited 3"):
+            RUNNER.step_pilot_wait(self.ctx, {"do": "pilot_wait", "stop": True})
+        self.assertEqual(self.events, [("kill", "p1"), ("release", "100"), ("release", "101")])
+
+    def test_a_failed_pilot_sharing_a_name_with_a_stopped_one_still_fails(self):
+        """Ione 60a76c2b: both pilots use the default name `pilot`; the first already exited 3, the second
+        is running. On ebe9b61 stopping the second marked the name, and the failure passed as stopped."""
+        self.pilots(3, None, names=["pilot", "pilot"])
         with self.assertRaisesRegex(RUNNER.StepFailed, "pilot exited 3"):
             RUNNER.step_pilot_wait(self.ctx, {"do": "pilot_wait", "stop": True})
         self.assertEqual(self.events, [("kill", "p1"), ("release", "100"), ("release", "101")])
