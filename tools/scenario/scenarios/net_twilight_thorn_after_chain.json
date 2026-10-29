@@ -84,7 +84,7 @@
     {
       "do": "save",
       "as": "evidence_scope",
-      "expr": "{'topology':'single-PC loopback, two native seats','input':'pad mailbox; no OS focus','boot':'FM-00 rehearsal, not New Game acceptance','clips':'30-second two-screen blocks; encoding gaps are not continuous footage','caption_work':'Burn in HOST / FRIEND and Single-PC loopback labels during final assembly; retain raw blocks','watchdog':'gameplay hang checks off across native event holds; all steps have fixed deadlines','reaction_observation':'Live08: existing read-only v7 promptHide from product-qualified actionable RC; raw cached RC remains diagnostic; routes/reach/timing/strategy unchanged'}"
+      "expr": "{'topology':'single-PC loopback, two native seats','input':'pad mailbox; no OS focus','boot':'FM-00 rehearsal, not New Game acceptance','clips':'none; no FMV is filmed or captured (lead #116): the me4 movie is proven by the host SaveGuard decode receipts','caption_work':'Burn in HOST / FRIEND and Single-PC loopback labels during final assembly; retain raw blocks','watchdog':'gameplay hang checks off across native event holds; all steps have fixed deadlines','reaction_observation':'Live08: existing read-only v7 promptHide from product-qualified actionable RC; raw cached RC remains diagnostic; routes/reach/timing/strategy unchanged'}"
     },
     {
       "do": "pilot",
@@ -246,18 +246,6 @@
       "timeoutMs": 420000
     },
     {
-      "do": "clip",
-      "instance": 0,
-      "seconds": 30,
-      "fps": 15,
-      "name": "me4_movie_host"
-    },
-    {
-      "do": "capture",
-      "instance": 1,
-      "name": "me4_movie_friend"
-    },
-    {
       "do": "pilot_wait"
     },
     {
@@ -274,11 +262,6 @@
       "do": "capture",
       "instance": 0,
       "name": "host_tt03_opening"
-    },
-    {
-      "do": "capture",
-      "instance": 1,
-      "name": "friend_while_host_tt03"
     },
     {
       "do": "wait_until",

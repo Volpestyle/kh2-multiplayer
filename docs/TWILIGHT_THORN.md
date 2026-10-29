@@ -545,6 +545,14 @@ requires the friend's active Sandlot opening and both exact load receipts, then 
 rows change only exact scene qualification; generic event holds and in-field replay descriptors are
 unchanged. Windows compilation and live completion need Ione's full review and the lead's PC slot.
 
+The fixture films and captures no FMV (lead #116). Run `vuh2921-thorn-chain-02` (main `d9bc74c`) passed the
+assisted kill and the victory, and the friend natively played 02/02 167 and 02/15 142 and queued 02/01 54. It then
+failed at a `clip` of the host's me4 movie: the in-renderer clip hooks `Present`, and FMV playback doesn't
+present through it ("The game isn't presenting frames"). That clip and two friend captures that could land on
+the friend's own, later me4 (`me4_movie_friend`, `friend_while_host_tt03`) are gone. The movie is proven by the
+host's SaveGuard decode receipts (`me4.mp4 -> ` at least once, then twice). `tests/test_thorn_after_chain_fixture.py`
+keeps clips out and friend captures out of the window from that decode to both seats in the tt03 dialog.
+
 Mac checks use the actual pure scene-control block from `EventHoldNativeInputTest.cpp`: strict C++20
 build and scoped ctest pass seven assertions, including all60 one-field near misses. Against the
 unchanged main table the same controls fail the chain and new-name assertions. The real scenario
