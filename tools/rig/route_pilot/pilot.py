@@ -1017,6 +1017,12 @@ class Pilot:
 
         while time.monotonic() < deadline:
             s = self.state()
+            if (s["world"], s["room"]) != room and s["world"] != 0xFF:
+                # No death on the way: the won fight's story moved on (Basement Hall -> 2/20). Checked before
+                # every other branch, so no Cross, Triangle or stick reaches the next room's events
+                # (vuh2921-thorn-chain-03: the not-free branch tapped Cross through the post-Thorn cutscenes).
+                self.kb.hold(set())
+                return {**stats, "exitRoom": [s["world"], s["room"]]}
             event_rc = event_reaction_allowed(s, event_scope, event_commands)
             if self.cooperative and self.cooperative.step(self, s, event_rc):
                 blocked_approach = None
@@ -1107,10 +1113,6 @@ class Pilot:
             foes = enemies(self.game.pid)
             if stats["enemiesStart"] is None:
                 stats["enemiesStart"] = len(foes)
-            if (s["world"], s["room"]) != room and s["world"] != 0xFF:
-                # No death on the way: the won fight's story moved on (Basement Hall -> 2/20).
-                self.kb.hold(set())
-                return {**stats, "exitRoom": [s["world"], s["room"]]}
             if not foes:
                 blocked_approach = None
                 self.kb.hold(set())

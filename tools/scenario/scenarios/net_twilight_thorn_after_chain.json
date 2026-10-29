@@ -233,7 +233,12 @@
     {
       "do": "wait_until",
       "expr": "log_count('[mission-mirror] host end trap=mission_dead_boss',0)==saved['thorn_baseline']['host_end']+1",
-      "timeoutMs": 120000
+      "timeoutMs": 120000,
+      "pollMs": 100
+    },
+    {
+      "do": "pilot_wait",
+      "stop": true
     },
     {
       "do": "save",
@@ -244,9 +249,6 @@
       "do": "wait_until",
       "expr": "len(log_matches(r'\\[saveguard\\] redirected [^\\n]*me4\\.mp4 -> ',0))>=1",
       "timeoutMs": 420000
-    },
-    {
-      "do": "pilot_wait"
     },
     {
       "do": "wait_until",

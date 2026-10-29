@@ -553,6 +553,16 @@ the friend's own, later me4 (`me4_movie_friend`, `friend_while_host_tt03`) are g
 host's SaveGuard decode receipts (`me4.mp4 -> ` at least once, then twice). `tests/test_thorn_after_chain_fixture.py`
 keeps clips out and friend captures out of the window from that decode to both seats in the tt03 dialog.
 
+Run this fixture through `tools/scenario/run_thorn.py` (on the desk: `desk-scenario.ps1 -Entry
+tools/scenario/run_thorn.py`), never plain `run.py`. Only the Thorn pilot (`route_pilot/thorn.py`) ends its fight
+on the first room change. `vuh2921-thorn-chain-03` ran through `run.py`: both Thorn pilots ran as the base pilot,
+tapped Cross through the post-Thorn cutscenes, and timed out at `pilot_wait`. Since lead #118, the fixture also
+stops both Thorn pilots with `pilot_wait` `stop` right at the host's `mission_dead_boss` receipt, polled every
+100 ms, and the base fight returns on a room change before any other branch. So no combat pilot input reaches
+the post-fight events through either pilot. The scene-scoped Cross presses in the tt03 dialog are the fixture's
+own, one seat at a time, and each is skipped unless that seat is in that dialog. `tests/test_pilot_stop.py` pins
+all three.
+
 Mac checks use the actual pure scene-control block from `EventHoldNativeInputTest.cpp`: strict C++20
 build and scoped ctest pass seven assertions, including all60 one-field near misses. Against the
 unchanged main table the same controls fail the chain and new-name assertions. The real scenario
