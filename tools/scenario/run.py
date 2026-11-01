@@ -42,8 +42,23 @@ RIG = ROOT / "build" / "rig"
 LOGS = RIG / "logs"
 LOCK = RIG / "rig.lock"
 RUNS = ROOT / "build" / "scenarios"
-SAVE_DIR = Path(os.environ["USERPROFILE"]) / "OneDrive" / "Documents" / "My Games" / \
-    "KINGDOM HEARTS HD 1.5+2.5 ReMIX"
+
+
+def _save_dir() -> Path:
+    """James's KH2 save folder (Steam Cloud syncs it). Resolved when first used rather than at import, so the
+    offline unit tests that import this module run where USERPROFILE is unset; anything that hashes saves
+    still fails loudly (KeyError) without it."""
+    return Path(os.environ["USERPROFILE"]) / "OneDrive" / "Documents" / "My Games" / \
+        "KINGDOM HEARTS HD 1.5+2.5 ReMIX"
+
+
+def __getattr__(name: str):
+    # Keeps `run.SAVE_DIR` (tools/rig/downed_spectate) working with the lazy lookup above.
+    if name == "SAVE_DIR":
+        return _save_dir()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 STEAM_OWNED = {"steam_autocloud.vdf"}  # written by the Steam client, not the game
 
 WARP_NAME = "Local\\kh2coop_warp_{pid}"
@@ -173,9 +188,10 @@ class RigLock:
 
 def hash_saves() -> dict[str, str]:
     out = {}
-    for path in sorted(SAVE_DIR.rglob("*")):
+    save_dir = _save_dir()
+    for path in sorted(save_dir.rglob("*")):
         if path.is_file():
-            out[str(path.relative_to(SAVE_DIR))] = hashlib.sha256(path.read_bytes()).hexdigest()
+            out[str(path.relative_to(save_dir))] = hashlib.sha256(path.read_bytes()).hexdigest()
     return out
 
 
