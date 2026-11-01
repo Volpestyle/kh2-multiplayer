@@ -9,12 +9,19 @@ This guide covers the **current ENet development path**, run from a matching
 built checkout with `kh2ctl`. For the Steam private package, use
 [the Steam guide](FRIEND_PLAYTEST_STEAM.md); it needs no Tailscale or separate
 relay. [Historical package instructions](FRIEND_PLAYTEST.md) cover the sealed protocol-10
-ENet preview; those are not current-source package instructions. The checked-in
-package validator/pins target protocol 18, so current protocol-34 packaging is
-blocked pending refresh and qualification ([details](../tools/packaging/README.md)).
+ENet preview; those are not current-source package instructions.
 
-Current source uses **protocol 34, AvatarBridge 4 and WorldBridge 13**. Rebuild
-all participating products together. The current launchers enable gameplay
+Read the current versions from the source, not from this guide: the wire
+protocol is `PROTOCOL_VERSION` in
+[`Protocol.hpp`](../common/include/kh2coop/Protocol.hpp), and the bridge versions
+are `AVATAR_BRIDGE_VERSION` in [`AvatarBridge.hpp`](../common/include/kh2coop/AvatarBridge.hpp)
+and `WORLD_BRIDGE_VERSION` in [`WorldBridge.hpp`](../common/include/kh2coop/WorldBridge.hpp).
+The package pin is [`friend-products.json`](../tools/packaging/friend-products.json).
+At the time of writing these are protocol 40, AvatarBridge 4 and WorldBridge 13,
+and the pin names a protocol-40 / AvatarBridge-4 product cohort; that pin is an
+input inventory, and a real ZIP self-check and install/join acceptance are still
+required ([packaging](../tools/packaging/README.md)). Rebuild all participating
+products together. The current launchers enable gameplay
 features listed in [known limits](FRIEND_PLAYTEST_KNOWN_ISSUES.md); the raw
 commands below do not reproduce those environment defaults automatically.
 Use the launcher for that player configuration, or deliberately supply the
@@ -98,7 +105,8 @@ Tailscale-relayed connections can work; see Tailscale's
 
 ## Matching runtime configuration (both PCs)
 
-Use **protocol 34** binaries for relay and runtimes. Protocol version is
+Use relay and runtime binaries built from the same checkout, so they share the
+`PROTOCOL_VERSION` in `Protocol.hpp` (see above). Protocol version is
 compiled in; there is no `--protocol` flag or runtime config key to change it.
 The game-build identifier below is the reported compatibility value, not the
 Windows executable's file-version field. Always specify the port: relay and
@@ -219,7 +227,7 @@ through `kh2ctl`.
 ## Historical ENet checks and current limits
 
 The dated runs below used their original products. Their counts are historical
-evidence, not protocol-34 regressions. Current gameplay limits are maintained
+evidence, not regressions in current source. Current gameplay limits are maintained
 in [known issues](FRIEND_PLAYTEST_KNOWN_ISSUES.md).
 
 - Without `--bind`, the relay listens on every network interface,

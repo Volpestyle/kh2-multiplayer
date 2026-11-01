@@ -4,10 +4,16 @@ The Steam transport passed its two-account, two-PC rev11 check. The package
 passed launch/title/exit (UX07) and technical GUI host/join (JOIN05). Effective
 movement with a clearly responding puppet on both package screens and a
 physical-controller friend session still need qualification. Use the specific
-matching package supplied by your host; current source is protocol 34,
-AvatarBridge 4 and WorldBridge 12, not the old acceptance products. The checked-in
-package validator/pins still target protocol 18; they cannot produce a current
-protocol-34 ZIP unchanged. See [packaging](../tools/packaging/README.md).
+matching package supplied by your host, not the old acceptance products. For the
+current versions, read the source rather than this guide: the wire protocol
+is `PROTOCOL_VERSION` in
+[`Protocol.hpp`](../common/include/kh2coop/Protocol.hpp), and the bridge versions
+are `AVATAR_BRIDGE_VERSION` in [`AvatarBridge.hpp`](../common/include/kh2coop/AvatarBridge.hpp)
+and `WORLD_BRIDGE_VERSION` in [`WorldBridge.hpp`](../common/include/kh2coop/WorldBridge.hpp).
+The package pin is [`friend-products.json`](../tools/packaging/friend-products.json).
+At the time of writing these are protocol 40, AvatarBridge 4 and WorldBridge 13,
+with a protocol-40 product cohort pinned; a real ZIP self-check and install/join
+acceptance of that pin are still required. See [packaging](../tools/packaging/README.md).
 
 You need Steam running, signed in to your account owning KINGDOM HEARTS HD
 1.5+2.5 ReMIX, Windows, and the exact supported Steam Global KH2 build. No
