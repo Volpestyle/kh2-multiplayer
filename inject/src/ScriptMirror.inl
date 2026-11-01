@@ -105,6 +105,7 @@ static void SmAxelCameraNativesInstall(uintptr_t,bool(*)(std::uint32_t,const std
 static void SmAxelCameraHooksInstall(bool(*)(R::AxelCameraHook));
 static void SmAxelCameraHooksRevoke();
 static void SmAxelClientReset();
+static void SmAxelHostRoomReset();
 static bool SmAxelCloneHeld(const ScriptActorRole&);
 static bool SmAxelApplyHold(ScriptActorRole&,bool) noexcept;
 static R::Call SmAxelHoldRecord(const ScriptActorRole&,bool);
@@ -693,6 +694,7 @@ static void SmResetRoom(bool retire = true) {
     g_sm.retirements.Reset();
     g_sm.occurrences.Reset();g_sm.reactions={};
     SmAxelClientReset();
+    SmAxelHostRoomReset();
     g_sm.hostEffects.Reset();
     g_sm.hostAttacks.Reset();
     g_sm.clientEffects.Reset();

@@ -790,6 +790,14 @@ int main() {
         check(!fade(Kind::WhiteOut,70.0f) && !g_axel.fade.thread,"a D303 that never whites in expires at its lease");
         (void)friendClearLight();running(kThread,kAxel);++enemysync::scope.epoch;
         check(fade(Kind::WhiteOut,70.0f) && g_axel.fade.thread && CameraOps().empty(),"another epoch blocks delivery without retiring custody or restoring native");
+        // VUH-2915: a room reset (any load, an Axel II Continue included) is what retires it, before the next room's frames.
+        SmAxelHostRoomReset();
+        check(!fade(Kind::WhiteOut,70.0f) && !g_axel.fade.thread && !g_axel.fade.pending && g_axel.olderFades.empty() &&
+              g_axel.nativeFades.empty() && !g_axel.cameraOwner.axel && !g_axel.actor && !g_axel.executor.command &&
+              CameraOps().empty(),
+              "a room reset retires the old room's D303 custody, camera handoff and host Axel, so the next room's fades are native");
+        SmAxelHostRoomReset();
+        check(!g_axel.actor && !g_axel.fade.thread,"a second room reset with nothing held changes nothing");
         Setup(1u<<R::kOvertakerGroup);Frame();
         handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});node();
         running(kOther,kAxel);duringCallback=queue;emitOk=false;

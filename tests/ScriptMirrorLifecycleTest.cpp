@@ -81,6 +81,7 @@ static bool g_smLifetimeReady=true;
 static std::atomic<bool> g_smLifetimeReliable{true};
 static void SmOwnerReset(bool) {}
 static void SmAxelClientReset() {}
+static void SmAxelHostRoomReset() {}
 static int SmOwnerApply(const R::Call&,uintptr_t) { return 0; }
 static int SmApplyReactionOffer(const R::Call&,uintptr_t) { return 0; }
 static int SmApplyReactionOwner(const R::Call&,uintptr_t) { return 0; }

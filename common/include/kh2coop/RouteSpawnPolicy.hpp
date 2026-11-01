@@ -115,6 +115,13 @@ inline bool MissingPartyLoadCurrent(std::uint32_t beforeLoad,std::uint32_t trans
     return beforeLoad && beforeLoad!=UINT32_MAX && transition && transition==currentTransition &&
         load==beforeLoad+1 && !pending;
 }
+// VUH-2915: an encounter body's scope belongs to the load that constructed it, while that load is pending and after
+// its completion (load advanced once, same transition), never a later load at the same NOW such as a Continue.
+inline bool EncounterLoadCurrent(std::uint32_t stampLoad,std::uint32_t stampTransition,
+                                 std::uint32_t load,std::uint32_t transition) {
+    return stampLoad && stampLoad!=UINT32_MAX && stampTransition && stampTransition==transition &&
+        (load==stampLoad || load==stampLoad+1);
+}
 // Negative fence only: same native stack, including a failed stack sample.
 inline bool SameConstructionStack(std::uint32_t ownerThread,std::uintptr_t ownerHigh,
                                   std::uint32_t thread,std::uintptr_t low,std::uintptr_t high) {

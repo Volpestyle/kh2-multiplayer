@@ -140,6 +140,15 @@ void bailey() {
     check(!MissingPartyLoadCurrent(4,4,5,4,true),"pending teardown blocks old body");
     check(!MissingPartyLoadCurrent(UINT32_MAX,4,0,4,false),"serial wrap fails closed");
     check(!MissingPartyLoadCurrent(0,4,1,4,false),"unknown construction serial refused");
+    // VUH-2915: the encounter scope (Axel II's 0x323 body) follows its construction load, not just its NOW.
+    check(EncounterLoadCurrent(4,4,4,4),"scope admits its own construction while the load is pending");
+    check(EncounterLoadCurrent(4,4,5,4),"scope admits after that load completes");
+    check(!EncounterLoadCurrent(4,4,6,4),"a later load at the same NOW (a Continue) ends the scope");
+    check(!EncounterLoadCurrent(4,4,5,5),"a new transition ends the scope");
+    check(!EncounterLoadCurrent(4,4,3,4),"an older load never admits");
+    check(!EncounterLoadCurrent(0,4,0,4),"no construction stamp refused");
+    check(!EncounterLoadCurrent(4,0,4,0),"unknown transition refused");
+    check(!EncounterLoadCurrent(UINT32_MAX,4,0,4),"serial wrap fails closed");
     check(SameConstructionStack(7,0x20000,7,0x10000,0x20000),"lost FLS on active native stack remains fenced");
     check(!SameConstructionStack(7,0x20000,8,0x10000,0x20000),"another thread cannot inherit the construction fence");
     check(!SameConstructionStack(7,0x20000,7,0x30000,0x40000),"parked fiber cannot fence another fiber on the same thread");
