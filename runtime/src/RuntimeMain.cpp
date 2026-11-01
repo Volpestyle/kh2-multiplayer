@@ -2130,10 +2130,16 @@ int main(int argc, char* argv[]) {
                 if (returnField) {
                     // VUH-2640 H1: don't spend the epoch on a capture that would refuse.
                     const auto ready = game.ReadRecoveryReadiness();
+#ifdef _WIN32
                     kh2coop::LocalDownedState hostDowned;
                     const bool downedRead = avatarBridge.ReadLocalDownedState(hostDowned);
                     const bool downedOrUnknown = kh2coop::HostDownedOrUnknown(downedRead, hostDowned,
                         {worldSessionGeneration, worldBridge.DeliverySerial(), 0}, GetTickCount64(), room);
+#else
+                    // No AvatarBridge off-Windows: the host's downed publication is unread, which
+                    // HostDownedOrUnknown counts as downed (fail closed).
+                    const bool downedOrUnknown = true;
+#endif
                     // VUH-2640 Leg A: in a reviewed boss arena the boss mission is the sit-out admission's case.
                     const bool bossArena = kh2coop::bossarena::Find(room.worldId, room.roomId, room.door,
                         room.mapProgram, room.battleProgram, room.eventProgram) != nullptr;
@@ -2144,7 +2150,9 @@ int main(int argc, char* argv[]) {
             returningSeatRecovery.Pump(returnContext, returnField,
                 [&]() { return netClient->resyncBusy(); }, submitAutomaticResync);
             // VUH-2640 H2: the host DLL's evidence of a quarantined (returning) seat, by connection.
+#ifdef _WIN32
             worldBridge.SetReturningConnections(returningSeatRecovery.PendingConnections());
+#endif
             if (membershipInvalidated) {
                 membershipInvalidated = false;
                 retireNetworkState();
