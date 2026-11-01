@@ -1531,7 +1531,7 @@ AVATARCTL = ROOT / "build" / "Release" / "avatarctl.exe"
 def start_process(ctx: Context, name: str, cmd: list[str], env: dict | None = None) -> subprocess.Popen:
     log = open(ctx.run_dir / f"{name}.log", "w")  # noqa: SIM115 - closed with the process
     proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env,
-                            creationflags=subprocess.CREATE_NO_WINDOW)
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     ctx.processes.append((name, proc, log))
     ctx.artifacts.append(f"{name}.log")
     return proc
@@ -1588,7 +1588,7 @@ def finish_pilot(ctx: Context, proc, end: float, inst, step: dict, name: str, ou
             proc.kill()
         released = subprocess.run([sys.executable, "-B", str(PILOT), "--pid", str(inst.pid), "--release-all",
                         "--input", step.get("input", "pad")],
-                       capture_output=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+                       capture_output=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if isinstance(step.get("_releaseReceipt"), dict):
             step["_releaseReceipt"]["exit"] = released.returncode
     if out.exists():
