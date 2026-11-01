@@ -2,6 +2,7 @@
 #include "kh2coop/SessionHost.hpp"
 #include "kh2coop/AppliedStateHash.hpp"
 #include "kh2coop/AutomaticResyncNotice.hpp"
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -10,6 +11,14 @@
 #include <algorithm>
 #include <chrono>
 using namespace kh2coop;
+// _putenv_s is MSVC-only. Off-Windows, mirror it: an empty value removes the variable, as _putenv_s does.
+static int setDiagnosticsEnv(const char* name,const char* value){
+#ifdef _WIN32
+    return _putenv_s(name,value);
+#else
+    return *value?setenv(name,value,1):unsetenv(name);
+#endif
+}
 int checks=0, failures=0;
 void check(bool yes,const char* label){++checks;failures+=!yes;std::cout<<(yes?"PASS ":"FAIL ")<<label<<'\n';}
 std::string field(const std::string& row,const std::string& key){const auto p=" "+key+"=";auto at=row.find(p);if(at==std::string::npos)return {};at+=p.size();return row.substr(at,row.find(' ',at)-at);}
@@ -246,10 +255,10 @@ int main(){
     std::ofstream raw("relay-raw.log");std::vector<std::string> rows;
     const CausalSink sink=[&](const auto& row){rows.push_back(row);raw<<row<<'\n';raw.flush();return raw.good();};
     for(const char* setting:{"","0","01","true","2"," 1"}){
-        _putenv_s("KH2COOP_CAUSAL_DIAGNOSTICS",setting);SessionConfig c;SessionCallbacks cb;cb.onHashDiagnostic=sink;
+        setDiagnosticsEnv("KH2COOP_CAUSAL_DIAGNOSTICS",setting);SessionConfig c;SessionCallbacks cb;cb.onHashDiagnostic=sink;
         SessionHost h(c,cb);h.sealHashDiagnostics();check(rows.empty()&&h.hashDiagnostics().seals==0,"only exact opt-in can activate callback/counters");
     }
-    _putenv_s("KH2COOP_CAUSAL_DIAGNOSTICS","1");
+    setDiagnosticsEnv("KH2COOP_CAUSAL_DIAGNOSTICS","1");
     SessionConfig cfg;cfg.bindAddress="127.0.0.1";cfg.port=17974;cfg.gameBuild="hash-private";cfg.modHash="m";cfg.contentHash="c";
     SessionCallbacks cb;cb.onHashDiagnostic=sink;SessionHost relay(cfg,cb);check(relay.start(),"owned real ENet relay starts");
     std::array<std::unique_ptr<NetworkClient>,2> clients;unsigned notices=0,automaticRequests=0;std::vector<DesyncNotice> noticeRows;
