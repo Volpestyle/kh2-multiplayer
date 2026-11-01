@@ -406,7 +406,7 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
     argument, source/handle, scope or camera name reserves owner custody and drops the candidate; recovery cannot
     split the sequence. Positively unrelated objects stay native. The handoff captures the original role's resource,
     connection, actor, source incarnation and epoch before later observations can fail. Executor retirement and
-    host Axel reset do not erase that snapshot; late start/watch calls remain sent or dropped until completion or
+    host Axel reset do not erase that snapshot (a room reset does: see the end below); late start/watch calls remain sent or dropped until completion or
     the 600-frame lease. A known new RC takes its own snapshot, while older D303 bindings remain independent.
   - **All six hooks or none** (`AxelCameraHooks`, Ione's `629ab5f1`). Custody needs every slot the sequence's ops
     arrive through: 1/164, 1/207, 0/31, 0/32, 1/295 and 2/20. They install in that order (`SmAxelCameraHooksInstall`),
@@ -457,7 +457,10 @@ ScriptActorOwner is a recorder there. Not exercised on the Mac:
       Multiple unfinished D303 bindings keep their own role identities and original leases.
     - **The end.** Only an identified D303 white-in, with readable arguments and matching scope, retires that
       binding, or `kAxelFadeLeaseFrames` (600) expires. An unread white-in, executor reset, handle replacement or
-      epoch change does not retire it. Expiry is checked on the frame tick as well as hook entry. **Bound:** the
+      epoch change does not retire it. A room reset does (`SmAxelHostRoomReset`, VUH-2915): from the first frame of
+      any transition or load, a Continue included, every binding, the camera handoff and the host's Axel are dropped,
+      so after load complete the host's fades are native again. A D303 op the old room still runs inside that
+      transition plays on the host; load complete's fade-in clears it. Expiry is checked on the frame tick as well as hook entry. **Bound:** the
       existing lease still permits native execution after expiry; isolation beyond 600 frames is not claimed.
     - **Hooks.** Its four slots are among custody's six: refused, there is no custody, so D303 plays on the host.
   - **The friend's replay** (`SmAxelApplyCameraOp`). Op 17 replays only on the owner's own Axel role, never a

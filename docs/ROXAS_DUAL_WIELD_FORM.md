@@ -41,8 +41,9 @@ native Roxas. Later unpinned fields keep the existing unpinned-field rule (nativ
 (`encounter=true`): `qualifiedKit`, `ProfileQualified`, party kits, the solo kit path and the roster gates all
 still refuse it. Only `bodyKit(member, encounterAllowed)` and the descriptor checks with `encounterAllowed`
 admit it, and `privatestatus::EncounterScope()` grants that only after the site's own missing-party construction
-and only while NOW is still exactly that site. It retains the canonical static site row (`EncounterSiteAt`), never
-the per-seat copy ingress builds on its stack, and clears it on the first read at another NOW. Any other load
+and only while NOW is still exactly that site and the load is the one that built it (pending, or completed once in
+the same transition: `routespawn::EncounterLoadCurrent`, VUH-2915). It retains the canonical static site row (`EncounterSiteAt`), never
+the per-seat copy ingress builds on its stack, and clears it on the first read at another NOW or another load. Any other load
 (the native Continue to the Computer Room `02/15 d99`) ends it, and the existing `MissingPartyLoadCurrent` check
 refuses every reference to the old clone.
 

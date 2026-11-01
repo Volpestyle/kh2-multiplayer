@@ -69,10 +69,12 @@ static void SmAxelHostReset() {
     SmAxelEndExecutor("host-axel-gone");
     g_axel.windows.Reset();g_axel.actor=0;g_axel.handle=0;g_axel.netId=0;g_axel.epoch=0;
 }
-// Host, from ScriptMirror's room reset (a load, Continue included, or a transition): the old room's Axel, executor,
-// camera handoff and D303 custody all name native objects that teardown destroyed, and load complete has already
-// faded every record in. Dropped here, before the next room's first frame, never left for their leases to expire or
-// for SmAxelFrame's next admission to notice. A friend's owed white-in is its own load-keyed debt and is kept.
+// Host, from ScriptMirror's room reset, which runs from the first frame of a transition or load (a Continue included)
+// through its completion: the old room's Axel, executor, camera handoff and D303 custody name native objects that
+// teardown destroys, and load complete fades every record in. Dropped from that first frame on, never left for their
+// leases to expire or for SmAxelFrame's next admission to notice. A D303 op the old room still runs inside the
+// transition plays natively on the host (load complete's fade-in then clears it). A friend's owed white-in is its own
+// load-keyed debt and is kept.
 static void SmAxelHostRoomReset() {
     SmAxelHostReset();
     const bool held=g_axel.cameraOwner.axel || g_axel.fade.axel || g_axel.fade.thread || g_axel.fade.pending ||

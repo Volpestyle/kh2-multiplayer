@@ -819,6 +819,10 @@ int main() {
         check(!g_axel.fade.thread && watched && g_axel.nativeFades.size()==1 &&
               g_axel.nativeFades.front().thread==kThread && g_axel.nativeFades.front().threadHandle==kThreadHandle,
               "the host's own RC supplies native thread proof without adopting any Owner binding");
+        g_axel.olderFades.push_back(g_axel.nativeFades.front());g_axel.watchPending=true;
+        SmAxelHostRoomReset();
+        check(g_axel.nativeFades.empty() && g_axel.olderFades.empty() && !g_axel.watchPending && !SmAxelFadePending(),
+              "a room reset also drops the old room's native D303 proofs, older bindings and a pending watch");
         Setup(1u<<R::kOvertakerGroup);Frame();reads=0;
         check(!SmAxelThreadWatched() && !SmAxelFadePending() && !SmAxelFade(Kind::WhiteOut,nullptr) && !reads,
               "with no retained proof and no validated callback running, the 2/20, fade and reset hooks read nothing");
