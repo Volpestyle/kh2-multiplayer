@@ -1064,6 +1064,16 @@ find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
     file(GLOB _kh2coop_python_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_*.py")
     list(FILTER _kh2coop_python_tests EXCLUDE REGEX "/test_runtime_desync\\.py$")
+    if(NOT WIN32)
+        # These drive Windows itself, so they run only on Windows:
+        #   desk_gate_disk_floor, desk_gate_foreground: run tools/rig/desk_gate/agent.ps1 in Windows PowerShell 5.1
+        #     (and the foreground window inventory).
+        #   downed_kill_step, pilot_pad: create and read the inject's named shared memory (mmap tagname,
+        #     CreateFileMappingW).
+        #   movie_twins: NTFS junctions (_winapi.CreateJunction) and OpenProcess liveness.
+        list(FILTER _kh2coop_python_tests EXCLUDE REGEX
+             "/test_(desk_gate_disk_floor|desk_gate_foreground|downed_kill_step|pilot_pad|movie_twins)\\.py$")
+    endif()
     foreach(_kh2coop_python_test IN LISTS _kh2coop_python_tests)
         get_filename_component(_kh2coop_python_name "${_kh2coop_python_test}" NAME_WE)
         add_test(NAME kh2coop_py_${_kh2coop_python_name}
