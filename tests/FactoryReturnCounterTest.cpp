@@ -1,3 +1,8 @@
+// NativePrivateStatus.hpp declares the game-facing wrapper type with MSVC's __fastcall. x64 ignores it (one
+// calling convention), so off-Windows spell it as nothing; this test only exercises the portable counters.
+#if !defined(_WIN32) && !defined(__fastcall)
+#define __fastcall
+#endif
 #include "NativePrivateStatus.hpp"
 #include <cstdio>
 #include <type_traits>
