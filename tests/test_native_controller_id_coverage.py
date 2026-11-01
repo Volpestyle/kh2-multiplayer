@@ -347,7 +347,7 @@ class Integration(unittest.TestCase):
 
     def test_fixture_is_exact_resource_parent_with_six_added_options(self):
         directory=ROOT/'tools/scenario/scenarios';old=directory/'net_reconnect_shadows_resource_bindings_trace.json'
-        self.assertEqual(hashlib.sha256(old.read_bytes()).hexdigest().upper(),'4F5D7D963D73064CA581A7B509EAAABFCF9747901966FA270A2EBCE50867714A')
+        self.assertEqual(binding_tests.crlf_text_sha256(old),'4F5D7D963D73064CA581A7B509EAAABFCF9747901966FA270A2EBCE50867714A')
         previous=json.loads(old.read_text());new=json.loads((directory/'net_reconnect_shadows_controller_records_phase_trace.json').read_text())
         self.assertEqual(new.pop('name'),'net_reconnect_shadows_controller_records_phase_trace');previous.pop('name')
         chosen=[i for i,s in enumerate(new['steps']) if 'controllerIdCoverage' in s]
