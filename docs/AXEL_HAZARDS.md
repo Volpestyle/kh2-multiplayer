@@ -162,8 +162,9 @@ within the established ownership design.
 The bounded reader is [axel_inventory_extract.py](../tools/rig/axel_inventory_extract.py),
 with the exact names, hash constraints and offset rules in
 [axel_inventory_plan.json](../tools/rig/axel_inventory_plan.json). With no arguments
-it prints that plan and reads no installation. It selects thirteen original
-assets by exact UTF-8 name MD5 across the six KH2 HEDs; it never bulk-extracts a
+it prints that plan and reads no installation. It selects the plan's required original
+assets (fourteen since VUH-2916 added `07localset.bin`) and reports any absent optional
+ones (`absentOptionalAssets`) by exact UTF-8 name MD5 across the six KH2 HEDs; it never bulk-extracts a
 PKG or its remastered textures/audio. It retains the pinned PE, every selected
 original, each BAR entry range/hash, AI subentries, selected ATKP row ranges and
 native trap table/file offsets. Full originals retain collision, PAX and all
@@ -174,7 +175,8 @@ desk gate, including idle ≥1800 seconds, no foreign game/OBS or desk job, no
 HOLD/needs-verify, free rig lock and C: ≥20 GiB with headroom. Hold the canonical
 rig lock for this first step of the future slot, before the VUH-2921 fixture.
 The script also refuses less than20 GiB plus512 MiB headroom. It is not a desk
-gate, a lease or permission to access PC1. No extraction has been attempted.
+gate, a lease or permission to access PC1. The 2026-10-29 `vuh2914-installed-02` capture (top of this
+document) used this reader.
 
 Supply a local copy of the pinned OpenKH `EgsEncryption.cs` (URL/full hash in the
 plan). Verify the extractor commit and the reference hash before running. From
@@ -190,7 +192,7 @@ python tools/rig/axel_inventory_extract.py `
 The output must be new and strictly within that worktree's real `.local/`.
 Input packages open read-only. Any PE/HED pin or prior partial asset constraint
 mismatch stops capture; a partial capture is never qualified. Read `capture.json`
-and require `complete=true`, all thirteen originals, full hashes and expected
+and require `complete=true`, every required original, full hashes and expected
 BAR/ATKP entries before proceeding. A capture is still **unqualified against
 installed semantics** until decoded/native evidence is checked.
 

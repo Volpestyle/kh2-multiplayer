@@ -14,6 +14,9 @@ a finding.
 - Same method and guards as `docs/AXEL_HAZARDS.md` "Read-only extraction": owned
   worktree, full desk gate, rig lock, pinned PE `9002b2de…` and HED hashes, OpenKH
   `7a3b945c` with its `EgsEncryption.cs` hash checked, output only under `.local/`.
+  The plan in this branch has more required assets than the earlier capture (it adds
+  `07localset.bin`) plus optional ones; the plan file, not a count in another doc, is
+  what a complete capture must match.
 - Originals, decodes and PE stay in `.local/`. Commit only hashes, ids, offsets,
   program numbers and derived tables. Pushing or posting the findings waits for
   James's yes.
@@ -56,7 +59,12 @@ for `docs/PROLOGUE_ENCOUNTERS.md`; the capture does not interpret them.
 
 For each fight: Axel I is 02/05 btl87, `TT05_MS404` (mission 185), object 2229,
 `Argument1=1`. Axel II is 02/14 btl137, `TT20_MS603` (mission 189), object 81, type 3,
-`Argument1=0`.
+`Argument1=0`. The object and `Argument1` split is qualified (`docs/AXEL_HAZARDS.md`,
+2026-10-29 capture); the battle programs, mission files and mission ids are not.
+
+0. **Battle program and mission.** In each room ARD, the battle program that spawns
+   Axel and the mission it loads: its file name and mission id. The victory table
+   (`common/include/kh2coop/BossVictories.hpp`) needs both.
 
 1. **End trap.** In the mission BAR's BDX, the state that runs when Axel is beaten:
    which trap it calls (4/3, 4/16 or another) and with what argument. Also the
@@ -92,4 +100,5 @@ For each fight: Axel I is 02/05 btl87, `TT05_MS404` (mission 185), object 2229,
 A findings table per fight in the shape of the Thorn tables, with full SHA-256 of
 every file read and the PE and HED pins confirmed. Mark each answer as read from
 installed bytes or still open. That table is enough to add Axel I and Axel II to
-`BossArenas.hpp` and to write the victory and retry code and fixtures off-PC.
+the victory table, `common/include/kh2coop/BossVictories.hpp` (not `BossArenas.hpp`,
+whose rows grant a sit-out), and to write the victory and retry code and fixtures off-PC.
