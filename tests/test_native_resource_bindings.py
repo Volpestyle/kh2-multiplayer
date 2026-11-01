@@ -15,6 +15,12 @@ from test_geometry_position_receipts import collector_module, Memory as Geometry
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def crlf_text_sha256(path):
+    """SHA-256 of a text fixture as a Windows (core.autocrlf) checkout writes it: the pinned hashes below were
+    taken there. Normalising to CRLF gives the same digest on an LF checkout and changes nothing on a CRLF one."""
+    return hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')).hexdigest().upper()
+
+
 class Memory:
     base = 0x140000000
 
@@ -433,7 +439,7 @@ class Integration(unittest.TestCase):
     def test_new_fixture_is_only_first_six_census_opt_ins_and_name_change(self):
         old_path = ROOT/'tools/scenario/scenarios/net_reconnect_shadows_outside_endpoints_trace.json'
         new_path = old_path.with_name('net_reconnect_shadows_resource_bindings_trace.json')
-        self.assertEqual(hashlib.sha256(old_path.read_bytes()).hexdigest().upper(),
+        self.assertEqual(crlf_text_sha256(old_path),
                          '10B4DBA17C11A75BA2CF2AE7B49FB45FE955AA0BC1DD6CDF43041BBB4B127ED1')
         old, new = (json.loads(p.read_text(encoding='utf-8')) for p in (old_path, new_path))
         self.assertEqual(len(old['steps']), 282); self.assertEqual(len(new['steps']), 282)
