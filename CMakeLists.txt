@@ -305,8 +305,16 @@ if(MSVC)
 else()
     target_compile_options(kh2coop_script_lifecycle_test PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-unused-function)
     # Native destruction reenters allocation-forget: make invalid traversal observable.
-    target_compile_options(kh2coop_script_lifecycle_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-    target_link_options(kh2coop_script_lifecycle_test PRIVATE -fsanitize=address)
+    # Only when the toolchain can link ASan (some clang installs ship without its runtime).
+    include(CheckLinkerFlag)
+    check_linker_flag(CXX -fsanitize=address KH2COOP_CAN_LINK_ASAN)
+    if(KH2COOP_CAN_LINK_ASAN)
+        target_compile_options(kh2coop_script_lifecycle_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(kh2coop_script_lifecycle_test PRIVATE -fsanitize=address)
+    else()
+        message(WARNING "kh2coop_script_lifecycle_test: this toolchain cannot link -fsanitize=address; "
+                        "the test builds and runs without AddressSanitizer")
+    endif()
 endif()
 
 add_executable(kh2coop_spawn_emission_test tests/SpawnEmissionTest.cpp)
