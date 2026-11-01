@@ -1057,6 +1057,23 @@ else()
 endif()
 add_test(NAME kh2coop_bailey_creeper_authority_test COMMAND kh2coop_bailey_creeper_authority_test)
 
+# VUH-2615, VUH-2627, VUH-2360: tests that bind the same fixed loopback ports must not run at once under ctest -j
+# (the second relay fails to start, or a test reads the other's traffic). The groups come from tracing bind() for
+# every ctest entry on Linux, plus BridgeTest's 17797 (Windows-only). One lock per shared port group; a test may
+# hold several. A port moved to a group of its own needs its lock here updated.
+function(kh2coop_port_lock lock)
+    foreach(_kh2coop_lock_test IN LISTS ARGN)
+        if(TEST ${_kh2coop_lock_test})
+            set_property(TEST ${_kh2coop_lock_test} APPEND PROPERTY RESOURCE_LOCK ${lock})
+        endif()
+    endforeach()
+endfunction()
+kh2coop_port_lock(kh2coop_port_17796_17797 kh2coop_avatar_test kh2coop_world_test kh2coop_bridge_test)
+kh2coop_port_lock(kh2coop_port_17821_17824 kh2coop_hp_order_test kh2coop_recovery_test)
+kh2coop_port_lock(kh2coop_port_17843 kh2coop_world_test kh2coop_resync_test)
+kh2coop_port_lock(kh2coop_port_17851 kh2coop_resync_test kh2coop_enemy_mirror_test)
+kh2coop_port_lock(kh2coop_port_29877 kh2coop_party_intent_test kh2coop_revive_test)
+
 # The Python unit tests (tests/test_*.py) run under ctest, so a governed build catches a stale fixture. Five of them
 # sat red for days because nothing ran them. test_runtime_desync.py is a harness that needs --bin-dir and
 # --out-root, so it's left out.
