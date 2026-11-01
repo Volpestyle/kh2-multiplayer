@@ -3,10 +3,13 @@
 #include "kh2coop/BossArenas.hpp"
 #include "kh2coop/BossVictories.hpp"
 #include "kh2coop/EventScenes.hpp"
+#include "MissionMirror.hpp"
 #include <cstdio>
+#include <cstring>
 #include <string_view>
 
 namespace V = kh2coop::bossvictory;
+namespace MR = kh2coop::inject::missionmirror::rules;
 unsigned failures=0,checks=0;
 void check(bool value,const char* name) { ++checks;if(!value){++failures;std::printf("FAIL %s\n",name);} }
 
@@ -40,6 +43,20 @@ int main() {
         for(std::size_t j=i+1;j<V::Victories.size();++j)
             check(V::Victories[i].missionFile!=V::Victories[j].missionFile && V::Victories[i].name!=V::Victories[j].name,
                   "victory rows have distinct mission files and names");
+
+    // The mission mirror's lookup over its NUL-padded file buffers matches the old literal compare exactly.
+    char file[MR::kFileBytes] {};
+    check(MR::FileOf("msn/us/TT34_MS304.bar",sizeof("msn/us/TT34_MS304.bar"),file) && MR::VictoryOf(file)==&t,
+          "a mission path's file finds Thorn's row in the mission mirror");
+    for(const char* name : {"","TT34_MS304.bar","TT34_MS304","TT34_MS304.ba","TT34_MS304.barX","tt34_ms304.bar",
+                            "TT05_MS404.bar","TT20_MS603.bar","MU01_MS102.bar"}) {
+        std::memset(file,0,sizeof(file));std::memcpy(file,name,std::strlen(name));
+        check((MR::VictoryOf(file)==&t)==MR::SameFile(file,"TT34_MS304.bar") &&
+              (MR::VictoryOf(file)!=nullptr)==MR::SameFile(file,"TT34_MS304.bar"),
+              "VictoryOf agrees with SameFile against Thorn's literal");
+    }
+    std::memset(file,'X',sizeof(file));std::memcpy(file,"TT34_MS304.bar",14);
+    check(!MR::VictoryOf(file),"an unterminated file buffer finds no victory");
 
     std::printf("%s (%u/%u)\n",failures?"FAILED":"ALL PASSED",checks-failures,checks);
     return failures?1:0;
