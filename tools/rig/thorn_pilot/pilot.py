@@ -66,9 +66,25 @@ VK = {"ENTER": 0x0D, "ESCAPE": 0x1B, "SPACE": 0x20, "SHIFT": 0x10, "UP": 0x26, "
       "LEFT": 0x25, "RIGHT": 0x27, "TAB": 0x09, "BACKSPACE": 0x08}
 EXTENDED = {"UP", "DOWN", "LEFT", "RIGHT"}
 
-k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-u32 = ctypes.WinDLL("user32", use_last_error=True)
-psapi = ctypes.WinDLL("psapi", use_last_error=True)
+class _WinDLLOnFirstUse:
+    """ctypes.WinDLL(name, use_last_error=True), loaded on the first attribute access instead of at import, so
+    the offline tests can import this module where WinDLL doesn't exist. On Windows the same DLL object (and
+    its cached function pointers, argtypes included) serves every call."""
+
+    def __init__(self, name: str) -> None:
+        self._name, self._dll = name, None
+
+    def __getattr__(self, attr: str):
+        if attr.startswith("__") and attr.endswith("__"):
+            raise AttributeError(attr)
+        if self._dll is None:
+            self._dll = ctypes.WinDLL(self._name, use_last_error=True)
+        return getattr(self._dll, attr)
+
+
+k32 = _WinDLLOnFirstUse("kernel32")
+u32 = _WinDLLOnFirstUse("user32")
+psapi = _WinDLLOnFirstUse("psapi")
 
 
 class KEYBDINPUT(ctypes.Structure):
