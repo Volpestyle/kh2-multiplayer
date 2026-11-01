@@ -17,15 +17,24 @@ not how fast:
   intermediate versions are normal) has the host's hash for that version, and
   personal SAVE bytes stayed unchanged; the host's latest version not applied
   yet is a warning;
-- no relay `Desync:` report and no `EXCEPTION` line in any inject log. A
+- no relay `Desync:` report, no `EXCEPTION` line and no `[crash]` line in any
+  inject log. The inject crash handler logs `[crash] unhandled exception 0xCODE
+  at ADDR; minidump written|FAILED: PATH` (inject/src/CrashDump.cpp); each such
+  line fails the run with the seat and the exception code named. A
   progress-only desync (fields=4) is a warning instead when every friend later
   applies, at a room boundary after that epoch, a host version with a matching
   hash: friends apply progress at boundaries, so their own copies of an event
   can drift mid-room. A progress-only desync in the epoch of a combat-admission
   hold (VUH-2897) is also a warning when the host, frozen behind the friend,
   reaches the friend's hash within 2 s of host play after `admission-release`
-  and both seats end the epoch on it; past the bound it fails. One that never
-  converges fails. Room and enemy desyncs always fail. The relay's desync-reports manifests (--desync-dir) add the room
+  and both seats end the epoch on it; past the bound it fails. A progress-only
+  desync at a room entry (VUH-2631) is a warning when it is exactly that race:
+  every friend applied, at that epoch's boundary, the host version the relay saw
+  on the friend; the host's first sample in the new room still carried its
+  previous version's hash (the relay's host hash), every later host sample has
+  the friend's hash, and every friend sample there has it too. A second stale
+  host sample, or any other shape, fails. One that never converges fails. Room
+  and enemy desyncs always fail. The relay's desync-reports manifests (--desync-dir) add the room
   and both progress hashes to each entry.
 
     python -B tools/scenario/coop_verdict.py --host H.log --friend F.log [--relay relay.log]
@@ -59,6 +68,8 @@ STATEHASH_TICK = re.compile(r"\[statehash\] role=(?:host|client) epoch=(?P<epoch
 STATEHASH_PROGRESS = re.compile(
     r"\[statehash\] role=(?:host|client) epoch=(?P<epoch>\d+) .*?progress=(?P<progress>[0-9A-F]+) .*?tickMs=(?P<tick>\d+)")
 ADMISSION_RELEASED = re.compile(r"\[combat-admission\] released .*?epoch=(?P<epoch>\d+) ")
+CRASH = re.compile(r"\[crash\][^\r\n]*")  # any line from inject/src/CrashDump.cpp
+CRASH_DETAIL = re.compile(r"unhandled exception (?P<code>0x[0-9A-Fa-f]+) at (?P<address>\S+?); minidump (?P<dump>\w+)")
 DESYNC_PROGRESS = 4  # DesyncField::DesyncProgress
 ADMISSION_CONVERGE_MS = 2000  # host play after its first post-release sample (VUH-2897 run 043745: 1015 ms)
 
@@ -70,6 +81,22 @@ def location(m: re.Match) -> dict:
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def crashes(text: str) -> list[dict]:
+    """Every `[crash]` line, with the exception code and minidump status when the line has them."""
+    out = []
+    for m in CRASH.finditer(text):
+        d = CRASH_DETAIL.search(m.group(0))
+        out.append({"line": m.group(0).strip(), "code": d["code"].upper().replace("0X", "0x") if d else None,
+                    "minidump": d["dump"] if d else None})
+    return out
+
+
+def crash_problem(seat: str, crash: dict) -> str:
+    if crash["code"] is None:
+        return f"{seat}: crash line: {crash['line']}"
+    return f"{seat}: crash: unhandled exception {crash['code']} (minidump {crash['minidump']})"
 
 
 def first_ticks(text: str) -> dict[int, int]:
@@ -139,6 +166,48 @@ def admission_convergence(host_text: str, friend_texts: dict[str, str], epoch: i
     return reached[2] - after[0][2]
 
 
+def room_entry_race(host_text: str, friend_texts: dict[str, str], applies: dict[str, list[dict]],
+                    host_progress: list[dict], epoch: int, detail: dict) -> dict | None:
+    """VUH-2631: the version and stale hash when this progress desync is the room-entry race;
+    None otherwise.
+
+    At a room boundary the friend applies the host's new version, while the host's first
+    statehash in the new room still hashes its previous version (run 20261021-121721: one
+    D8E9050A sample at 02/21, then 201 with 8D692D6C). It counts only when every friend applied,
+    at this epoch's boundary, the version whose host hash is the relay's friend hash; the relay's
+    host hash is the host's previous published version; the host's first sample after arriving
+    in the epoch has it and every later one (at least one) has the friend's hash; and every
+    friend sample in the epoch has the friend's hash."""
+    if not detail or detail["hostProgress"] == detail["friendProgress"]:
+        return None
+    stale, fresh = detail["hostProgress"], detail["friendProgress"]
+    versions = []
+    for rows in applies.values():
+        row = next((a for a in rows if a["epoch"] == epoch and a["hash"] == fresh), None)
+        if row is None:
+            return None
+        versions.append(row["version"])
+    if len(set(versions)) != 1:
+        return None
+    version = versions[0]
+    published = sorted((p["version"], p["hash"]) for p in host_progress)
+    want = next((h for v, h in published if v == version), None)
+    previous = [h for v, h in published if v < version]
+    if want != fresh or not previous or previous[-1] != stale:
+        return None
+    arrived = next((m for m in HOST_ARRIVED.finditer(host_text) if int(m["epoch"]) == epoch), None)
+    if arrived is None:
+        return None
+    host = [m["progress"] for m in STATEHASH_PROGRESS.finditer(host_text, arrived.end()) if int(m["epoch"]) == epoch]
+    if len(host) < 2 or host[0] != stale or any(h != fresh for h in host[1:]):
+        return None
+    for text in friend_texts.values():
+        seen = [m["progress"] for m in STATEHASH_PROGRESS.finditer(text) if int(m["epoch"]) == epoch]
+        if not seen or any(h != fresh for h in seen):
+            return None
+    return {"version": version, "stale": stale, "fresh": fresh, "hostSamples": len(host)}
+
+
 def friend_report(text: str, host_rooms: list[dict], host_progress: list[dict]) -> dict:
     arrivals, arrived_at = {}, {}
     for m in CLIENT_ARRIVED.finditer(text):
@@ -189,6 +258,7 @@ def friend_report(text: str, host_rooms: list[dict], host_progress: list[dict]) 
         "holdTimeouts": len(HOLD_TIMEOUT.findall(text)),
         "nativeExitsBlocked": len(EXIT_BLOCKED.findall(text)),
         "exceptions": text.count("EXCEPTION"),
+        "crashes": crashes(text),
         "problems": problems, "warnings": warnings,
     }
 
@@ -207,6 +277,7 @@ def verdict(host_text: str, friend_texts: dict[str, str], relay_text: str = "",
             "holdsPublished": [{"active": m["active"] == "1", "epoch": int(m["epoch"])}
                                for m in HOLD_PUBLISHED.finditer(host_text)],
             "exceptions": host_text.count("EXCEPTION"),
+            "crashes": crashes(host_text),
         },
         "friends": {name: friend_report(text, host_rooms, host_progress) for name, text in friend_texts.items()},
         "desync": [m["detail"].strip() for m in DESYNC.finditer(relay_text)],
@@ -223,10 +294,17 @@ def verdict(host_text: str, friend_texts: dict[str, str], relay_text: str = "",
         converged = {name: next((a for a in rows if a["epoch"] is not None and a["epoch"] > epoch and
                                  published.get(a["version"]) == a["hash"]), None) for name, rows in applies.items()}
         held = admission_convergence(host_text, friend_texts, epoch, detail) if fields == DESYNC_PROGRESS else None
+        race = (room_entry_race(host_text, friend_texts, applies, host_progress, epoch, detail)
+                if fields == DESYNC_PROGRESS else None)
         if fields == DESYNC_PROGRESS and converged and all(converged.values()):
             first = min((a for a in converged.values()), key=lambda a: a["epoch"])
             desync_warnings.append(f"{text}; converged at the epoch {first['epoch']} boundary "
                                    f"(v{first['version']} hash {first['hash']})")
+        elif race is not None:
+            desync_warnings.append(f"{text}; room-entry race (VUH-2631): the host's first epoch {epoch} sample "
+                                   f"still had its previous version's hash {race['stale']}, the friend applied "
+                                   f"v{race['version']} hash {race['fresh']} at that boundary, and all "
+                                   f"{race['hostSamples'] - 1} later host samples match it")
         elif held is not None and held <= ADMISSION_CONVERGE_MS:
             desync_warnings.append(f"{text}; combat-admission hold, converged {held} ms into host play "
                                    f"after admission-release (bound {ADMISSION_CONVERGE_MS} ms)")
@@ -240,6 +318,8 @@ def verdict(host_text: str, friend_texts: dict[str, str], relay_text: str = "",
     problems += [f"{name}: {f['exceptions']} EXCEPTION lines" for name, f in result["friends"].items() if f["exceptions"]]
     if result["host"]["exceptions"]:
         problems.append(f"host: {result['host']['exceptions']} EXCEPTION lines")
+    problems += [crash_problem("host", c) for c in result["host"]["crashes"]]
+    problems += [crash_problem(name, c) for name, f in result["friends"].items() for c in f["crashes"]]
     if not host_rooms:
         problems.append("host published no room")
     problems += [f"relay desync: {d}" for d in desync_problems]

@@ -7,9 +7,14 @@
 > See [Steam setup](FRIEND_PLAYTEST_STEAM.md) and the
 > [current plan](ONLINE_COOP_PLAN.md) for later evidence and route limits.
 >
-> Current source uses protocol 34 / AvatarBridge 4 / WorldBridge 13. The checked-in
-> package validator and pins still target protocol 18: a current-source ZIP
-> cannot be built with them unchanged. See [packaging](../tools/packaging/README.md).
+> Current versions live in the source, not here: `PROTOCOL_VERSION` in
+> [`Protocol.hpp`](../common/include/kh2coop/Protocol.hpp), `AVATAR_BRIDGE_VERSION`
+> in [`AvatarBridge.hpp`](../common/include/kh2coop/AvatarBridge.hpp),
+> `WORLD_BRIDGE_VERSION` in [`WorldBridge.hpp`](../common/include/kh2coop/WorldBridge.hpp),
+> and the package pin in [`friend-products.json`](../tools/packaging/friend-products.json).
+> At the time of writing: protocol 40 / AvatarBridge 4 / WorldBridge 13, with a
+> protocol-40 cohort pinned that still needs ZIP self-check and install/join
+> acceptance. See [packaging](../tools/packaging/README.md).
 > Do not combine old package products with current DLL/runtime/relay binaries.
 
 ## Current source behavior and remaining limits

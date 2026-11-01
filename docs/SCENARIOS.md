@@ -3675,6 +3675,34 @@ first stamp up to its once-a-second cadence after arriving, so treat `lagMs` as
 ±1 s. The step result's `lastRoom` carries the latest room's row per friend.
 Tests: `tests/test_mansion_verdict_wait.py` and `tests/test_coop_verdict.py`.
 
+### What `coop_verdict` fails on: crashes and the room-entry race (VUH-2631)
+
+**Crash lines.** The inject crash handler (`inject/src/CrashDump.cpp`) logs
+`[crash] unhandled exception 0xCODE at ADDR; minidump written|FAILED: PATH`.
+Every `[crash]` line in the host's or a friend's log is a problem naming the
+seat and the code, e.g. `host: crash: unhandled exception 0xC0000005 (minidump
+written)`; a `[crash]` line in another format is reported whole. Each seat's
+report lists them under `crashes`. `EXCEPTION` lines still fail as before
+(`<seat>: N EXCEPTION lines`). Before this, a crash line alone passed.
+
+**Room-entry race.** A progress-only relay desync (`fields=4`) whose friend
+applied the host's version at a *later* room boundary already only warns. The
+VUH-2631 race happens at the boundary itself: the friend applies the host's new
+version there, but the host's first statehash in the new room still hashes its
+previous version (run `20261021-121721_calling_seen_1`: one `D8E9050A` sample at
+02/21, then 201 with `8D692D6C`). The verdict treats it as converged (a warning)
+only when all of these hold, using the relay manifest under `desync-reports`:
+- every friend applied, at that epoch's boundary, one version whose host hash is
+  the relay's friend hash;
+- the relay's host hash is the host's previous published version's hash;
+- the host's first statehash after its `host arrived` for that epoch has the
+  stale hash, and every later one (at least one) has the friend's hash;
+- every friend statehash in that epoch has the friend's hash.
+
+Two stale host samples, a host hash that isn't the previous version, any other
+hash on either seat in that room, or no manifest still fail (`progress never
+converged`).
+
 
 Thorn fight routes may opt into `blockedThornProbe`: after one second with less
 than15 units of canonical movement just outside melee reach, a selected live307
