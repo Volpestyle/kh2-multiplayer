@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """VUH-2914 selective, read-only installed-byte capture. See docs/AXEL_HAZARDS.md.
+VUH-2916/VUH-2915 add optional room scripts; see docs/testing/vuh2916-pc-read/README.md.
 
 No network, processes, saves, package writes or remastered-asset extraction.
 Default is a plan; capture requires explicit paths and separate PC authorization.
@@ -218,7 +219,10 @@ def capture(install, out, key_source, plan):
     if sha(pe) != plan["pe"]["sha256"]:
         raise ValueError("installed PE differs from retained baseline; stop for qualification")
     native = pe_traps(pe, plan["traps"])
-    wanted = {hashlib.md5(name.encode("utf-8")).digest(): name for name in plan["assets"]}
+    # Optional names (VUH-2916 rooms) may be absent from the install; required ones may not.
+    optional = [name for name in plan.get("optionalAssets", []) if name not in plan["assets"]]
+    names = list(plan["assets"]) + optional
+    wanted = {hashlib.md5(name.encode("utf-8")).digest(): name for name in names}
     matches = {}
     heds = []
     for relative, expected in plan["hedSha256"].items():
@@ -235,7 +239,7 @@ def capture(install, out, key_source, plan):
                 if name in matches:
                     raise ValueError(f"duplicate package match: {name}")
                 matches[name] = (path.with_suffix(".pkg"), row, i)
-    if set(matches) != set(plan["assets"]):
+    if not set(plan["assets"]) <= set(matches):
         raise ValueError(f"missing assets: {sorted(set(plan['assets']) - set(matches))}")
     out.mkdir(parents=True, exist_ok=False)
     (out / "originals").mkdir()
@@ -244,10 +248,11 @@ def capture(install, out, key_source, plan):
     (out / "native" / "kh2fm.exe").write_bytes(pe)
     result = {"schema": 1, "complete": False, "qualification": "UNQUALIFIED; capture is not ABI proof",
               "pe": plan["pe"], "hed": heds, "nativeTrapEntries": native,
-              "nativeLifecycleRvas": [0x3CF830, 0x3CFB10], "assets": [], "openkhCommands": []}
+              "nativeLifecycleRvas": [0x3CF830, 0x3CFB10], "assets": [], "openkhCommands": [],
+              "absentOptionalAssets": [name for name in optional if name not in matches]}
     total = len(pe)
     try:
-        for name in plan["assets"]:
+        for name in (name for name in names if name in matches):
             pkg, row, hed_index = matches[name]
             with pkg.open("rb") as stream:
                 data, metadata = read_original(stream, row, tables)
@@ -255,17 +260,21 @@ def capture(install, out, key_source, plan):
             if total * 2 > MAX_TOTAL:  # reserve room for extracted AI and later unpacking
                 raise ValueError("capture exceeds 512 MiB budget including unpack headroom")
             digest = sha(data)
-            expected = plan["assets"][name]
+            expected = plan["assets"].get(name)
             if expected and not (digest.startswith(expected[0]) and digest.endswith(expected[1])):
                 raise ValueError(f"asset differs from prior prefix/suffix constraint: {name}")
             target = out / "originals" / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
-            # Objentry is a standalone table, not a BAR; retain it for OpenKH.
-            bar = [] if name == "00objentry.bin" else bar_rows(data)
+            # Objentry is a standalone table, not a BAR; retain it for OpenKH. A name the plan lists
+            # in standaloneOrBar is parsed as a BAR only when it carries the BAR magic.
+            standalone = name == "00objentry.bin" or (
+                name in plan.get("standaloneOrBar", []) and data[:4] != b"BAR\x01")
+            bar = [] if standalone else bar_rows(data)
             asset = {"path": name, "sha256": digest, "bytes": len(data), "bar": bar,
                      "pkg": str(pkg), "hedRowOffset": hed_index * 32,
                      "constraint": "partial prior hash" if expected else "new full hash, no prior pin",
+                     "required": name in plan["assets"], "format": "standalone" if standalone else "bar",
                      **metadata}
             if name == "00battle.bin":
                 asset["selectedAtkpRows"], asset["atkpTables"] = atkp_rows(data, bar)
@@ -305,7 +314,8 @@ def main():
         result = capture(args.install, args.out, args.key_source, plan)
     except (OSError, ValueError, struct.error, zlib.error) as error:
         parser.exit(1, f"Capture refused/failed: {error}\n")
-    print(f"Captured {len(result['assets'])} originals; local manifest: {args.out / 'capture.json'}")
+    print(f"Captured {len(result['assets'])} originals ({len(result['absentOptionalAssets'])} optional absent); "
+          f"local manifest: {args.out / 'capture.json'}")
 
 
 if __name__ == "__main__":

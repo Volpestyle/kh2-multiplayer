@@ -226,5 +226,62 @@ class ExtractTest(unittest.TestCase):
                 self.assertEqual((root / "capture/originals" / name).read_bytes(), data)
 
 
+    def test_capture_optional_rooms_and_standalone_localset(self):
+        # VUH-2916 rooms: optional names may be absent; required ones still stop the capture.
+        local = extract.REPO / ".local"
+        local.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=local) as tmp:
+            root = Path(tmp)
+            install = root / "fake-install"
+            install.mkdir()
+            source = root / "keys.cs"
+            source.write_bytes(key_source())
+            (install / "fake.exe").write_bytes(pe())
+            assets = {"msn/us/TT20_MS603.bar": bar(b"ms_b", 3, b"mission ai"),
+                      "07localset.bin": b"not a bar table",
+                      "ard/us/tt19.ard": bar(b"evt ", 5, b"room script")}
+            pkg = bytearray()
+            hed = bytearray()
+            for name, data in assets.items():
+                record, row = original(data)
+                hed.extend(struct.pack("<16sQii", hashlib.md5(name.encode()).digest(), len(pkg), row[2], row[3]))
+                pkg.extend(record)
+            (install / "fake.hed").write_bytes(hed)
+            (install / "fake.pkg").write_bytes(pkg)
+            plan = {"pe": {"path": "fake.exe", "bytes": len(pe()), "sha256": extract.sha(pe())},
+                    "openkhEncryptionSha256": extract.sha(key_source()), "traps": [[1, 155]],
+                    "hedSha256": {"fake.hed": extract.sha(hed)}, "axelPublicLabels": [],
+                    "assets": {"msn/us/TT20_MS603.bar": None, "07localset.bin": None},
+                    "optionalAssets": ["ard/us/tt19.ard", "ard/us/eh03.ard", "07localset.bin"],
+                    "standaloneOrBar": ["07localset.bin"]}
+            with patch.object(extract.shutil, "disk_usage", return_value=SimpleNamespace(free=100 * 1024**3)):
+                result = extract.capture(install, root / "capture", source, plan)
+                missing = dict(plan, assets={**plan["assets"], "ard/us/tt21.ard": None})
+                with self.assertRaisesRegex(ValueError, "missing assets: .*tt21"):
+                    extract.capture(install, root / "capture-2", source, missing)
+                # A required BAR that lacks the magic still refuses.
+                strict = dict(plan, standaloneOrBar=[])
+                with self.assertRaisesRegex(ValueError, "not a BAR archive"):
+                    extract.capture(install, root / "capture-3", source, strict)
+            self.assertTrue(result["complete"])
+            self.assertEqual(result["absentOptionalAssets"], ["ard/us/eh03.ard"])
+            rows = {asset["path"]: asset for asset in result["assets"]}
+            self.assertEqual(list(rows), ["msn/us/TT20_MS603.bar", "07localset.bin", "ard/us/tt19.ard"])
+            self.assertEqual((rows["07localset.bin"]["format"], rows["07localset.bin"]["bar"]), ("standalone", []))
+            self.assertEqual((rows["ard/us/tt19.ard"]["format"], rows["ard/us/tt19.ard"]["required"]), ("bar", False))
+            self.assertTrue(rows["msn/us/TT20_MS603.bar"]["required"])
+            self.assertEqual((root / "capture/originals/ard/us/tt19.ard").read_bytes(), assets["ard/us/tt19.ard"])
+
+    def test_shipped_plan_selects_vuh2916_files(self):
+        plan = json.loads(extract.PLAN.read_text())
+        self.assertIn("07localset.bin", plan["assets"])
+        self.assertIn("07localset.bin", plan["standaloneOrBar"])
+        for name in ("ard/us/tt19.ard", "ard/us/tt21.ard", "ard/us/eh03.ard"):
+            self.assertIn(name, plan["optionalAssets"])
+        self.assertFalse(set(plan["optionalAssets"]) & set(plan["assets"]))
+        self.assertIn([4, 3], plan["traps"])
+        self.assertIn([4, 16], plan["traps"])
+
+
 if __name__ == "__main__":
     unittest.main()
