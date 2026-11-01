@@ -5,3 +5,8 @@ compile_commands.json
 .cache/
 .clangd/
 /build-pc2/
+# Python bytecode: any tool run without -B rewrites these (VUH-2678).
+__pycache__/
+*.pyc
+# Logs that tools and tests write at the repo root (fixture logs under tests/ stay tracked).
+/*.log
