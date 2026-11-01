@@ -183,6 +183,14 @@ connections/deliveries, generation, epoch, native mission, load and transition.
 It seals once even when the friend resumes with `host=-`. Other mission names
 cannot use16 on the wire; the generic end-trap selector still never returns16.
 
+The exact mission is a row of `common/include/kh2coop/BossVictories.hpp`
+(VUH-2916): its location, boss object, mission file and id, end trap4/16 with
+argument -1, and victory event315. The codec, the host's end detour, the
+client's4/16 drop and legacy seal look the file up there; the Thorn-only
+native sequence below requires Thorn's own row. Thorn is the only row. Axel I
+and II join once PC1 reads their installed end traps and victory events
+(`docs/testing/vuh2916-pc-read/README.md`).
+
 One exact native Thorn sequence owns the initial death camera through315. Only
 the actual input collector may start it, requiring fresh unchanged field/menu/
 event/context/freeze/blocker safety, matching live control scope and runtime

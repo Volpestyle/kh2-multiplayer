@@ -187,7 +187,7 @@ template <std::size_t I> void __fastcall MissionDetour(std::uint64_t* args) {
     if(role==1) {
         // Host: remember which end ran on this mission, with its argument, then end it natively.
         if((MR::kTraps[I].kind==MR::Kind::End ||
-            (MR::kTraps[I].kind==MR::Kind::BossEnd && MR::SameFile(g_missionHostFile,"TT34_MS304.bar"))) && !g_missionHostEndTrap) {
+            (MR::kTraps[I].kind==MR::Kind::BossEnd && MR::VictoryOf(g_missionHostFile)!=nullptr)) && !g_missionHostEndTrap) {
             std::uint32_t arg=0;
             if(CopyNative(reinterpret_cast<uintptr_t>(args),&arg,sizeof(arg))) {
                 g_missionHostEndTrap=static_cast<std::uint8_t>(MR::kTraps[I].index);g_missionHostEndArg=arg;
@@ -208,7 +208,7 @@ template <std::size_t I> void __fastcall MissionDetour(std::uint64_t* args) {
         // dropping calls: following and the replay guard both expire with it.
         const bool fresh=GetTickCount64()-g_missionFollowMs.load(std::memory_order_acquire)<=250;
         const bool following=fresh && g_missionFollowing.load(std::memory_order_acquire);
-        if(MR::DropLocalCall(I,following,g_missionHostFailed.load(std::memory_order_acquire),fresh && g_missionReplayed, MR::SameFile(g_missionLocalFile,"TT34_MS304.bar"))) {
+        if(MR::DropLocalCall(I,following,g_missionHostFailed.load(std::memory_order_acquire),fresh && g_missionReplayed, MR::VictoryOf(g_missionLocalFile)!=nullptr)) {
             g_missionDropped.fetch_add(1,std::memory_order_relaxed);
             std::uint32_t arg=0;
             if(following && !g_missionReplayed && MR::kTraps[I].kind==MR::Kind::End && g_missionDroppedEnd<0 &&
@@ -388,7 +388,7 @@ thorndefeat::Key ThornKey() {
         mission=g_thornDefeat.Scope().mission;
     } else {
         uintptr_t checked=0;const auto local=ReadMission(&checked);
-        if(checked!=mission || !local.active || !MR::SameFile(local.file,"TT34_MS304.bar"))return key;
+        if(checked!=mission || !local.active || MR::VictoryOf(local.file)!=&bossvictory::TwilightThorn)return key;
     }
     std::memcpy(key.session.data(),g_eventControlScope.session,key.session.size());
     key.host=g_eventControlScope.hostConnection;key.hostDelivery=g_eventControlScope.hostDelivery;
@@ -402,7 +402,7 @@ void ObserveThornMission(const WorldScope& scope,const MissionState& packet) {
     const auto key=ThornKey();
     const bool end=packet.active && packet.endTrap==16 && packet.endArg==UINT32_MAX &&
         (packet.flags&MR::kEnded)==MR::kEnded && packet.result!=MR::kFailedResult &&
-        MR::SameFile(packet.file.data(),"TT34_MS304.bar") && packet.location.epoch==key.epoch &&
+        MR::VictoryOf(packet.file.data())==&bossvictory::TwilightThorn && packet.location.epoch==key.epoch &&
         scope.sourceConnectionId==key.host && scope.sourceDeliverySerial==key.hostDelivery;
     if(g_thornDefeat.Observe(key,end,scope.hostSourceSerial)) {
         if(g_log)g_log("[thorn-defeat] admitted source=%llu epoch=%u mission=%llX load=%u transition=%u",
@@ -426,7 +426,7 @@ bool HostThornDefeatCameraCurrent(uintptr_t context) {
        g_missionHostLoad!=warp::LoadSerial() || !ThornLocation() || !ThornPinsReady())return false;
     uintptr_t mission=0;const auto local=ReadMission(&mission);
     return mission==g_missionHostBase && MR::Ended(local) && !MR::Failed(local) &&
-        MR::SameFile(local.file,"TT34_MS304.bar") && ThornContentReady(mission) && ThornPreludeContext(mission,context);
+        MR::VictoryOf(local.file)==&bossvictory::TwilightThorn && ThornContentReady(mission) && ThornPreludeContext(mission,context);
 }
 bool ThornControlCurrent() {
     eventhold::Scope bound {};
@@ -445,7 +445,7 @@ int StartThornDefeat(const eventhold::Scope& scope,bool nativeSafe,bool converge
     uintptr_t mission=0,prelude=0;std::uint32_t phase=UINT32_MAX;
     const auto local=ReadMission(&mission);
     const bool supported=mission==key.mission && local.active && !MR::Ended(local) && !MR::Failed(local) &&
-        MR::SameFile(local.file,"TT34_MS304.bar") && ReadNative(mission+0xA0,prelude) && prelude &&
+        MR::VictoryOf(local.file)==&bossvictory::TwilightThorn && ReadNative(mission+0xA0,prelude) && prelude &&
         ReadNative(mission+0x430,phase) && phase<=1 && g_missionReady &&
         ThornContentReady(mission) && ThornDeathFocusReady();
     const thorndefeat::Gates gates {EventControlScopeCurrent(scope),ThornControlCurrent(),converged,
@@ -648,7 +648,7 @@ void ApplyMission(std::uint32_t frame) {
             g_missionHost.active?g_missionHost.file:"-");
     if(current && MR::Failed(g_missionHost) && MR::SameFile(g_missionHost.file,local.file))g_missionHostFailedSeen=true;
     if(current && g_missionHost.endTrap==16 && MR::Ended(g_missionHost) &&
-       MR::SameFile(g_missionHost.file,"TT34_MS304.bar") && MR::SameFile(g_missionHost.file,local.file)) {
+       MR::VictoryOf(g_missionHost.file)!=nullptr && MR::SameFile(g_missionHost.file,local.file)) {
         // Legacy seal for a latest snapshot that did not earn retained native
         // ownership. Only the qualified input consumer above may call16; the
         // generic mission selector never replays it or an earlier dropped end.

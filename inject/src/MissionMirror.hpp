@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include "kh2coop/BossVictories.hpp"
 #include "kh2coop/MissionFlags.hpp"
 
 namespace kh2coop::inject::missionmirror::rules {
@@ -58,6 +59,12 @@ inline bool FileOf(const char* path, std::size_t n, char (&out)[kFileBytes]) noe
     return true;
 }
 inline bool SameFile(const char* a, const char* b) noexcept { return a[0] && std::strncmp(a, b, kFileBytes) == 0; }
+// VUH-2916: the exact-boss victory (bossvictory::Victories) whose mission this file is, compared as SameFile.
+inline const bossvictory::Victory* VictoryOf(const char* file) noexcept {
+    for (const auto& v : bossvictory::Victories)
+        if (SameFile(file, v.missionFile.data())) return &v;
+    return nullptr;
+}
 
 struct Slot { std::uint32_t flags = 0; std::int32_t max = 0; float gauge = 0; std::int32_t count = 0; };
 struct Mission {
