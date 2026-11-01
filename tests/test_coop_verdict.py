@@ -172,5 +172,98 @@ class AdmissionHoldDesyncTest(unittest.TestCase):
         self.assertFalse(self.verdict(friend=drift)["pass"])
 
 
+class CrashLineTest(unittest.TestCase):
+    # The exact line inject/src/CrashDump.cpp logs from its unhandled-exception filter.
+    CRASH = ("[crash] unhandled exception 0xC0000005 at 00007FF6A1B2C3D4; minidump written: "
+             "build\\rig\\logs\\kh2coop_crash_4242.dmp\n")
+
+    def test_clean_run_has_no_crashes(self):
+        v = coop_verdict.verdict(HOST, {"friend": FRIEND})
+        self.assertTrue(v["pass"], v["problems"])
+        self.assertEqual((v["host"]["crashes"], v["friends"]["friend"]["crashes"]), ([], []))
+
+    def test_crash_line_on_host_fails(self):
+        v = coop_verdict.verdict(HOST + self.CRASH, {"friend": FRIEND})
+        self.assertFalse(v["pass"])
+        self.assertIn("host: crash: unhandled exception 0xC0000005 (minidump written)", v["problems"])
+        self.assertEqual(v["host"]["crashes"][0]["code"], "0xC0000005")
+
+    def test_crash_line_on_friend_fails(self):
+        failed = self.CRASH.replace("0xC0000005", "0xC00000FD").replace("written", "FAILED")
+        v = coop_verdict.verdict(HOST, {"friend": FRIEND + failed})
+        self.assertFalse(v["pass"])
+        self.assertEqual(v["problems"], ["friend: crash: unhandled exception 0xC00000FD (minidump FAILED)"])
+
+    def test_any_other_crash_line_fails_and_exception_still_counts(self):
+        v = coop_verdict.verdict(HOST + "[crash] handler re-entered\n", {"friend": FRIEND + "EXCEPTION in tick\n"})
+        self.assertIn("host: crash line: [crash] handler re-entered", v["problems"])
+        self.assertIn("friend: 1 EXCEPTION lines", v["problems"])
+
+
+# VUH-2631: the shape of run 20261021-121721 (calling_seen, 02/20 -> 02/21). At the 02/21 boundary
+# the friend applies v2; the host's first 02/21 sample still hashes v1, every later one has v2.
+def room_sample(role, epoch, room, progress, tick):
+    return (f"[statehash] role={role} epoch={epoch} frame={tick % 10000} room=02/{room} door=0 map=0 btl=0 evt=0 "
+            f"enemies=17EF7978 progress={progress} count=0 unmatched=0 observed=0 tickMs={tick}\n")
+
+
+RACE_HOST = (
+    "[progresssync] host full version=1 spans=4 bytes=8108 hash=D8E9050A\n"
+    "[enemysync] host arrived epoch=1 room=02/20 door=0 map=0 btl=0 evt=0\n"
+    + room_sample("host", 1, 20, "D8E9050A", 1000) + room_sample("host", 1, 20, "D8E9050A", 2000)
+    + "[progresssync] host delta version=2 spans=1 bytes=1 hash=8D692D6C\n"
+    "[enemysync] host arrived epoch=2 room=02/21 door=0 map=0 btl=0 evt=0\n"
+    + room_sample("host", 2, 21, "D8E9050A", 3000)
+    + room_sample("host", 2, 21, "8D692D6C", 4000) + room_sample("host", 2, 21, "8D692D6C", 5000))
+RACE_FRIEND = (
+    "[progresssync] apply version=1 spans=0 bytes=0 hash=D8E9050A personal_before=1 personal_after=1 personal_unchanged=1\n"
+    "[warp] client issued epoch=1\n"
+    "[enemysync] client arrived epoch=1 room=02/20 door=0 map=0 btl=0 evt=0\n"
+    + room_sample("client", 1, 20, "D8E9050A", 1500)
+    + "[progresssync] apply version=2 spans=1 bytes=1 hash=8D692D6C personal_before=1 personal_after=1 personal_unchanged=1\n"
+    "[warp] client issued epoch=2\n"
+    "[enemysync] client arrived epoch=2 room=02/21 door=0 map=0 btl=0 evt=0\n"
+    + room_sample("client", 2, 21, "8D692D6C", 3500) + room_sample("client", 2, 21, "8D692D6C", 4500))
+RACE_RELAY = "[SessionHost] Desync: peer1 fields=4 epoch=2\n"
+
+
+class RoomEntryRaceTest(unittest.TestCase):
+    def verdict(self, host=RACE_HOST, friend=RACE_FRIEND, host_hash=0xD8E9050A, friend_hash=0x8D692D6C,
+                manifest=True):
+        with tempfile.TemporaryDirectory() as root:
+            if manifest:
+                report = Path(root) / "3bc84d4f" / "1"
+                report.mkdir(parents=True)
+                (report / "manifest.json").write_text(json.dumps({"trigger": {
+                    "epoch": 2, "fields": 4, "hostHash": {"worldId": 2, "roomId": 0x21, "progressHash": host_hash},
+                    "clientHash": {"worldId": 2, "roomId": 0x21, "progressHash": friend_hash}}}), encoding="utf-8")
+            return coop_verdict.verdict(host, {"friend": friend}, RACE_RELAY, Path(root))
+
+    def test_one_stale_host_sample_at_the_boundary_converged(self):
+        v = self.verdict()
+        self.assertTrue(v["pass"], v["problems"])
+        self.assertTrue(any("room-entry race (VUH-2631)" in w and "v2 hash 8D692D6C" in w for w in v["warnings"]),
+                        v["warnings"])
+
+    def test_two_stale_host_samples_still_fail(self):
+        host = RACE_HOST.replace(room_sample("host", 2, 21, "8D692D6C", 4000), room_sample("host", 2, 21, "D8E9050A", 4000))
+        v = self.verdict(host=host)
+        self.assertFalse(v["pass"])
+        self.assertIn("relay desync: peer1 fields=4 epoch=2 room=02/21 hostProgress=D8E9050A "
+                      "friendProgress=8D692D6C; progress never converged", v["problems"])
+
+    def test_a_real_divergence_still_fails(self):
+        # The host's stale hash is not its previous version, so this is drift, not the race.
+        self.assertFalse(self.verdict(host_hash=0x12345678)["pass"])
+        # A friend sample off the applied version in that room is drift too.
+        self.assertFalse(self.verdict(friend=RACE_FRIEND + room_sample("client", 2, 21, "0BADF00D", 5500))["pass"])
+        # The host never reaching the friend's hash after its first sample.
+        host = RACE_HOST.replace(room_sample("host", 2, 21, "8D692D6C", 5000), room_sample("host", 2, 21, "0BADF00D", 5000))
+        self.assertFalse(self.verdict(host=host)["pass"])
+
+    def test_without_the_relay_manifest_it_still_fails(self):
+        self.assertFalse(self.verdict(manifest=False)["pass"])
+
+
 if __name__ == "__main__":
     unittest.main()
