@@ -434,13 +434,17 @@ endif()
 
 # ---------------------------------------------------------------------------
 # kh2coop_bridge_test — PacketRing + WorldBridge DLL<->runtime plumbing, with a
-# fake DLL on each side of the relay.
+# fake DLL on each side of the relay. Windows-only: WorldBridge is a Windows
+# named file mapping, and the test itself opens and edits those mappings
+# (OpenFileMappingA, InterlockedExchange64) to stage stale writers.
 # ---------------------------------------------------------------------------
-add_executable(kh2coop_bridge_test
-    tests/BridgeTest.cpp
-)
+if(WIN32)
+    add_executable(kh2coop_bridge_test
+        tests/BridgeTest.cpp
+    )
 
-target_link_libraries(kh2coop_bridge_test PRIVATE kh2coop_server_core kh2coop_common)
+    target_link_libraries(kh2coop_bridge_test PRIVATE kh2coop_server_core kh2coop_common)
+endif()
 
 # ---------------------------------------------------------------------------
 # avatarctl — record/replay/synthesize avatar streams through a KH2

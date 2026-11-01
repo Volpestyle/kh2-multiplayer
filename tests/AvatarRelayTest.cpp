@@ -12,7 +12,13 @@
 // Distance units are KH2 world units (~1 cm), so 50 units ~ 0.5 m.
 // Exit code 0 = all checks passed.
 
+// AvatarBridge is a Windows named file mapping (CreateFileMappingA, Interlocked*); the inject DLL and
+// the runtime only share it on Windows. Its section runs there; the relay, codec, interpolation and capture
+// sections below are portable and run everywhere.
+#ifdef _WIN32
 #include "kh2coop/AvatarBridge.hpp"
+#endif
+#include "kh2coop/PuppetProvenance.hpp"
 #include "kh2coop/AvatarCapture.hpp"
 #include "kh2coop/AvatarInterpolator.hpp"
 #include "kh2coop/AvatarSync.hpp"
@@ -366,6 +372,7 @@ void testPuppetProvenance() {
     check(!valid(PuppetProvenance {}, off), "untagged legacy pose never accepted as standalone");
 }
 
+#ifdef _WIN32
 void testAvatarBridge() {
     std::cout << "\n=== AvatarBridge (shared memory) ===\n";
     const DWORD fakePid = 0x7FFF0000u + (GetCurrentProcessId() & 0xFFFFu);
@@ -403,6 +410,12 @@ void testAvatarBridge() {
     check(!ValidPuppetProvenance(got.provenance, 2, 1, authority) && got.pose.position.x == 9.0f,
           "unchanged cached bytes lose authority after roster replacement without a new read");
 }
+#else
+void testAvatarBridge() {
+    std::cout << "\n=== AvatarBridge (shared memory) ===\n"
+              << "  not built: the bridge is a Windows named file mapping\n";
+}
+#endif
 
 // Byte-addressed fake memory for AvatarCapture.
 struct FakeMemory {
