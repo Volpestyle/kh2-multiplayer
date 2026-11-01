@@ -5,7 +5,16 @@
 #include <set>
 #include <new>
 #include <cstdlib>
+// Test-only access to private members. clang flags redefining a keyword (-Wkeyword-macro, an error under
+// -Werror); the redefinition is deliberate here, so silence it for this one line.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wkeyword-macro"
+#endif
 #define private public
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 #include "kh2coop/SessionHost.hpp"
 #undef private
 #define main existingForcedMain

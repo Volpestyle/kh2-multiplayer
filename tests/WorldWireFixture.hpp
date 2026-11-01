@@ -12,7 +12,16 @@
 #include <optional>
 #include <string>
 #include <vector>
+// Test-only access to private members. clang flags redefining a keyword (-Wkeyword-macro, an error under
+// -Werror); the redefinition is deliberate here, so silence it for this one line.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wkeyword-macro"
+#endif
 #define private public
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 #include "kh2coop/NetworkClient.hpp"
 #undef private
 #include <enet/enet.h>
