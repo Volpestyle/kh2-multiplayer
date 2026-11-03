@@ -263,6 +263,74 @@ def steps_for(selection):
     ]
 
 
+
+# ---- VUH-2915: the full-party retry walks back and fights Axel II again (two default Roxases) ----------------
+RETRY_NAME = "net_prologue_mansion_axel_retry"
+RETRY_DESCRIPTION = (
+    "VUH-2915, Axel II part. The VUH-2911 delivery fixture (two default Roxases) through its full-party game over and "
+    "native Continue to the Computer Room 02/15 d99, then the retry itself: the host walks the same FM-02 route back "
+    "(Computer Room -> Basement Hall pilot, both Dusk waves again) to Axel II. The route back must build each seat's "
+    "tt20-137 pair again, arm and release a fresh combat-admission lease with both seats arrived, and bring Axel back "
+    "at the HP he had on the first arrival, the same on both seats. Both seats then fight him for a bounded window "
+    "under hp_assist (test only; hits and HP loss stay native), and his HP must fall and settle equal on both seats. "
+    "The host's hit-claim rejects across the retry are recorded for review, not judged. Stops before victory. "
+    "Rehearsal save, no save.")
+RETRY_FIGHT_SECONDS = 20
+
+
+def retry_steps():
+    born = "log_count('[missing-party] born site=tt20-137 bound=1 ', {i})"
+    first = steps_for(VARIANTS["net_prologue_mansion_axel_form"])
+    # The first fight's Axel HP, read inside the host's admission hold (before any boss damage).
+    at = next(i for i, s in enumerate(first) if s.get("as") == "window_close") + 1
+    first.insert(at, {"do": "save", "as": "axel_hp_first", "expr": f"[{boss_hp(0)}, {boss_hp(1)}]"})
+    assert first[-1]["do"] == "coop_verdict"
+    verdict = first.pop()
+    return [
+        *first,
+        {"do": "save", "as": "retry_before", "expr":
+            f"{{'born': [{born.format(i=0)}, {born.format(i=1)}], "
+            f"'hall': [log_count('{RELEASED_HALL}', 0), log_count('{RELEASED_HALL}', 1)], "
+            "'admitted': log_count('[combat-admission] released admitted ', 0), "
+            "'arrived': log_count('[enemysync] client arrived epoch=', 1), "
+            "'deaths': log_count('[enemysync] host death epoch', 0), "
+            "'rejects': log_count('[hitclaim] reject ', 0)}"},
+        {"do": "wait", "ms": 3000},
+        {"do": "pilot", "instance": 0, "route": "tools/rig/route_pilot/routes/fm02_computer_to_hall.json", "seconds": 120,
+         "name": "host_hall_retry", "input": "pad", "allowStuck": True},
+        {"do": "wait_until", "expr": f"log_count('{RELEASED_HALL}', 0) > saved['retry_before']['hall'][0] and "
+                                     f"log_count('{RELEASED_HALL}', 1) > saved['retry_before']['hall'][1]",
+         "timeoutMs": 90000, "pollMs": 500},
+        {"do": "hp_assist", "seats": [0, 1], "floor": HP_ASSIST_FLOOR},
+        {"do": "fight", "instances": [0, 1], "seconds": 240, "reach": 250, "as": "hall_retry",
+         "until": "log_count('[enemysync] host death epoch', 0) >= saved['retry_before']['deaths'] + 6"},
+        {"do": "wait_until", "expr": f"location(0) == {AXEL} and location(1) == {AXEL}", "timeoutMs": 90000, "pollMs": 250},
+        {"do": "wait_until", "expr": f"{born.format(i=0)} > saved['retry_before']['born'][0] and "
+                                     f"{born.format(i=1)} > saved['retry_before']['born'][1]", "timeoutMs": 30000, "pollMs": 100},
+        {"do": "save", "as": "axel_hp_retry", "expr": f"[{boss_hp(0)}, {boss_hp(1)}]"},
+        {"do": "wait_until", "expr": "log_count('[combat-admission] released admitted ', 0) > saved['retry_before']['admitted']",
+         "timeoutMs": 60000, "pollMs": 100},
+        {"do": "assert", "expr": "log_count('[enemysync] client arrived epoch=', 1) > saved['retry_before']['arrived']",
+         "message": "the friend must arrive in the route back's own epoch before the fresh lease releases"},
+        {"do": "assert", "expr": "saved['axel_hp_first'][0] > 0 and saved['axel_hp_retry'] == saved['axel_hp_first']",
+         "message": "the retried Axel II must come back at his first-arrival HP, the same on both seats (no damage carried over)"},
+        {"do": "capture", "instance": 0, "name": "retry_axel_host"},
+        {"do": "capture", "instance": 1, "name": "retry_axel_friend"},
+        {"do": "fight", "instances": [0, 1], "seconds": RETRY_FIGHT_SECONDS, "reach": 250, "as": "axel_retry_fight"},
+        {"do": "hp_assist", "on": False, "as": "hp_assist"},
+        {"do": "wait", "ms": SETTLE_MS},
+        {"do": "save", "as": "axel_hp_after", "expr": f"[{boss_hp(0)}, {boss_hp(1)}]"},
+        {"do": "save", "as": "retry_rejects", "expr": "[m['l'] for m in log_matches(r'(?P<l>\\[hitclaim\\] reject [^\\n]*)', 0)]"
+                                                      "[saved['retry_before']['rejects']:][-20:]"},
+        {"do": "assert", "expr": "0 < saved['axel_hp_after'][0] < saved['axel_hp_first'][0] and "
+                                 "saved['axel_hp_after'][1] == saved['axel_hp_after'][0]",
+         "message": "both seats' hits must count on the retried Axel, and his HP must settle equal on both seats"},
+        {"do": "capture", "instance": 0, "name": "retry_fight_host"},
+        {"do": "capture", "instance": 1, "name": "retry_fight_friend"},
+        verdict,
+    ]
+
+
 # ---- VUH-2912: shared HP and ordinary targeting after the form handoff (two default Roxases) ----------------
 HP_NAME = "net_prologue_mansion_axel_hp"
 HP_DESCRIPTION = (
@@ -668,6 +736,11 @@ if __name__ == "__main__":
         out = Path(__file__).with_name(f"{name}.json")
         out.write_text(json.dumps(scenario, indent=1) + "\n", encoding="utf-8")
         print(out)
+    retry = {"name": RETRY_NAME, "description": RETRY_DESCRIPTION, "playerDefaults": True, "protect": [],
+             "testOnly": ["player_hp_refill"], "steps": retry_steps()}
+    out = Path(__file__).with_name(f"{RETRY_NAME}.json")
+    out.write_text(json.dumps(retry, indent=1) + "\n", encoding="utf-8")
+    print(out)
     for name, (kwargs, note) in {HP_NAME: ({}, ""), **HP_SPLITS}.items():
         scenario = {"name": name, "description": f"{HP_DESCRIPTION} {note}".strip(), "playerDefaults": True,
                     "protect": [], "steps": hp_steps(**kwargs)}

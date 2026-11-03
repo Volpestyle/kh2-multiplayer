@@ -790,6 +790,14 @@ int main() {
         check(!fade(Kind::WhiteOut,70.0f) && !g_axel.fade.thread,"a D303 that never whites in expires at its lease");
         (void)friendClearLight();running(kThread,kAxel);++enemysync::scope.epoch;
         check(fade(Kind::WhiteOut,70.0f) && g_axel.fade.thread && CameraOps().empty(),"another epoch blocks delivery without retiring custody or restoring native");
+        // VUH-2915: a room reset (any load, an Axel II Continue included) is what retires it, before the next room's frames.
+        SmAxelHostRoomReset();
+        check(!fade(Kind::WhiteOut,70.0f) && !g_axel.fade.thread && !g_axel.fade.pending && g_axel.olderFades.empty() &&
+              g_axel.nativeFades.empty() && !g_axel.cameraOwner.axel && !g_axel.actor && !g_axel.executor.command &&
+              CameraOps().empty(),
+              "a room reset retires the old room's D303 custody, camera handoff and host Axel, so the next room's fades are native");
+        SmAxelHostRoomReset();
+        check(!g_axel.actor && !g_axel.fade.thread,"a second room reset with nothing held changes nothing");
         Setup(1u<<R::kOvertakerGroup);Frame();
         handles[kName]=kNameHandle;Put(kName,std::uint32_t{0x3031});node();
         running(kOther,kAxel);duringCallback=queue;emitOk=false;
@@ -811,6 +819,10 @@ int main() {
         check(!g_axel.fade.thread && watched && g_axel.nativeFades.size()==1 &&
               g_axel.nativeFades.front().thread==kThread && g_axel.nativeFades.front().threadHandle==kThreadHandle,
               "the host's own RC supplies native thread proof without adopting any Owner binding");
+        g_axel.olderFades.push_back(g_axel.nativeFades.front());g_axel.watchPending=true;
+        SmAxelHostRoomReset();
+        check(g_axel.nativeFades.empty() && g_axel.olderFades.empty() && !g_axel.watchPending && !SmAxelFadePending(),
+              "a room reset also drops the old room's native D303 proofs, older bindings and a pending watch");
         Setup(1u<<R::kOvertakerGroup);Frame();reads=0;
         check(!SmAxelThreadWatched() && !SmAxelFadePending() && !SmAxelFade(Kind::WhiteOut,nullptr) && !reads,
               "with no retained proof and no validated callback running, the 2/20, fade and reset hooks read nothing");

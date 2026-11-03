@@ -384,7 +384,7 @@ void releaseWaits() {
               "after the freezing event only the lease's own 3/4 are released");
     }
 }
-// VUH-2906: a game over's Continue in Axel I lands at the Computer Room checkpoint (02/15, live on
+// VUH-2906: a game over's Continue in Axel II lands at the Computer Room checkpoint (02/15, live on
 // 4edbff6) and never arms; walking back reaches Axel through the ordinary Mansion -> Axel request,
 // which arms a fresh lease. The Continue's load retires any previous lease (S2), and that lease's
 // challenge and epoch never admit the new one.

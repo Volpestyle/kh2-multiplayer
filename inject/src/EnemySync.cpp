@@ -305,6 +305,9 @@ bool g_mirrorIgnoredLogged = false, g_mirrorFirstPacketLogged = false, g_mirrorS
 bool g_hpSourceExhaustionLogged = false;
 // Independent of HostRoom so replacement manifests and room changes cannot
 // admit older HP. Only an actual bridge generation change retires this floor.
+// The host's HP source sequence is process-wide and never restarts (g_hpSourceSequence), so this high-water is kept
+// across epochs (a Continue's included); only a world-session boundary clears it and a resync bootstrap sets it from
+// the snapshot. The epoch compare refuses old rows.
 std::uint64_t g_hostHpSequence = 0;
 bool g_manifestSent = false;        // host: first manifest of the epoch went out
 bool g_hostBeginPending = false;

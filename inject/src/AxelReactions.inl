@@ -69,6 +69,22 @@ static void SmAxelHostReset() {
     SmAxelEndExecutor("host-axel-gone");
     g_axel.windows.Reset();g_axel.actor=0;g_axel.handle=0;g_axel.netId=0;g_axel.epoch=0;
 }
+// Host, from ScriptMirror's room reset, which runs from the first frame of a transition or load (a Continue included)
+// through its completion: the old room's Axel, executor, camera handoff and D303 custody name native objects that
+// teardown destroys, and load complete fades every record in. Dropped from that first frame on, never left for their
+// leases to expire or for SmAxelFrame's next admission to notice. A D303 op the old room still runs inside the
+// transition plays natively on the host (load complete's fade-in then clears it). A friend's owed white-in is its own
+// load-keyed debt and is kept.
+static void SmAxelHostRoomReset() {
+    SmAxelHostReset();
+    const bool held=g_axel.cameraOwner.axel || g_axel.fade.axel || g_axel.fade.thread || g_axel.fade.pending ||
+        !g_axel.olderFades.empty() || !g_axel.nativeFades.empty() || g_axel.watchPending;
+    if(held && SmAxelLogBudget())Log("[axel-rc] camera custody retired: room reset fade=%u older=%zu native=%zu watch=%u",
+        g_axel.fade.thread || g_axel.fade.pending?1u:0u,g_axel.olderFades.size(),g_axel.nativeFades.size(),
+        g_axel.watchPending?1u:0u);
+    g_axel.cameraOwner={};g_axel.fade={};g_axel.olderFades.clear();g_axel.nativeFades.clear();
+    g_axel.watchPending=false;g_axel.watchStep={};g_axel.watchArgs[0]=0;
+}
 static bool SmAxelExecutorBound(const enemysync::DownedScope& scope) {
     return g_axel.executor.command && R::AxelExecutorLive(g_axel.executor,scope.epoch,g_frameCounter);
 }

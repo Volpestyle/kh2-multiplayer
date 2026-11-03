@@ -81,6 +81,8 @@ static bool g_smLifetimeReady=true;
 static std::atomic<bool> g_smLifetimeReliable{true};
 static void SmOwnerReset(bool) {}
 static void SmAxelClientReset() {}
+static unsigned axelRoomResets=0;
+static void SmAxelHostRoomReset() { ++axelRoomResets; }
 static int SmOwnerApply(const R::Call&,uintptr_t) { return 0; }
 static int SmApplyReactionOffer(const R::Call&,uintptr_t) { return 0; }
 static int SmApplyReactionOwner(const R::Call&,uintptr_t) { return 0; }
@@ -258,7 +260,8 @@ static void admissionControls() {
 static void retirement() {
     reset();send({entry(true,1),entry(true,2),entry(true,3)});
     check(births==3 && g_sm.clientAttacks.Size()==3,"three admitted attack births before reentrant retirement");
-    reenter=true;SmResetRoom();
+    const auto resetsBefore=axelRoomResets;reenter=true;SmResetRoom();
+    check(axelRoomResets==resetsBefore+1,"a room reset retires the host's Axel room state (VUH-2915)");
     check(ends==3 && !g_sm.clientAttacks.Size(),"native free reenters actual allocation-forget during room retirement");
     reset();send({entry(true,1),entry(true,2),entry(true,3)});
     reenter=forgetPending=true;SmResetRoom();
